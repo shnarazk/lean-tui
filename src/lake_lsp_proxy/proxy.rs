@@ -43,26 +43,15 @@ pub async fn run() -> Result<()> {
     let (child_stdin, child_stdout) = spawn_lake_serve().await?;
 
     // Client-side: lean-tui → lake serve
-    let (mut client_mainloop, server_socket) = MainLoop::new_client(|_| {
-        Intercept::new(
-            Forward(None),
-            "<-",
-            broadcaster.clone(),
-            None, // Client side doesn't need RPC
-        )
-    });
+    let (mut client_mainloop, server_socket) =
+        MainLoop::new_client(|_| Intercept::new(Forward(None), broadcaster.clone(), None));
 
     // Create RPC client from server socket
     let rpc_client = Arc::new(RpcClient::new(server_socket.clone()));
 
     // Server-side: editor → lean-tui
     let (server_mainloop, client_socket) = MainLoop::new_server(|_| {
-        Intercept::new(
-            server_socket,
-            "->",
-            broadcaster.clone(),
-            Some(rpc_client.clone()),
-        )
+        Intercept::new(server_socket, broadcaster.clone(), Some(rpc_client.clone()))
     });
 
     // Link client side to server side

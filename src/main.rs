@@ -33,10 +33,11 @@ async fn main() {
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive("lean_tui=debug".parse().unwrap()),
+                    .add_directive("lean_tui=info".parse().unwrap()),
             )
             .with_writer(log_file)
             .with_ansi(true)
+            .with_target(false)
             .pretty()
             .init();
     }
