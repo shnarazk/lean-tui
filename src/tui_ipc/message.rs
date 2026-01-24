@@ -34,12 +34,12 @@ impl CursorInfo {
     }
 
     /// Convenience accessor for line
-    pub fn line(&self) -> u32 {
+    pub const fn line(&self) -> u32 {
         self.position.line
     }
 
     /// Convenience accessor for character
-    pub fn character(&self) -> u32 {
+    pub const fn character(&self) -> u32 {
         self.position.character
     }
 }
@@ -57,4 +57,6 @@ pub enum Message {
         position: Position,
         goals: Vec<Goal>,
     },
+    /// Error message
+    Error { error: String },
 }

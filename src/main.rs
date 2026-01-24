@@ -28,8 +28,8 @@ async fn main() {
 
     // Only init tracing for serve (TUI uses terminal)
     if matches!(cli.command, Commands::Serve) {
-        let log_file = std::fs::File::create("/tmp/lean-tui.log")
-            .expect("Failed to create log file");
+        let log_file =
+            std::fs::File::create("/tmp/lean-tui.log").expect("Failed to create log file");
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::from_default_env()

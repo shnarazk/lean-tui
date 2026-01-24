@@ -1,7 +1,6 @@
 //! RPC client for communicating with Lean server via `$/lean/rpc/*` methods.
 
 use std::collections::HashMap;
-use std::time::Instant;
 
 use async_lsp::ServerSocket;
 use serde_json::json;
@@ -16,8 +15,6 @@ use super::{
 /// Session state for a single file
 struct Session {
     session_id: String,
-    #[allow(dead_code)]
-    last_keepalive: Instant,
 }
 
 /// RPC client that manages sessions and sends requests to lake serve.
@@ -71,12 +68,12 @@ impl RpcClient {
                             uri.to_string(),
                             Session {
                                 session_id: session_id.clone(),
-                                last_keepalive: Instant::now(),
                             },
                         );
+                        drop(sessions);
 
                         // Start keepalive task
-                        self.start_keepalive(uri.to_string(), session_id.clone());
+                        Self::start_keepalive();
 
                         Some(session_id)
                     }
@@ -93,22 +90,23 @@ impl RpcClient {
         }
     }
 
-    fn start_keepalive(&self, _uri: String, _session_id: String) {
-        // TODO: Implement keepalive once we figure out how to send raw notifications
-        // with ServerSocket. For now, sessions will time out after ~60s without
-        // keepalive, but we'll reconnect automatically when that happens.
+    fn start_keepalive() {
+        // TODO: Implement keepalive once we figure out how to send raw
+        // notifications with ServerSocket. For now, sessions will time
+        // out after ~60s without keepalive, but we'll reconnect
+        // automatically when that happens.
         //
         // The issue is that ServerSocket::notify expects a typed Notification,
         // but Lean's $/lean/rpc/keepAlive is a custom method not in lsp-types.
     }
 
-    /// Check if we have a session for the given URI.
-    pub async fn has_session(&self, uri: &str) -> bool {
-        self.sessions.lock().await.contains_key(uri)
-    }
-
     /// Get interactive goals at a position.
-    pub async fn get_goals(&self, uri: &str, line: u32, character: u32) -> Vec<Goal> {
+    pub async fn get_goals(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Vec<Goal>, String> {
         let session_id = {
             let sessions = self.sessions.lock().await;
             sessions.get(uri).map(|s| s.session_id.clone())
@@ -120,14 +118,14 @@ impl RpcClient {
                 // Try to connect first
                 match self.connect(uri).await {
                     Some(id) => id,
-                    None => return vec![],
+                    None => return Err("Failed to connect RPC session".to_string()),
                 }
             }
         };
 
         let id = self.next_request_id().await;
-        // Structure from lean.nvim: textDocument/position at top level AND inside params
-        // See: https://github.com/Julian/lean.nvim/blob/main/lua/lean/rpc.lua#L183-L186
+        // Structure from lean.nvim: textDocument/position at top level AND inside
+        // params See: https://github.com/Julian/lean.nvim/blob/main/lua/lean/rpc.lua#L183-L186
         let params = json!({
             "textDocument": { "uri": uri },
             "position": { "line": line, "character": character },
@@ -146,10 +144,15 @@ impl RpcClient {
         });
         let request: async_lsp::AnyRequest = match serde_json::from_value(request_json) {
             Ok(r) => r,
-            Err(_) => return vec![],
+            Err(e) => return Err(format!("Failed to construct RPC request: {e}")),
         };
 
-        tracing::debug!("Calling getInteractiveGoals at {}:{}:{}", uri, line, character);
+        tracing::debug!(
+            "Calling getInteractiveGoals at {}:{}:{}",
+            uri,
+            line,
+            character
+        );
 
         match self.socket.clone().call(request).await {
             Ok(response) => {
@@ -158,17 +161,17 @@ impl RpcClient {
                     Ok(resp) => {
                         let goals = resp.to_goals();
                         tracing::info!("Parsed {} goals", goals.len());
-                        goals
+                        Ok(goals)
                     }
                     Err(e) => {
                         tracing::error!("Goals parse error: {} - raw: {}", e, response);
-                        vec![]
+                        Err(format!("Failed to parse goals: {e}"))
                     }
                 }
             }
             Err(e) => {
                 tracing::error!("RPC call error: {:?}", e);
-                vec![]
+                Err(format!("RPC call failed: {e:?}"))
             }
         }
     }

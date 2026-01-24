@@ -47,11 +47,10 @@ impl Broadcaster {
                         tokio::spawn(async move {
                             let (_, mut writer) = stream.into_split();
                             while let Ok(msg) = rx.recv().await {
-                                let json = match serde_json::to_string(&msg) {
-                                    Ok(j) => j,
-                                    Err(_) => continue,
+                                let Ok(json) = serde_json::to_string(&msg) else {
+                                    continue;
                                 };
-                                let line = format!("{}\n", json);
+                                let line = format!("{json}\n");
                                 if writer.write_all(line.as_bytes()).await.is_err() {
                                     break;
                                 }
@@ -78,6 +77,15 @@ impl Broadcaster {
 
     /// Broadcast goals to all connected clients.
     pub fn broadcast_goals(&self, uri: String, position: Position, goals: Vec<Goal>) {
-        self.send(Message::Goals { uri, position, goals });
+        self.send(Message::Goals {
+            uri,
+            position,
+            goals,
+        });
+    }
+
+    /// Broadcast error to all connected clients.
+    pub fn broadcast_error(&self, error: String) {
+        self.send(Message::Error { error });
     }
 }

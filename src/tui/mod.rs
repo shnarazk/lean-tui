@@ -1,3 +1,6 @@
+mod draw;
+mod socket;
+
 use std::io::stdout;
 use std::time::Duration;
 
@@ -7,22 +10,21 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::net::UnixStream;
-use tokio::sync::mpsc;
 
-use crate::lake_ipc::Goal;
-use crate::tui_ipc::{CursorInfo, Message, Position, SOCKET_PATH};
 use crate::error::Result;
+use crate::lake_ipc::Goal;
+use crate::tui_ipc::{CursorInfo, Message, Position};
+use draw::draw_ui;
+use socket::spawn_socket_reader;
 
 /// TUI application state
 #[derive(Default)]
-struct AppState {
-    cursor: CursorInfo,
-    goals: Vec<Goal>,
-    goals_position: Option<Position>,
-    connected: bool,
+pub(crate) struct AppState {
+    pub cursor: CursorInfo,
+    pub goals: Vec<Goal>,
+    pub goals_position: Option<Position>,
+    pub error: Option<String>,
+    pub connected: bool,
 }
 
 impl AppState {
@@ -31,6 +33,7 @@ impl AppState {
             Message::Cursor(cursor) => {
                 self.cursor = cursor;
                 self.connected = true;
+                self.error = None; // Clear errors on new cursor position
             }
             Message::Goals {
                 uri: _,
@@ -39,6 +42,11 @@ impl AppState {
             } => {
                 self.goals = goals;
                 self.goals_position = Some(position);
+                self.connected = true;
+                self.error = None; // Clear errors on successful goals
+            }
+            Message::Error { error } => {
+                self.error = Some(error);
                 self.connected = true;
             }
         }
@@ -51,31 +59,8 @@ pub async fn run() -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    // Channel for messages from proxy
-    let (tx, mut rx) = mpsc::channel::<Message>(16);
-
-    // Spawn socket reader task
-    tokio::spawn(async move {
-        loop {
-            match UnixStream::connect(SOCKET_PATH).await {
-                Ok(stream) => {
-                    let reader = BufReader::new(stream);
-                    let mut lines = reader.lines();
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        if let Ok(msg) = serde_json::from_str::<Message>(&line) {
-                            if tx.send(msg).await.is_err() {
-                                return;
-                            }
-                        }
-                    }
-                }
-                Err(_) => {
-                    // Retry connection after delay
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-        }
-    });
+    // Spawn socket reader task and get receiver
+    let mut rx = spawn_socket_reader();
 
     let mut state = AppState::default();
 
@@ -103,54 +88,4 @@ pub async fn run() -> Result<()> {
     stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
-}
-
-fn draw_ui(frame: &mut Frame, state: &AppState) {
-    let area = frame.area();
-
-    let block = Block::default()
-        .title(" lean-tui ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let content = if state.connected {
-        let mut lines = vec![
-            format!(
-                "File: {}  Pos: {}:{}  ({})",
-                state.cursor.filename(),
-                state.cursor.line() + 1,
-                state.cursor.character() + 1,
-                state.cursor.method
-            ),
-            String::new(),
-        ];
-
-        if state.goals.is_empty() {
-            lines.push("No goals".to_string());
-        } else {
-            for (i, goal) in state.goals.iter().enumerate() {
-                lines.push(format!("Goal {}:", i + 1));
-                for hyp in &goal.hyps {
-                    let names = hyp.names.join(", ");
-                    if let Some(val) = &hyp.value {
-                        lines.push(format!("  {} : {} := {}", names, hyp.type_, val));
-                    } else {
-                        lines.push(format!("  {} : {}", names, hyp.type_));
-                    }
-                }
-                lines.push(format!("  ⊢ {}", goal.target));
-                lines.push(String::new());
-            }
-        }
-
-        lines.join("\n")
-    } else {
-        format!("Connecting to {}...", SOCKET_PATH)
-    };
-
-    let paragraph = Paragraph::new(content)
-        .block(block)
-        .style(Style::default().fg(Color::White));
-
-    frame.render_widget(paragraph, area);
 }

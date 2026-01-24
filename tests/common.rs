@@ -41,9 +41,10 @@ impl LspTestHarness {
     }
 
     pub fn send(&mut self, content: &str) -> std::io::Result<()> {
-        let stdin = self.stdin.as_mut().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "stdin closed")
-        })?;
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "stdin closed"))?;
         let msg = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
         stdin.write_all(msg.as_bytes())?;
         stdin.flush()

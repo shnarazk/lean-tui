@@ -1,16 +1,23 @@
 [package]
-name = "lean-tui"
-version = "0.1.0"
-edition = "2021"
 description = "Standalone TUI infoview for Lean 4 theorem prover"
+edition = "2021"
 license = "MIT"
+name = "lean-tui"
 repository = "https://github.com/wvhulle/lean-tui"
+version = "0.1.0"
+
+
+[lints.clippy]
+excessive_nesting = { level = "deny", priority = 2 }
+missing_errors_doc = { level = "allow", priority = -1 }
+nursery = "warn"
+pedantic = "deny"
 
 [dependencies]
 # Async runtime
+futures = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }
-futures = "0.3"
 
 # LSP
 async-lsp = { version = "0.2", features = ["forward", "tracing", "tokio"] }
@@ -28,5 +35,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
 # TUI
-ratatui = "0.29"
 crossterm = "0.28"
+ratatui = "0.29"

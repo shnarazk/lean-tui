@@ -23,7 +23,7 @@ fn test_did_change_logs_cursor_position() {
     std::thread::sleep(Duration::from_secs(1));
 
     let output = harness.collect_stderr();
-    println!("stderr: {}", output);
+    println!("stderr: {output}");
 
     assert!(
         output.contains("[lean-tui]"),
@@ -31,7 +31,10 @@ fn test_did_change_logs_cursor_position() {
     );
     assert!(output.contains("test.lean"), "Should contain file name");
     assert!(output.contains("3:0"), "Should contain edit position 3:0");
-    assert!(output.contains("didChange"), "Should contain didChange method");
+    assert!(
+        output.contains("didChange"),
+        "Should contain didChange method"
+    );
 }
 
 #[test]
@@ -48,14 +51,17 @@ fn test_hover_logs_cursor_position() {
     std::thread::sleep(Duration::from_secs(2));
 
     let output = harness.collect_stderr();
-    println!("stderr: {}", output);
+    println!("stderr: {output}");
 
     assert!(
         output.contains("[lean-tui]"),
         "Should log cursor with [lean-tui] prefix"
     );
     assert!(output.contains("test.lean"), "Should contain file name");
-    assert!(output.contains("0:5"), "Should contain line:character position");
+    assert!(
+        output.contains("0:5"),
+        "Should contain line:character position"
+    );
     assert!(
         output.contains("textDocument/hover"),
         "Should contain method name"
@@ -76,13 +82,16 @@ fn test_definition_logs_cursor_position() {
     std::thread::sleep(Duration::from_secs(2));
 
     let output = harness.collect_stderr();
-    println!("stderr: {}", output);
+    println!("stderr: {output}");
 
     assert!(
         output.contains("textDocument/definition"),
         "Should log definition request"
     );
-    assert!(output.contains("1:3"), "Should contain line:character position");
+    assert!(
+        output.contains("1:3"),
+        "Should contain line:character position"
+    );
 }
 
 #[test]
@@ -99,11 +108,14 @@ fn test_completion_logs_cursor_position() {
     std::thread::sleep(Duration::from_secs(2));
 
     let output = harness.collect_stderr();
-    println!("stderr: {}", output);
+    println!("stderr: {output}");
 
     assert!(
         output.contains("textDocument/completion"),
         "Should log completion request"
     );
-    assert!(output.contains("2:0"), "Should contain line:character position");
+    assert!(
+        output.contains("2:0"),
+        "Should contain line:character position"
+    );
 }

@@ -5,60 +5,19 @@
 //! - `$/lean/rpc/keepAlive` - maintain session
 //! - `$/lean/rpc/call` - invoke Lean methods like `getInteractiveGoals`
 
+mod goal_fetcher;
 mod rpc_client;
 
+pub use goal_fetcher::spawn_goal_fetch;
 pub use rpc_client::RpcClient;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-/// Parameters for `$/lean/rpc/connect` request
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RpcConnectParams {
-    pub uri: String,
-}
 
 /// Response from `$/lean/rpc/connect`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcConnectResponse {
     pub session_id: String,
-}
-
-/// Parameters for `$/lean/rpc/keepAlive` notification
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RpcKeepAliveParams {
-    pub uri: String,
-    pub session_id: String,
-}
-
-/// Parameters for `$/lean/rpc/call` request
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RpcCallParams {
-    pub session_id: String,
-    pub method: String,
-    pub params: Value,
-}
-
-/// Parameters for `Lean.Widget.getInteractiveGoals` RPC method
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetInteractiveGoalsParams {
-    pub text_document: TextDocumentIdentifier,
-    pub position: Position,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextDocumentIdentifier {
-    pub uri: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Position {
-    pub line: u32,
-    pub character: u32,
 }
 
 /// Simplified goal representation for TUI display
@@ -75,8 +34,6 @@ pub struct Goal {
 pub struct Hypothesis {
     pub names: Vec<String>,
     pub type_: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
 }
 
 /// Response from `Lean.Widget.getInteractiveGoals`
@@ -108,7 +65,7 @@ pub struct InteractiveHypothesis {
     pub val: Option<CodeWithInfos>,
 }
 
-/// Tagged text with semantic info - Lean's CodeWithInfos type
+/// Tagged text with semantic info - Lean's `CodeWithInfos` type
 /// Structure: {"tag": [info, content]} or {"text": "..."} or {"append": [...]}
 /// See: Lean/Widget/TaggedText.lean
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,21 +73,19 @@ pub struct InteractiveHypothesis {
 pub enum CodeWithInfos {
     /// Plain text leaf
     Text { text: String },
-    /// Tagged span: [info, content] where content is the nested CodeWithInfos
-    Tag { tag: (Value, Box<CodeWithInfos>) },
+    /// Tagged span: [info, content] where content is the nested `CodeWithInfos`
+    Tag { tag: (Value, Box<Self>) },
     /// Concatenation of multiple items
-    Append { append: Vec<CodeWithInfos> },
+    Append { append: Vec<Self> },
 }
 
 impl CodeWithInfos {
     /// Extract plain text from the tagged structure
     pub fn to_plain_text(&self) -> String {
         match self {
-            CodeWithInfos::Text { text } => text.clone(),
-            CodeWithInfos::Tag { tag } => tag.1.to_plain_text(),
-            CodeWithInfos::Append { append } => {
-                append.iter().map(|item| item.to_plain_text()).collect()
-            }
+            Self::Text { text } => text.clone(),
+            Self::Tag { tag } => tag.1.to_plain_text(),
+            Self::Append { append } => append.iter().map(Self::to_plain_text).collect(),
         }
     }
 }
@@ -145,7 +100,6 @@ impl InteractiveGoal {
                 .map(|h| Hypothesis {
                     names: h.names.clone(),
                     type_: h.type_.to_plain_text(),
-                    value: h.val.as_ref().map(|v| v.to_plain_text()),
                 })
                 .collect(),
             target: self.type_.to_plain_text(),
@@ -156,12 +110,11 @@ impl InteractiveGoal {
 impl InteractiveGoalsResponse {
     /// Convert to simplified goals for TUI
     pub fn to_goals(&self) -> Vec<Goal> {
-        self.goals.iter().map(|g| g.to_goal()).collect()
+        self.goals.iter().map(InteractiveGoal::to_goal).collect()
     }
 }
 
 /// RPC method names
 pub const RPC_CONNECT: &str = "$/lean/rpc/connect";
-pub const RPC_KEEP_ALIVE: &str = "$/lean/rpc/keepAlive";
 pub const RPC_CALL: &str = "$/lean/rpc/call";
 pub const GET_INTERACTIVE_GOALS: &str = "Lean.Widget.getInteractiveGoals";
