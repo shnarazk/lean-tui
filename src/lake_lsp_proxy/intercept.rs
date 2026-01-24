@@ -13,26 +13,26 @@ use futures::Future;
 use super::cursor_extractor::{extract_cursor, extract_cursor_from_notification};
 use crate::{
     lake_ipc::{spawn_goal_fetch, RpcClient},
-    tui_ipc::Broadcaster,
+    tui_ipc::SocketServer,
 };
 
 /// Intercepts LSP messages, extracts cursor position, and forwards to inner
 /// service.
 pub struct Intercept<S> {
     pub service: S,
-    pub broadcaster: Arc<Broadcaster>,
+    pub socket_server: Arc<SocketServer>,
     pub rpc_client: Option<Arc<RpcClient>>,
 }
 
 impl<S: LspService> Intercept<S> {
     pub const fn new(
         service: S,
-        broadcaster: Arc<Broadcaster>,
+        socket_server: Arc<SocketServer>,
         rpc_client: Option<Arc<RpcClient>>,
     ) -> Self {
         Self {
             service,
-            broadcaster,
+            socket_server,
             rpc_client,
         }
     }
@@ -48,10 +48,10 @@ impl<S: LspService> Intercept<S> {
             .entered();
             tracing::info!("cursor position");
 
-            self.broadcaster.broadcast_cursor(cursor.clone());
+            self.socket_server.broadcast_cursor(cursor.clone());
 
             if let Some(rpc) = &self.rpc_client {
-                spawn_goal_fetch(&cursor, &self.broadcaster, rpc);
+                spawn_goal_fetch(&cursor, &self.socket_server, rpc);
             }
         }
     }
@@ -67,10 +67,10 @@ impl<S: LspService> Intercept<S> {
             .entered();
             tracing::info!("cursor position");
 
-            self.broadcaster.broadcast_cursor(cursor.clone());
+            self.socket_server.broadcast_cursor(cursor.clone());
 
             if let Some(rpc) = &self.rpc_client {
-                spawn_goal_fetch(&cursor, &self.broadcaster, rpc);
+                spawn_goal_fetch(&cursor, &self.socket_server, rpc);
             }
         }
     }

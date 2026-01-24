@@ -5,7 +5,7 @@ use ratatui::widgets::ListState;
 
 use crate::{
     lake_ipc::Goal,
-    tui_ipc::{CursorInfo, Message, Position},
+    tui_ipc::{Command, CursorInfo, Message, Position},
 };
 
 /// A selectable item in the TUI (hypothesis or goal target).
@@ -32,6 +32,8 @@ pub struct App {
     pub list_state: ListState,
     /// Whether app should exit.
     pub should_exit: bool,
+    /// Pending navigation command to send.
+    pub pending_navigation: Option<Command>,
 }
 
 impl App {
@@ -137,10 +139,7 @@ impl App {
                     true
                 }
                 KeyCode::Enter => {
-                    // TODO: Trigger navigation to selected item
-                    if let Some(selection) = self.current_selection() {
-                        tracing::info!("Selected: {:?}", selection);
-                    }
+                    self.navigate_to_selection();
                     true
                 }
                 _ => false,
@@ -148,5 +147,43 @@ impl App {
         } else {
             false
         }
+    }
+
+    /// Navigate to the currently selected item.
+    fn navigate_to_selection(&mut self) {
+        let Some(selection) = self.current_selection() else {
+            return;
+        };
+
+        // Get the URI from cursor info
+        let uri = self.cursor.uri.clone();
+        if uri.is_empty() {
+            return;
+        }
+
+        // For now, navigate to the start of the goal (line 0)
+        // TODO: Get actual source locations from Lean's SubexprInfo
+        let (line, character) = match selection {
+            SelectableItem::Hypothesis { goal_idx: _, hyp_idx: _ } => {
+                // Navigate to cursor position (hypothesis doesn't have separate location yet)
+                (self.cursor.line(), self.cursor.character())
+            }
+            SelectableItem::GoalTarget { goal_idx: _ } => {
+                // Navigate to cursor position
+                (self.cursor.line(), self.cursor.character())
+            }
+        };
+
+        self.pending_navigation = Some(Command::Navigate {
+            uri,
+            line,
+            character,
+        });
+    }
+
+    /// Take the pending navigation command, if any.
+    #[allow(clippy::missing_const_for_fn)] // Option::take is not const-stable
+    pub fn take_pending_navigation(&mut self) -> Option<Command> {
+        self.pending_navigation.take()
     }
 }

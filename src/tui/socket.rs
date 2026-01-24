@@ -1,39 +1,99 @@
 use std::time::Duration;
 
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixStream,
     sync::mpsc,
 };
 
-use crate::tui_ipc::{Message, SOCKET_PATH};
+use crate::tui_ipc::{Command, Message, SOCKET_PATH};
 
-/// Spawn a background task that connects to the Unix socket and reads messages.
-/// Returns a receiver channel for incoming messages.
-pub fn spawn_socket_reader() -> mpsc::Receiver<Message> {
-    let (tx, rx) = mpsc::channel::<Message>(16);
+/// Handle for communicating with the proxy.
+pub struct SocketHandle {
+    /// Receiver for incoming messages from proxy.
+    pub rx: mpsc::Receiver<Message>,
+    /// Sender for outgoing commands to proxy.
+    pub tx: mpsc::Sender<Command>,
+}
 
-    tokio::spawn(async move {
-        loop {
-            match UnixStream::connect(SOCKET_PATH).await {
-                Ok(stream) => {
-                    let reader = BufReader::new(stream);
-                    let mut lines = reader.lines();
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        if let Ok(msg) = serde_json::from_str::<Message>(&line) {
-                            if tx.send(msg).await.is_err() {
-                                return;
-                            }
-                        }
-                    }
+/// Spawn a background task that connects to the Unix socket.
+/// Returns a handle for bidirectional communication.
+pub fn spawn_socket_handler() -> SocketHandle {
+    let (msg_tx, msg_rx) = mpsc::channel::<Message>(16);
+    let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(16);
+
+    tokio::spawn(connection_loop(msg_tx, cmd_rx));
+
+    SocketHandle {
+        rx: msg_rx,
+        tx: cmd_tx,
+    }
+}
+
+async fn connection_loop(msg_tx: mpsc::Sender<Message>, mut cmd_rx: mpsc::Receiver<Command>) {
+    loop {
+        match UnixStream::connect(SOCKET_PATH).await {
+            Ok(stream) => {
+                handle_connection(stream, &msg_tx, &mut cmd_rx).await;
+            }
+            Err(_) => {
+                // Retry connection after delay
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+async fn handle_connection(
+    stream: UnixStream,
+    msg_tx: &mpsc::Sender<Message>,
+    cmd_rx: &mut mpsc::Receiver<Command>,
+) {
+    let (reader, mut writer) = stream.into_split();
+    let reader = BufReader::new(reader);
+    let mut lines = reader.lines();
+
+    loop {
+        tokio::select! {
+            line_result = lines.next_line() => {
+                match handle_incoming_line(line_result, msg_tx).await {
+                    Ok(true) => {}
+                    Ok(false) | Err(()) => break,
                 }
-                Err(_) => {
-                    // Retry connection after delay
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            Some(cmd) = cmd_rx.recv() => {
+                if send_command(&mut writer, &cmd).await.is_err() {
+                    break;
                 }
             }
         }
-    });
+    }
+}
 
-    rx
+async fn handle_incoming_line(
+    line_result: Result<Option<String>, std::io::Error>,
+    msg_tx: &mpsc::Sender<Message>,
+) -> Result<bool, ()> {
+    match line_result {
+        Ok(Some(line)) => {
+            if let Ok(msg) = serde_json::from_str::<Message>(&line) {
+                if msg_tx.send(msg).await.is_err() {
+                    return Err(()); // TUI closed, exit task
+                }
+            }
+            Ok(true)
+        }
+        Ok(None) | Err(_) => Ok(false), // Connection closed, reconnect
+    }
+}
+
+async fn send_command(
+    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    cmd: &Command,
+) -> Result<(), ()> {
+    let Ok(json) = serde_json::to_string(cmd) else {
+        return Ok(()); // Skip invalid command, don't break connection
+    };
+    let line = format!("{json}\n");
+    writer.write_all(line.as_bytes()).await.map_err(|_| ())
 }

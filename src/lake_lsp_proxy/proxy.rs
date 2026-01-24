@@ -11,7 +11,7 @@ use super::{forward::Forward, intercept::Intercept};
 use crate::{
     error::{Error, Result},
     lake_ipc::RpcClient,
-    tui_ipc::Broadcaster,
+    tui_ipc::{CommandHandler, SocketServer},
 };
 
 /// Spawn lake serve child process.
@@ -37,22 +37,40 @@ fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::Chi
 
 /// Run the LSP proxy: editor ↔ lean-tui ↔ lake serve.
 pub async fn run() -> Result<()> {
-    let broadcaster = Arc::new(Broadcaster::new());
-    broadcaster.clone().start_listener();
+    let socket_server = Arc::new(SocketServer::new());
 
     let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
     // Client-side: lean-tui → lake serve
     let (mut client_mainloop, server_socket) =
-        MainLoop::new_client(|_| Intercept::new(Forward(None), broadcaster.clone(), None));
+        MainLoop::new_client(|_| Intercept::new(Forward(None), socket_server.clone(), None));
 
     // Create RPC client from server socket
     let rpc_client = Arc::new(RpcClient::new(server_socket.clone()));
 
     // Server-side: editor → lean-tui
     let (server_mainloop, client_socket) = MainLoop::new_server(|_| {
-        Intercept::new(server_socket, broadcaster.clone(), Some(rpc_client.clone()))
+        Intercept::new(server_socket, socket_server.clone(), Some(rpc_client.clone()))
     });
+
+    // Start socket listener and get command receiver
+    let cmd_rx = socket_server.start_listener();
+
+    // Create command handler to process TUI commands
+    let (cmd_handler, cmd_tx) = CommandHandler::new(client_socket.clone());
+
+    // Forward commands from socket server to command handler
+    tokio::spawn(async move {
+        let mut cmd_rx = cmd_rx;
+        while let Some(cmd) = cmd_rx.recv().await {
+            if cmd_tx.send(cmd).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Run command handler
+    tokio::spawn(cmd_handler.run());
 
     // Link client side to server side
     client_mainloop.get_mut().service.0 = Some(client_socket);

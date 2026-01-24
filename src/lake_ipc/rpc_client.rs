@@ -154,33 +154,36 @@ impl RpcClient {
             character
         );
 
-        match self.socket.clone().call(request).await {
-            Ok(response) => {
-                // Handle null response (no goals at this position)
-                if response.is_null() {
-                    tracing::debug!("No goals at {}:{}:{}", uri, line, character);
-                    return Ok(vec![]);
-                }
+        let response = self.socket.clone().call(request).await.map_err(|e| {
+            tracing::error!("RPC call failed: {e:?}");
+            format!("RPC call failed: {e:?}")
+        })?;
 
-                match serde_json::from_value::<InteractiveGoalsResponse>(response.clone()) {
-                    Ok(resp) => {
-                        let goals = resp.to_goals();
-                        if !goals.is_empty() {
-                            tracing::info!("Found {} goal(s)", goals.len());
-                        }
-                        Ok(goals)
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to parse goals response: {e}");
-                        tracing::debug!("Raw response: {}", response);
-                        Err(format!("Failed to parse goals: {e}"))
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!("RPC call failed: {e:?}");
-                Err(format!("RPC call failed: {e:?}"))
-            }
+        Self::parse_goals_response(&response, uri, line, character)
+    }
+
+    fn parse_goals_response(
+        response: &serde_json::Value,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Vec<Goal>, String> {
+        if response.is_null() {
+            tracing::debug!("No goals at {uri}:{line}:{character}");
+            return Ok(vec![]);
         }
+
+        let resp: InteractiveGoalsResponse =
+            serde_json::from_value(response.clone()).map_err(|e| {
+                tracing::error!("Failed to parse goals response: {e}");
+                tracing::debug!("Raw response: {response}");
+                format!("Failed to parse goals: {e}")
+            })?;
+
+        let goals = resp.to_goals();
+        if !goals.is_empty() {
+            tracing::info!("Found {} goal(s)", goals.len());
+        }
+        Ok(goals)
     }
 }

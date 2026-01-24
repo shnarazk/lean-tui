@@ -1,4 +1,4 @@
-//! Broadcasts messages to connected TUI clients via Unix socket.
+//! Unix socket server that broadcasts messages to connected TUI clients.
 
 use std::path::Path;
 
@@ -8,18 +8,18 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use super::message::{Command, CursorInfo, Message, Position, SOCKET_PATH};
+use super::protocol::{Command, CursorInfo, Message, Position, SOCKET_PATH};
 use crate::lake_ipc::Goal;
 
-/// Broadcasts messages to connected TUI clients via Unix socket.
+/// Unix socket server that broadcasts messages to TUI clients.
 /// Immutable after creation - all state is in channels.
-pub struct Broadcaster {
+pub struct SocketServer {
     /// Sender for outgoing messages to TUI clients.
     msg_sender: broadcast::Sender<Message>,
 }
 
-impl Broadcaster {
-    /// Create a new broadcaster.
+impl SocketServer {
+    /// Create a new socket server.
     pub fn new() -> Self {
         let (msg_sender, _) = broadcast::channel(16);
         Self { msg_sender }

@@ -18,7 +18,7 @@ use crossterm::{
     ExecutableCommand,
 };
 use ratatui::prelude::*;
-use socket::spawn_socket_reader;
+use socket::spawn_socket_handler;
 use ui::render;
 
 use crate::error::Result;
@@ -30,15 +30,21 @@ pub fn run() -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    // Spawn socket reader and create app
-    let mut rx = spawn_socket_reader();
+    // Spawn socket handler and create app
+    let mut socket = spawn_socket_handler();
     let mut app = App::new();
 
     // Main event loop
     while !app.should_exit {
         // Process all pending messages from proxy
-        while let Ok(msg) = rx.try_recv() {
+        while let Ok(msg) = socket.rx.try_recv() {
             app.handle_message(msg);
+        }
+
+        // Send any pending navigation commands
+        if let Some(cmd) = app.take_pending_navigation() {
+            // Use try_send to avoid blocking
+            let _ = socket.tx.try_send(cmd);
         }
 
         // Render UI

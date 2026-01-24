@@ -71,49 +71,58 @@ fn render_goals(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from("No goals").style(Style::default().fg(Color::DarkGray)));
     } else {
         let selection = app.current_selection();
-
         for (goal_idx, goal) in app.goals.iter().enumerate() {
-            // Goal header
-            lines.push(
-                Line::from(format!("Goal {}:", goal_idx + 1)).style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            );
-
-            // Hypotheses
-            for (hyp_idx, hyp) in goal.hyps.iter().enumerate() {
-                let names = hyp.names.join(", ");
-                let is_selected =
-                    selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
-
-                let style = if is_selected {
-                    Style::default().bg(Color::DarkGray).fg(Color::White)
-                } else {
-                    Style::default()
-                };
-
-                let prefix = if is_selected { "▶ " } else { "  " };
-                lines.push(Line::from(format!("{prefix}{names} : {}", hyp.type_)).style(style));
-            }
-
-            // Goal target
-            let is_target_selected = selection == Some(SelectableItem::GoalTarget { goal_idx });
-            let target_style = if is_target_selected {
-                Style::default().bg(Color::DarkGray).fg(Color::Cyan)
-            } else {
-                Style::default().fg(Color::Cyan)
-            };
-            let prefix = if is_target_selected { "▶ " } else { "  " };
-            lines.push(Line::from(format!("{prefix}⊢ {}", goal.target)).style(target_style));
-
-            lines.push(Line::from(""));
+            render_goal(&mut lines, goal, goal_idx, selection.as_ref());
         }
     }
 
     let content = Paragraph::new(Text::from(lines));
     frame.render_widget(content, area);
+}
+
+fn render_goal(lines: &mut Vec<Line<'_>>, goal: &crate::lake_ipc::Goal, goal_idx: usize, selection: Option<&SelectableItem>) {
+    // Goal header
+    lines.push(
+        Line::from(format!("Goal {}:", goal_idx + 1)).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    );
+
+    // Hypotheses
+    for (hyp_idx, hyp) in goal.hyps.iter().enumerate() {
+        let is_selected = selection == Some(&SelectableItem::Hypothesis { goal_idx, hyp_idx });
+        let line = render_hypothesis_line(hyp, is_selected);
+        lines.push(line);
+    }
+
+    // Goal target
+    let is_target_selected = selection == Some(&SelectableItem::GoalTarget { goal_idx });
+    let target_style = selected_style(is_target_selected, Color::Cyan);
+    let prefix = selection_prefix(is_target_selected);
+    lines.push(Line::from(format!("{prefix}⊢ {}", goal.target)).style(target_style));
+
+    lines.push(Line::from(""));
+}
+
+fn render_hypothesis_line(hyp: &crate::lake_ipc::Hypothesis, is_selected: bool) -> Line<'static> {
+    let names = hyp.names.join(", ");
+    let style = selected_style(is_selected, Color::White);
+    let prefix = selection_prefix(is_selected);
+    Line::from(format!("{prefix}{names} : {}", hyp.type_)).style(style)
+}
+
+const fn selected_style(is_selected: bool, fg_color: Color) -> Style {
+    if is_selected {
+        Style::new().bg(Color::DarkGray).fg(fg_color)
+    } else {
+        Style::new().fg(fg_color)
+    }
+}
+
+const fn selection_prefix(is_selected: bool) -> &'static str {
+    if is_selected { "▶ " } else { "  " }
 }
 
 /// Render the help bar at the bottom.
