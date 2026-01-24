@@ -1,6 +1,8 @@
 //! TUI command processing with RPC lookups.
 
-use async_lsp::lsp_types::TextDocumentIdentifier;
+use std::sync::Arc;
+
+use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 
 use crate::{
     lean_rpc::{GoToKind, RpcClient},
@@ -8,25 +10,23 @@ use crate::{
 };
 
 /// Process a command from TUI, potentially doing RPC lookups.
-/// Returns a (possibly modified) command to forward to the handler.
-pub async fn process_command(cmd: Command, rpc_client: &RpcClient) -> Command {
-    match &cmd {
+/// Returns a command to forward to the handler, or None if handled internally.
+pub async fn process_command(cmd: Command, rpc_client: &Arc<RpcClient>) -> Option<Command> {
+    match cmd {
         Command::GetHypothesisLocation {
-            uri,
+            ref uri,
             line,
             character,
-            info,
+            ref info,
         } => {
             // Use Lean's getGoToLocation RPC with the InfoWithCtx reference.
-            // This can resolve hypothesis locations even though they don't exist
-            // at the cursor position in the source text.
-            let Ok(url) = async_lsp::lsp_types::Url::parse(uri) else {
+            let Ok(url) = Url::parse(uri) else {
                 tracing::error!("Invalid URI: {uri}");
-                return cmd;
+                return Some(cmd);
             };
 
             let text_document = TextDocumentIdentifier { uri: url };
-            let position = async_lsp::lsp_types::Position::new(*line, *character);
+            let position = Position::new(line, character);
 
             match rpc_client
                 .get_goto_location(&text_document, position, GoToKind::Definition, info.clone())
@@ -39,22 +39,22 @@ pub async fn process_command(cmd: Command, rpc_client: &RpcClient) -> Command {
                         location.target_selection_range.start.line,
                         location.target_selection_range.start.character
                     );
-                    Command::Navigate {
+                    Some(Command::Navigate {
                         uri: location.target_uri.to_string(),
                         line: location.target_selection_range.start.line,
                         character: location.target_selection_range.start.character,
-                    }
+                    })
                 }
                 Ok(None) => {
                     tracing::info!("No definition found for hypothesis, using fallback");
-                    cmd
+                    Some(cmd)
                 }
                 Err(e) => {
                     tracing::error!("getGoToLocation failed: {e}");
-                    cmd
+                    Some(cmd)
                 }
             }
         }
-        Command::Navigate { .. } => cmd,
+        Command::Navigate { .. } => Some(cmd),
     }
 }

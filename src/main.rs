@@ -44,7 +44,7 @@ async fn main() {
 
     let result = match cli.command {
         Commands::Serve => proxy::run().await,
-        Commands::Tui => tui::run(),
+        Commands::Tui => tui::run().await,
     };
 
     if let Err(e) = result {

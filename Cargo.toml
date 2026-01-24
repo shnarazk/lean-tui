@@ -35,5 +35,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
 # TUI
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
 ratatui = "0.29"

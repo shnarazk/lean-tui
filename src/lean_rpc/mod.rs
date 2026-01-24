@@ -11,6 +11,27 @@ pub use client::{GoToKind, RpcClient};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Diff status for goal state comparisons.
+///
+/// The Lean server marks subexpressions with these tags when comparing
+/// goal states (e.g., before/after a tactic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffTag {
+    /// Subexpression was modified (in "before" view)
+    WasChanged,
+    /// Subexpression will be modified (in "after" view)
+    WillChange,
+    /// Subexpression was deleted (in "before" view)
+    WasDeleted,
+    /// Subexpression will be deleted (in "after" view)
+    WillDelete,
+    /// Subexpression was inserted (in "before" view)
+    WasInserted,
+    /// Subexpression will be inserted (in "after" view)
+    WillInsert,
+}
+
 /// Response from `$/lean/rpc/connect`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +46,12 @@ pub struct Goal {
     pub hyps: Vec<Hypothesis>,
     /// Goal type to prove
     pub target: String,
+    /// Goal was inserted (new in current state vs pinned)
+    #[serde(default)]
+    pub is_inserted: bool,
+    /// Goal was removed (gone in current state vs pinned)
+    #[serde(default)]
+    pub is_removed: bool,
 }
 
 /// A hypothesis in the local context
@@ -39,6 +66,15 @@ pub struct Hypothesis {
     /// `getGoToLocation`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info: Option<Value>,
+    /// Hypothesis was inserted (new in current state vs pinned)
+    #[serde(default)]
+    pub is_inserted: bool,
+    /// Hypothesis was removed (gone in current state vs pinned)
+    #[serde(default)]
+    pub is_removed: bool,
+    /// Diff status from the type's first subexpression
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_status: Option<DiffTag>,
 }
 
 /// Response from `Lean.Widget.getInteractiveGoals`
@@ -58,6 +94,12 @@ pub struct InteractiveGoal {
     pub type_: CodeWithInfos,
     #[serde(default)]
     pub goal_prefix: String,
+    /// Goal was inserted (new in diff comparison)
+    #[serde(default)]
+    pub is_inserted: bool,
+    /// Goal was removed (gone in diff comparison)
+    #[serde(default)]
+    pub is_removed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +114,12 @@ pub struct InteractiveHypothesis {
     pub type_: CodeWithInfos,
     #[serde(default)]
     pub val: Option<CodeWithInfos>,
+    /// Hypothesis was inserted (new in diff comparison)
+    #[serde(default)]
+    pub is_inserted: bool,
+    /// Hypothesis was removed (gone in diff comparison)
+    #[serde(default)]
+    pub is_removed: bool,
 }
 
 /// Tagged text with semantic info - Lean's `CodeWithInfos` type
@@ -115,6 +163,23 @@ impl CodeWithInfos {
             Self::Append { append } => append.iter().find_map(Self::first_subexpr_info),
         }
     }
+
+    /// Extract the first `diffStatus` from the tagged text.
+    /// Returns the diff tag if any subexpression has been marked as changed.
+    pub fn first_diff_status(&self) -> Option<DiffTag> {
+        match self {
+            Self::Text { .. } => None,
+            Self::Tag { tag } => {
+                // tag.0 is the SubexprInfo which may contain {"diffStatus": "wasChanged", ...}
+                if let Some(status) = tag.0.get("diffStatus") {
+                    serde_json::from_value(status.clone()).ok()
+                } else {
+                    tag.1.first_diff_status()
+                }
+            }
+            Self::Append { append } => append.iter().find_map(Self::first_diff_status),
+        }
+    }
 }
 
 impl InteractiveGoal {
@@ -129,9 +194,14 @@ impl InteractiveGoal {
                     type_: h.type_.to_plain_text(),
                     fvar_ids: h.fvar_ids.clone(),
                     info: h.type_.first_subexpr_info(),
+                    is_inserted: h.is_inserted,
+                    is_removed: h.is_removed,
+                    diff_status: h.type_.first_diff_status(),
                 })
                 .collect(),
             target: self.type_.to_plain_text(),
+            is_inserted: self.is_inserted,
+            is_removed: self.is_removed,
         }
     }
 }

@@ -55,12 +55,14 @@ pub async fn run() -> Result<()> {
     let (cmd_handler, cmd_tx) = CommandHandler::new(client_socket.clone());
 
     // Forward commands from socket server to command handler,
-    // intercepting GetHypothesisLocation to do RPC lookup first
+    // intercepting GetHypothesisLocation for RPC lookup
     let rpc_for_commands = rpc_client.clone();
     tokio::spawn(async move {
         let mut cmd_rx = cmd_rx;
         while let Some(cmd) = cmd_rx.recv().await {
-            let cmd = process_command(cmd, &rpc_for_commands).await;
+            let Some(cmd) = process_command(cmd, &rpc_for_commands).await else {
+                continue;
+            };
             if cmd_tx.send(cmd).await.is_err() {
                 break;
             }

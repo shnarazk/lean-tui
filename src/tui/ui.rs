@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use super::app::{App, ClickRegion, SelectableItem};
-use crate::tui_ipc::SOCKET_PATH;
+use crate::{lean_rpc::DiffTag, tui_ipc::SOCKET_PATH};
 
 /// Render the UI.
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -133,9 +133,21 @@ fn render_goal(
 
     // Goal target (clickable)
     let is_target_selected = selection == Some(&SelectableItem::GoalTarget { goal_idx });
-    let target_style = selected_style(is_target_selected, Color::Cyan);
     let prefix = selection_prefix(is_target_selected);
-    lines.push(Line::from(format!("{prefix}⊢ {}", goal.target)).style(target_style));
+
+    // Determine style and marker based on goal diff status
+    let (target_style, diff_marker) = if goal.is_inserted {
+        (diff_style(is_target_selected, Color::Green), " [+]")
+    } else if goal.is_removed {
+        (
+            diff_style(is_target_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
+            " [-]",
+        )
+    } else {
+        (selected_style(is_target_selected, Color::Cyan), "")
+    };
+
+    lines.push(Line::from(format!("{prefix}⊢ {}{diff_marker}", goal.target)).style(target_style));
     click_items.push(Some(SelectableItem::GoalTarget { goal_idx }));
 
     // Empty line (not clickable)
@@ -145,9 +157,41 @@ fn render_goal(
 
 fn render_hypothesis_line(hyp: &crate::lean_rpc::Hypothesis, is_selected: bool) -> Line<'static> {
     let names = hyp.names.join(", ");
-    let style = selected_style(is_selected, Color::White);
     let prefix = selection_prefix(is_selected);
-    Line::from(format!("{prefix}{names} : {}", hyp.type_)).style(style)
+
+    // Determine style and marker based on diff status
+    let (style, diff_marker) = if hyp.is_inserted {
+        (diff_style(is_selected, Color::Green), " [+]")
+    } else if hyp.is_removed {
+        (
+            diff_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
+            " [-]",
+        )
+    } else {
+        match hyp.diff_status {
+            Some(DiffTag::WasChanged | DiffTag::WillChange) => {
+                (diff_style(is_selected, Color::Yellow), " [~]")
+            }
+            Some(DiffTag::WasInserted | DiffTag::WillInsert) => {
+                (diff_style(is_selected, Color::Green), " [+]")
+            }
+            Some(DiffTag::WasDeleted | DiffTag::WillDelete) => {
+                (diff_style(is_selected, Color::Red), " [-]")
+            }
+            None => (selected_style(is_selected, Color::White), ""),
+        }
+    };
+
+    Line::from(format!("{prefix}{names} : {}{diff_marker}", hyp.type_)).style(style)
+}
+
+/// Style for diff-highlighted items (with selection support).
+const fn diff_style(is_selected: bool, fg_color: Color) -> Style {
+    if is_selected {
+        Style::new().bg(Color::DarkGray).fg(fg_color)
+    } else {
+        Style::new().fg(fg_color)
+    }
 }
 
 const fn selected_style(is_selected: bool, fg_color: Color) -> Style {
