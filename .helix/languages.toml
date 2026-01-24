@@ -1,0 +1,7 @@
+[language-server.lean-tui]
+command = "cargo"
+args = ["run", "--release", "--quiet", "--", "serve"]
+
+[[language]]
+name = "lean"
+language-servers = ["lean-tui"]
