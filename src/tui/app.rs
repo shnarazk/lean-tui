@@ -22,6 +22,22 @@ pub struct ClickRegion {
     pub item: SelectableItem,
 }
 
+/// Visibility settings for diff columns.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ColumnVisibility {
+    /// Show the "Previous" column in diff view.
+    pub previous: bool,
+    /// Show the "Next" column in diff view.
+    pub next: bool,
+}
+
+impl ColumnVisibility {
+    /// Create with both columns visible.
+    pub const fn both() -> Self {
+        Self { previous: true, next: true }
+    }
+}
+
 /// Application state.
 #[derive(Default)]
 pub struct App {
@@ -43,12 +59,17 @@ pub struct App {
     pub pending_navigation: Option<Command>,
     /// Click regions for mouse interaction (updated each render).
     pub click_regions: Vec<ClickRegion>,
+    /// Visibility settings for diff columns.
+    pub columns: ColumnVisibility,
 }
 
 impl App {
     /// Create a new app instance.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            columns: ColumnVisibility::both(),
+            ..Self::default()
+        }
     }
 
     /// Get all selectable items as a flat list.
@@ -152,6 +173,14 @@ impl App {
                         self.navigate_to_selection();
                         true
                     }
+                    KeyCode::Char('p') => {
+                        self.columns.previous = !self.columns.previous;
+                        true
+                    }
+                    KeyCode::Char('n') => {
+                        self.columns.next = !self.columns.next;
+                        true
+                    }
                     _ => false,
                 }
             }
@@ -168,24 +197,28 @@ impl App {
 
     /// Handle mouse click at given coordinates.
     fn handle_click(&mut self, x: u16, y: u16) -> bool {
-        // Find which item was clicked
-        for region in &self.click_regions {
-            if region.area.x <= x
+        let Some(region) = self.find_click_region(x, y) else {
+            return false;
+        };
+
+        let items = self.selectable_items();
+        let Some(idx) = items.iter().position(|item| *item == region.item) else {
+            return false;
+        };
+
+        self.list_state.select(Some(idx));
+        self.navigate_to_selection();
+        true
+    }
+
+    /// Find the click region containing the given coordinates.
+    fn find_click_region(&self, x: u16, y: u16) -> Option<&ClickRegion> {
+        self.click_regions.iter().find(|region| {
+            region.area.x <= x
                 && x < region.area.x + region.area.width
                 && region.area.y <= y
                 && y < region.area.y + region.area.height
-            {
-                // Find index of this item
-                let items = self.selectable_items();
-                if let Some(idx) = items.iter().position(|item| *item == region.item) {
-                    self.list_state.select(Some(idx));
-                    // Navigate immediately on click
-                    self.navigate_to_selection();
-                    return true;
-                }
-            }
-        }
-        false
+        })
     }
 
     /// Navigate to the currently selected item.

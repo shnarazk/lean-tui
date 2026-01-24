@@ -46,6 +46,12 @@ pub struct Goal {
     pub hyps: Vec<Hypothesis>,
     /// Goal type to prove
     pub target: String,
+    /// Prefix before the target (usually `⊢ `, but `∣ ` for conv goals)
+    #[serde(default)]
+    pub prefix: String,
+    /// Case label (e.g., `case foo` for pattern matching)
+    #[serde(default)]
+    pub user_name: Option<String>,
     /// Goal was inserted (new in current state vs pinned)
     #[serde(default)]
     pub is_inserted: bool,
@@ -94,6 +100,9 @@ pub struct InteractiveGoal {
     pub type_: CodeWithInfos,
     #[serde(default)]
     pub goal_prefix: String,
+    /// Case label (e.g., `case foo` for pattern matching)
+    #[serde(default)]
+    pub user_name: Option<String>,
     /// Goal was inserted (new in diff comparison)
     #[serde(default)]
     pub is_inserted: bool,
@@ -200,6 +209,12 @@ impl InteractiveGoal {
                 })
                 .collect(),
             target: self.type_.to_plain_text(),
+            prefix: if self.goal_prefix.is_empty() {
+                "⊢ ".to_string()
+            } else {
+                self.goal_prefix.clone()
+            },
+            user_name: self.user_name.clone(),
             is_inserted: self.is_inserted,
             is_removed: self.is_removed,
         }

@@ -49,7 +49,7 @@ pub async fn run() -> Result<()> {
                 app.handle_event(&event);
             }
             // Send pending commands (with small delay to batch)
-            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+            () = tokio::time::sleep(Duration::from_millis(50)) => {
                 if let Some(cmd) = app.take_pending_navigation() {
                     let _ = socket.tx.send(cmd).await;
                 }
