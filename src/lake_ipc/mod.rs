@@ -34,6 +34,13 @@ pub struct Goal {
 pub struct Hypothesis {
     pub names: Vec<String>,
     pub type_: String,
+    /// `FVarIds` for go-to-definition support
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fvar_ids: Option<Vec<String>>,
+    /// First `SubexprInfo` from type (`InfoWithCtx` reference for
+    /// `getGoToLocation`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<Value>,
 }
 
 /// Response from `Lean.Widget.getInteractiveGoals`
@@ -56,9 +63,13 @@ pub struct InteractiveGoal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InteractiveHypothesis {
     #[serde(default)]
     pub names: Vec<String>,
+    /// `FVarIds` for each hypothesis in the bundle (same length as names)
+    #[serde(default)]
+    pub fvar_ids: Option<Vec<String>>,
     #[serde(rename = "type")]
     pub type_: CodeWithInfos,
     #[serde(default)]
@@ -88,6 +99,24 @@ impl CodeWithInfos {
             Self::Append { append } => append.iter().map(Self::to_plain_text).collect(),
         }
     }
+
+    /// Extract the first `SubexprInfo` (`InfoWithCtx` reference) from the
+    /// tagged text. This can be used with `getGoToLocation` to jump to the
+    /// definition.
+    pub fn first_subexpr_info(&self) -> Option<Value> {
+        match self {
+            Self::Text { .. } => None,
+            Self::Tag { tag } => {
+                // tag.0 is the SubexprInfo which contains {"info": InfoWithCtx, "subexprPos":
+                // ...} We need the "info" field for getGoToLocation
+                tag.0
+                    .get("info")
+                    .cloned()
+                    .or_else(|| tag.1.first_subexpr_info())
+            }
+            Self::Append { append } => append.iter().find_map(Self::first_subexpr_info),
+        }
+    }
 }
 
 impl InteractiveGoal {
@@ -100,6 +129,8 @@ impl InteractiveGoal {
                 .map(|h| Hypothesis {
                     names: h.names.clone(),
                     type_: h.type_.to_plain_text(),
+                    fvar_ids: h.fvar_ids.clone(),
+                    info: h.type_.first_subexpr_info(),
                 })
                 .collect(),
             target: self.type_.to_plain_text(),
@@ -118,3 +149,4 @@ impl InteractiveGoalsResponse {
 pub const RPC_CONNECT: &str = "$/lean/rpc/connect";
 pub const RPC_CALL: &str = "$/lean/rpc/call";
 pub const GET_INTERACTIVE_GOALS: &str = "Lean.Widget.getInteractiveGoals";
+pub const GET_GO_TO_LOCATION: &str = "Lean.Widget.getGoToLocation";

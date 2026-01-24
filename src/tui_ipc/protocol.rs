@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::lake_ipc::Goal;
 
@@ -70,5 +71,18 @@ pub enum Command {
         uri: String,
         line: u32,
         character: u32,
+    },
+    /// Request go-to-definition location for a hypothesis
+    /// The proxy will look up the location using `getGoToLocation` RPC
+    /// and respond with a `Navigate` via `showDocument`
+    GetHypothesisLocation {
+        /// Document URI where the hypothesis appears
+        uri: String,
+        /// Line where goals were fetched (for RPC session)
+        line: u32,
+        /// Character position where goals were fetched
+        character: u32,
+        /// The `InfoWithCtx` reference from the hypothesis type's `SubexprInfo`
+        info: Value,
     },
 }

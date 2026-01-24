@@ -150,6 +150,10 @@ impl App {
     }
 
     /// Navigate to the currently selected item.
+    ///
+    /// For hypotheses with `info` (from `SubexprInfo`), sends a `GetHypothesisLocation`
+    /// command to look up the actual definition location via `getGoToLocation` RPC.
+    /// Falls back to `goals_position` if no info is available.
     fn navigate_to_selection(&mut self) {
         let Some(selection) = self.current_selection() else {
             return;
@@ -161,24 +165,45 @@ impl App {
             return;
         }
 
-        // For now, navigate to the start of the goal (line 0)
-        // TODO: Get actual source locations from Lean's SubexprInfo
-        let (line, character) = match selection {
-            SelectableItem::Hypothesis { goal_idx: _, hyp_idx: _ } => {
-                // Navigate to cursor position (hypothesis doesn't have separate location yet)
-                (self.cursor.line(), self.cursor.character())
-            }
-            SelectableItem::GoalTarget { goal_idx: _ } => {
-                // Navigate to cursor position
-                (self.cursor.line(), self.cursor.character())
-            }
+        // Get the position where goals were fetched (for RPC session context)
+        let goals_pos = self.goals_position.unwrap_or(self.cursor.position);
+
+        self.pending_navigation = Some(self.build_navigation_command(&selection, uri, goals_pos));
+    }
+
+    /// Build the appropriate navigation command for the selected item.
+    fn build_navigation_command(
+        &self,
+        selection: &SelectableItem,
+        uri: String,
+        goals_pos: Position,
+    ) -> Command {
+        // Try to get hypothesis info for go-to-definition
+        let hyp_info = match selection {
+            SelectableItem::Hypothesis { goal_idx, hyp_idx } => self
+                .goals
+                .get(*goal_idx)
+                .and_then(|g| g.hyps.get(*hyp_idx))
+                .and_then(|h| h.info.clone()),
+            SelectableItem::GoalTarget { .. } => None,
         };
 
-        self.pending_navigation = Some(Command::Navigate {
-            uri,
-            line,
-            character,
-        });
+        if let Some(info) = hyp_info {
+            // We have info - request location lookup from proxy
+            Command::GetHypothesisLocation {
+                uri,
+                line: goals_pos.line,
+                character: goals_pos.character,
+                info,
+            }
+        } else {
+            // Fallback: navigate to goals position
+            Command::Navigate {
+                uri,
+                line: goals_pos.line,
+                character: goals_pos.character,
+            }
+        }
     }
 
     /// Take the pending navigation command, if any.

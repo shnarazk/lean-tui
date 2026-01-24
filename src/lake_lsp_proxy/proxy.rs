@@ -50,7 +50,11 @@ pub async fn run() -> Result<()> {
 
     // Server-side: editor → lean-tui
     let (server_mainloop, client_socket) = MainLoop::new_server(|_| {
-        Intercept::new(server_socket, socket_server.clone(), Some(rpc_client.clone()))
+        Intercept::new(
+            server_socket,
+            socket_server.clone(),
+            Some(rpc_client.clone()),
+        )
     });
 
     // Start socket listener and get command receiver

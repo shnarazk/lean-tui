@@ -1,9 +1,4 @@
 //! TUI module for displaying Lean proof goals.
-//!
-//! Architecture:
-//! - `app.rs`: Application state and event handling
-//! - `ui.rs`: UI rendering
-//! - `socket.rs`: Unix socket connection to proxy
 
 mod app;
 mod socket;

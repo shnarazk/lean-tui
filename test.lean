@@ -6,4 +6,6 @@ open MyNat
 
 example (h: 1 = 2): (succ zero) = zero := by
 
+ intros
+
  sorry
