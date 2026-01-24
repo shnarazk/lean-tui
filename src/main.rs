@@ -28,18 +28,21 @@ async fn main() {
 
     // Only init tracing for serve (TUI uses terminal)
     if matches!(cli.command, Commands::Serve) {
-        let log_file =
-            std::fs::File::create("/tmp/lean-tui.log").expect("Failed to create log file");
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive("lean_tui=info".parse().unwrap()),
-            )
-            .with_writer(log_file)
-            .with_ansi(true)
-            .with_target(false)
-            .pretty()
-            .init();
+        if let Ok(log_file) = std::fs::File::create("/tmp/lean-tui.log") {
+            let filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(
+                "lean_tui=info"
+                    .parse()
+                    .unwrap_or_else(|_| "info".parse().unwrap()),
+            );
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(log_file)
+                .with_ansi(true)
+                .with_target(false)
+                .pretty()
+                .init();
+        }
+        // If log file creation fails, continue without file logging
     }
 
     let result = match cli.command {

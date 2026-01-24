@@ -28,7 +28,7 @@ pub async fn run() -> Result<()> {
 
     // Spawn socket handler and create app
     let mut socket = spawn_socket_handler();
-    let mut app = App::new();
+    let mut app = App::default();
 
     // Event stream for async terminal events
     let mut event_stream = EventStream::new();

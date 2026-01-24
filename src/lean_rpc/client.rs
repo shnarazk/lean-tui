@@ -16,6 +16,7 @@ use super::{
     Goal, InteractiveGoalsResponse, RpcConnectResponse, GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS,
     RPC_CALL, RPC_CONNECT,
 };
+use crate::error::LspError;
 
 /// Lean RPC connect request parameters.
 #[derive(Serialize)]
@@ -43,19 +44,11 @@ struct GetInteractiveGoalsParams {
 }
 
 /// Navigation target kind for `Lean.Widget.getGoToLocation`.
-///
-/// Specifies what location to navigate to when looking up a symbol.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Declaration and Type are documented for completeness
 pub enum GoToKind {
-    /// Navigate to the declaration site (where the symbol is first declared).
-    Declaration,
-    /// Navigate to the definition site (where the symbol is
-    /// defined/implemented).
+    /// Navigate to the definition site.
     Definition,
-    /// Navigate to the type of the expression.
-    Type,
 }
 
 /// Parameters for `Lean.Widget.getGoToLocation` inner call.
@@ -91,28 +84,40 @@ impl RpcClient {
         &self,
         method: &str,
         params: impl Serialize,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<serde_json::Value, LspError> {
         let id = self.next_request_id();
         let request_json = json!({ "id": id, "method": method, "params": params });
-        let request: async_lsp::AnyRequest =
-            serde_json::from_value(request_json).map_err(|e| format!("Invalid request: {e}"))?;
+        let request: async_lsp::AnyRequest = serde_json::from_value(request_json)
+            .map_err(|e| LspError::InvalidRequest(e.to_string()))?;
 
         self.socket
             .clone()
             .call(request)
             .await
-            .map_err(|e| format!("{e:?}"))
+            .map_err(|e| Self::parse_rpc_error(&format!("{e:?}")))
+    }
+
+    /// Parse an RPC error string into a structured `LspError`.
+    fn parse_rpc_error(error: &str) -> LspError {
+        if error.contains("Outdated RPC session") || error.contains("-32900") {
+            LspError::SessionExpired
+        } else {
+            LspError::RpcError {
+                code: None,
+                message: error.to_string(),
+            }
+        }
     }
 
     /// Connect to RPC for a given file URI. Returns session ID on success.
-    async fn connect(&self, uri: &Url) -> Result<String, String> {
+    async fn connect(&self, uri: &Url) -> Result<String, LspError> {
         let params = RpcConnectParams {
             uri: uri.to_string(),
         };
         let response = self.request(RPC_CONNECT, params).await?;
 
         let resp: RpcConnectResponse =
-            serde_json::from_value(response).map_err(|e| format!("Parse error: {e}"))?;
+            serde_json::from_value(response).map_err(|e| LspError::ParseError(e.to_string()))?;
 
         let session_id = resp.session_id;
         tracing::info!("RPC session for {uri}: {session_id}");
@@ -125,7 +130,7 @@ impl RpcClient {
     }
 
     /// Get or create a session for a URI.
-    async fn get_session(&self, uri: &Url) -> Result<String, String> {
+    async fn get_session(&self, uri: &Url) -> Result<String, LspError> {
         if let Some(id) = self.sessions.lock().await.get(uri.as_str()).cloned() {
             return Ok(id);
         }
@@ -137,11 +142,6 @@ impl RpcClient {
         self.sessions.lock().await.remove(uri.as_str());
     }
 
-    /// Check if an error indicates an outdated RPC session.
-    fn is_session_expired(error: &str) -> bool {
-        error.contains("Outdated RPC session") || error.contains("-32900")
-    }
-
     /// Call a Lean RPC method with automatic session management.
     async fn rpc_call<P: Serialize>(
         &self,
@@ -150,7 +150,7 @@ impl RpcClient {
         position: Position,
         method: &'static str,
         inner_params: P,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<serde_json::Value, LspError> {
         let session_id = self.get_session(uri).await?;
 
         let params = RpcCallParams {
@@ -164,45 +164,46 @@ impl RpcClient {
         self.request(RPC_CALL, params).await
     }
 
+    /// Call a Lean RPC method with automatic session retry on expiry.
+    async fn rpc_call_with_retry<P: Serialize + Clone>(
+        &self,
+        uri: &Url,
+        text_document: &TextDocumentIdentifier,
+        position: Position,
+        method: &'static str,
+        params: P,
+    ) -> Result<serde_json::Value, LspError> {
+        let result = self
+            .rpc_call(uri, text_document, position, method, params.clone())
+            .await;
+
+        match result {
+            Ok(r) => Ok(r),
+            Err(LspError::SessionExpired) => {
+                tracing::info!("Session expired, reconnecting...");
+                self.invalidate_session(uri).await;
+                self.rpc_call(uri, text_document, position, method, params)
+                    .await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Get interactive goals at a position. Retries once if session expired.
     pub async fn get_goals(
         &self,
         text_document: &TextDocumentIdentifier,
         position: Position,
-    ) -> Result<Vec<Goal>, String> {
+    ) -> Result<Vec<Goal>, LspError> {
         let uri = &text_document.uri;
-        let inner_params = GetInteractiveGoalsParams {
+        let params = GetInteractiveGoalsParams {
             text_document: text_document.clone(),
             position,
         };
 
-        let result = self
-            .rpc_call(
-                uri,
-                text_document,
-                position,
-                GET_INTERACTIVE_GOALS,
-                inner_params.clone(),
-            )
-            .await;
-
-        // Retry once on session expiry
-        let response = match result {
-            Ok(r) => r,
-            Err(e) if Self::is_session_expired(&e) => {
-                tracing::info!("Session expired, reconnecting...");
-                self.invalidate_session(uri).await;
-                self.rpc_call(
-                    uri,
-                    text_document,
-                    position,
-                    GET_INTERACTIVE_GOALS,
-                    inner_params,
-                )
-                .await?
-            }
-            Err(e) => return Err(e),
-        };
+        let response = self
+            .rpc_call_with_retry(uri, text_document, position, GET_INTERACTIVE_GOALS, params)
+            .await?;
 
         Self::parse_goals_response(&response)
     }
@@ -215,51 +216,24 @@ impl RpcClient {
         position: Position,
         kind: GoToKind,
         info: serde_json::Value,
-    ) -> Result<Option<LocationLink>, String> {
+    ) -> Result<Option<LocationLink>, LspError> {
         let uri = &text_document.uri;
-        let inner_params = GetGoToLocationParams {
-            kind,
-            info: info.clone(),
-        };
+        let params = GetGoToLocationParams { kind, info };
 
-        let result = self
-            .rpc_call(
-                uri,
-                text_document,
-                position,
-                GET_GOTO_LOCATION,
-                inner_params.clone(),
-            )
-            .await;
-
-        // Retry once on session expiry
-        let response = match result {
-            Ok(r) => r,
-            Err(e) if Self::is_session_expired(&e) => {
-                tracing::info!("Session expired, reconnecting...");
-                self.invalidate_session(uri).await;
-                self.rpc_call(
-                    uri,
-                    text_document,
-                    position,
-                    GET_GOTO_LOCATION,
-                    inner_params,
-                )
-                .await?
-            }
-            Err(e) => return Err(e),
-        };
+        let response = self
+            .rpc_call_with_retry(uri, text_document, position, GET_GOTO_LOCATION, params)
+            .await?;
 
         Ok(Self::parse_definition_response(&response))
     }
 
-    fn parse_goals_response(response: &serde_json::Value) -> Result<Vec<Goal>, String> {
+    fn parse_goals_response(response: &serde_json::Value) -> Result<Vec<Goal>, LspError> {
         if response.is_null() {
             return Ok(vec![]);
         }
 
-        let resp: InteractiveGoalsResponse =
-            serde_json::from_value(response.clone()).map_err(|e| format!("Parse error: {e}"))?;
+        let resp: InteractiveGoalsResponse = serde_json::from_value(response.clone())
+            .map_err(|e| LspError::ParseError(e.to_string()))?;
 
         let goals = resp.to_goals();
         if !goals.is_empty() {

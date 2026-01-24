@@ -55,7 +55,10 @@ fn render_main(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(block, area);
 
     if !app.connected {
-        frame.render_widget(Paragraph::new(format!("Connecting to {SOCKET_PATH}...")), inner);
+        frame.render_widget(
+            Paragraph::new(format!("Connecting to {SOCKET_PATH}...")),
+            inner,
+        );
         return;
     }
 
@@ -122,7 +125,14 @@ fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
     let selection = app.current_selection();
     let num_goals = app.goals.len();
     for goal_idx in 0..num_goals {
-        render_goal_row(frame, app, rows[goal_idx + 1], goal_idx, selection.as_ref(), layout);
+        render_goal_row(
+            frame,
+            app,
+            rows[goal_idx + 1],
+            goal_idx,
+            selection.as_ref(),
+            layout,
+        );
     }
 }
 
@@ -176,8 +186,14 @@ fn render_grid_header(frame: &mut Frame, area: Rect, layout: ColumnLayout) {
                 _ => unreachable!(),
             };
 
-            frame.render_widget(header_label(left_label, layout == ColumnLayout::CurrentAndNext), left);
-            frame.render_widget(header_label(right_label, layout == ColumnLayout::PreviousAndCurrent), right);
+            frame.render_widget(
+                header_label(left_label, layout == ColumnLayout::CurrentAndNext),
+                left,
+            );
+            frame.render_widget(
+                header_label(right_label, layout == ColumnLayout::PreviousAndCurrent),
+                right,
+            );
         }
     }
 }
@@ -250,6 +266,22 @@ fn render_goal_cell(frame: &mut Frame, app: &App, area: Rect, goal_idx: usize, k
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
+/// Register a click region for a line at a given offset within an area.
+fn register_click_region(
+    click_regions: &mut Vec<ClickRegion>,
+    area: Rect,
+    line_offset: u16,
+    item: SelectableItem,
+) {
+    let line_y = area.y + line_offset;
+    if line_y < area.y + area.height {
+        click_regions.push(ClickRegion {
+            area: Rect::new(area.x, line_y, area.width, 1),
+            item,
+        });
+    }
+}
+
 /// Render an interactive goal cell (Current column) with click regions.
 fn render_goal_cell_interactive(
     frame: &mut Frame,
@@ -259,32 +291,25 @@ fn render_goal_cell_interactive(
     selection: Option<&SelectableItem>,
 ) {
     let goal = &app.goals[goal_idx];
-
-    // Collect hypothesis indices for click regions
-    let hyp_indices: Vec<usize> = goal.hyps.iter().enumerate().map(|(i, _)| i).collect();
-
     let lines = build_goal_lines(goal, goal_idx, selection, CellKind::Current);
 
     // Register click regions (header at line 0, then hypotheses, then target)
     let mut line_offset = 1u16;
-    for hyp_idx in hyp_indices {
-        let line_y = area.y + line_offset;
-        if line_y < area.y + area.height {
-            app.click_regions.push(ClickRegion {
-                area: Rect::new(area.x, line_y, area.width, 1),
-                item: SelectableItem::Hypothesis { goal_idx, hyp_idx },
-            });
-        }
+    for hyp_idx in 0..goal.hyps.len() {
+        register_click_region(
+            &mut app.click_regions,
+            area,
+            line_offset,
+            SelectableItem::Hypothesis { goal_idx, hyp_idx },
+        );
         line_offset += 1;
     }
-
-    let line_y = area.y + line_offset;
-    if line_y < area.y + area.height {
-        app.click_regions.push(ClickRegion {
-            area: Rect::new(area.x, line_y, area.width, 1),
-            item: SelectableItem::GoalTarget { goal_idx },
-        });
-    }
+    register_click_region(
+        &mut app.click_regions,
+        area,
+        line_offset,
+        SelectableItem::GoalTarget { goal_idx },
+    );
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
@@ -347,7 +372,11 @@ fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
 
         // Goal target (clickable)
         let is_target_selected = selection == Some(SelectableItem::GoalTarget { goal_idx });
-        lines.push(render_target_line(goal, is_target_selected, CellKind::Current));
+        lines.push(render_target_line(
+            goal,
+            is_target_selected,
+            CellKind::Current,
+        ));
         click_items.push(Some(SelectableItem::GoalTarget { goal_idx }));
 
         // Empty line between goals
@@ -359,13 +388,7 @@ fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
     for (line_idx, item) in click_items.into_iter().enumerate() {
         if let Some(selectable) = item {
             #[allow(clippy::cast_possible_truncation)]
-            let line_y = area.y + (line_idx as u16);
-            if line_y < area.y + area.height {
-                app.click_regions.push(ClickRegion {
-                    area: Rect::new(area.x, line_y, area.width, 1),
-                    item: selectable,
-                });
-            }
+            register_click_region(&mut app.click_regions, area, line_idx as u16, selectable);
         }
     }
 
@@ -392,9 +415,10 @@ const fn should_skip_hyp(hyp: &Hypothesis, kind: CellKind) -> bool {
 
 /// Build goal header string.
 fn goal_header(goal: &Goal, goal_idx: usize) -> String {
-    goal.user_name
-        .as_ref()
-        .map_or_else(|| format!("Goal {}:", goal_idx + 1), |name| format!("case {name}"))
+    goal.user_name.as_ref().map_or_else(
+        || format!("Goal {}:", goal_idx + 1),
+        |name| format!("case {name}"),
+    )
 }
 
 /// Render hypothesis line with cell-aware styling.
@@ -404,17 +428,18 @@ fn render_hypothesis_line(hyp: &Hypothesis, is_selected: bool, kind: CellKind) -
 
     // In non-Current columns, don't show diff markers (items are already filtered)
     let (style, diff_marker) = match kind {
-        CellKind::Previous | CellKind::Next => (selected_style(is_selected, Color::White), ""),
-        CellKind::Current if hyp.is_inserted => (diff_style(is_selected, Color::Green), " [+]"),
-        CellKind::Current if hyp.is_removed => {
-            (diff_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT), " [-]")
-        }
+        CellKind::Previous | CellKind::Next => (item_style(is_selected, Color::White), ""),
+        CellKind::Current if hyp.is_inserted => (item_style(is_selected, Color::Green), " [+]"),
+        CellKind::Current if hyp.is_removed => (
+            item_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
+            " [-]",
+        ),
         CellKind::Current => match hyp.diff_status {
-            Some(DiffTag::WasChanged) => (diff_style(is_selected, Color::Yellow), " [~]"),
-            Some(DiffTag::WasInserted) => (diff_style(is_selected, Color::Green), " [+]"),
-            Some(DiffTag::WasDeleted) => (diff_style(is_selected, Color::Red), " [-]"),
+            Some(DiffTag::WasChanged) => (item_style(is_selected, Color::Yellow), " [~]"),
+            Some(DiffTag::WasInserted) => (item_style(is_selected, Color::Green), " [+]"),
+            Some(DiffTag::WasDeleted) => (item_style(is_selected, Color::Red), " [-]"),
             Some(DiffTag::WillChange | DiffTag::WillInsert | DiffTag::WillDelete) | None => {
-                (selected_style(is_selected, Color::White), "")
+                (item_style(is_selected, Color::White), "")
             }
         },
     };
@@ -427,25 +452,22 @@ fn render_target_line(goal: &Goal, is_selected: bool, kind: CellKind) -> Line<'s
     let prefix = selection_prefix(is_selected);
 
     let (style, diff_marker) = match kind {
-        CellKind::Current if goal.is_inserted => (diff_style(is_selected, Color::Green), " [+]"),
-        CellKind::Current if goal.is_removed => {
-            (diff_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT), " [-]")
-        }
-        _ => (selected_style(is_selected, Color::Cyan), ""),
+        CellKind::Current if goal.is_inserted => (item_style(is_selected, Color::Green), " [+]"),
+        CellKind::Current if goal.is_removed => (
+            item_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
+            " [-]",
+        ),
+        _ => (item_style(is_selected, Color::Cyan), ""),
     };
 
-    Line::from(format!("{prefix}{}{}{diff_marker}", goal.prefix, goal.target)).style(style)
+    Line::from(format!(
+        "{prefix}{}{}{diff_marker}",
+        goal.prefix, goal.target
+    ))
+    .style(style)
 }
-/// Style for diff-highlighted items (with selection support).
-const fn diff_style(is_selected: bool, fg_color: Color) -> Style {
-    if is_selected {
-        Style::new().bg(Color::DarkGray).fg(fg_color)
-    } else {
-        Style::new().fg(fg_color)
-    }
-}
-
-const fn selected_style(is_selected: bool, fg_color: Color) -> Style {
+/// Style for items with optional selection highlighting.
+const fn item_style(is_selected: bool, fg_color: Color) -> Style {
     if is_selected {
         Style::new().bg(Color::DarkGray).fg(fg_color)
     } else {

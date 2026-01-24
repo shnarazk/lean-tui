@@ -35,7 +35,7 @@ pub fn spawn_goal_fetch(
             }
             Err(e) => {
                 tracing::warn!("Could not fetch goals at {uri_string}:{line}:{character}: {e}");
-                socket_server.broadcast_error(e);
+                socket_server.broadcast_error(e.to_string());
             }
         }
     });

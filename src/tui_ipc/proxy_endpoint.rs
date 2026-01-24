@@ -52,7 +52,9 @@ impl SocketServer {
 
     /// Broadcast a message to all connected clients.
     pub fn send(&self, msg: Message) {
-        let _ = self.msg_sender.send(msg);
+        if self.msg_sender.send(msg).is_err() {
+            tracing::debug!("No TUI clients connected to receive broadcast");
+        }
     }
 
     /// Broadcast cursor info to all connected clients.
@@ -121,7 +123,13 @@ async fn handle_client(
             // Send messages to TUI
             msg_result = msg_rx.recv() => {
                 let Ok(msg) = msg_result else { break };
-                let Ok(json) = serde_json::to_string(&msg) else { continue };
+                let json = match serde_json::to_string(&msg) {
+                    Ok(j) => j,
+                    Err(e) => {
+                        tracing::warn!("Failed to serialize message: {e}");
+                        continue;
+                    }
+                };
                 if writer.write_all(format!("{json}\n").as_bytes()).await.is_err() {
                     break;
                 }

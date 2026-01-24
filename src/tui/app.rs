@@ -22,20 +22,13 @@ pub struct ClickRegion {
     pub item: SelectableItem,
 }
 
-/// Visibility settings for diff columns.
+/// Visibility settings for diff columns (both hidden by default).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ColumnVisibility {
     /// Show the "Previous" column in diff view.
     pub previous: bool,
     /// Show the "Next" column in diff view.
     pub next: bool,
-}
-
-impl ColumnVisibility {
-    /// Create with both columns visible.
-    pub const fn both() -> Self {
-        Self { previous: true, next: true }
-    }
 }
 
 /// Application state.
@@ -64,14 +57,6 @@ pub struct App {
 }
 
 impl App {
-    /// Create a new app instance.
-    pub fn new() -> Self {
-        Self {
-            columns: ColumnVisibility::both(),
-            ..Self::default()
-        }
-    }
-
     /// Get all selectable items as a flat list.
     pub fn selectable_items(&self) -> Vec<SelectableItem> {
         let mut items = Vec::new();

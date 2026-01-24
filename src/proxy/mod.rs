@@ -20,7 +20,7 @@ use service::{DeferredService, InterceptService};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
-    error::{Error, Result},
+    error::{Error, LspError, Result},
     lean_rpc::RpcClient,
     tui_ipc::{CommandHandler, SocketServer},
 };
@@ -94,13 +94,13 @@ pub async fn run() -> Result<()> {
     tokio::select! {
         result = client_task => {
             result
-                .map_err(|e| Error::Lsp(e.to_string()))?
-                .map_err(|e| Error::Lsp(e.to_string()))?;
+                .map_err(|e| Error::Lsp(LspError::RpcError { code: None, message: e.to_string() }))?
+                .map_err(|e| Error::Lsp(LspError::RpcError { code: None, message: e.to_string() }))?;
         }
         result = server_task => {
             result
-                .map_err(|e| Error::Lsp(e.to_string()))?
-                .map_err(|e| Error::Lsp(e.to_string()))?;
+                .map_err(|e| Error::Lsp(LspError::RpcError { code: None, message: e.to_string() }))?
+                .map_err(|e| Error::Lsp(LspError::RpcError { code: None, message: e.to_string() }))?;
         }
     }
 
@@ -116,14 +116,18 @@ fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::Chi
         .stderr(Stdio::inherit())
         .spawn()?;
 
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| Error::Lsp("Failed to capture lake serve stdin".to_string()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| Error::Lsp("Failed to capture lake serve stdout".to_string()))?;
+    let stdin = child.stdin.take().ok_or_else(|| {
+        Error::Lsp(LspError::RpcError {
+            code: None,
+            message: "Failed to capture lake serve stdin".to_string(),
+        })
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        Error::Lsp(LspError::RpcError {
+            code: None,
+            message: "Failed to capture lake serve stdout".to_string(),
+        })
+    })?;
 
     Ok((stdin, stdout))
 }
