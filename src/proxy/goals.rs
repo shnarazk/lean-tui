@@ -1,11 +1,13 @@
-//! Goal fetching operations using Lean RPC.
+//! Asynchronous goal fetching and broadcasting.
 
 use std::sync::Arc;
 
 use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 
-use super::RpcClient;
-use crate::tui_ipc::{CursorInfo, Position as TuiPosition, SocketServer};
+use crate::{
+    lean_rpc::RpcClient,
+    tui_ipc::{CursorInfo, Position as TuiPosition, SocketServer},
+};
 
 /// Spawn a task to fetch goals and broadcast results or errors.
 pub fn spawn_goal_fetch(

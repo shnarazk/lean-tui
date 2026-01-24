@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::lake_ipc::Goal;
+use crate::lean_rpc::Goal;
 
 pub const SOCKET_PATH: &str = "/tmp/lean-tui.sock";
 

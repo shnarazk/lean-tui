@@ -1,4 +1,4 @@
-//! LSP service interceptor for cursor tracking and goal fetching.
+//! LSP service implementations for message interception and forwarding.
 
 use std::{
     ops::ControlFlow,
@@ -10,21 +10,21 @@ use std::{
 use async_lsp::{AnyEvent, AnyNotification, AnyRequest, LspService};
 use futures::Future;
 
-use super::cursor_extractor::{extract_cursor, extract_cursor_from_notification};
-use crate::{
-    lake_ipc::{spawn_goal_fetch, RpcClient},
-    tui_ipc::SocketServer,
+use super::{
+    cursor::{extract_cursor_from_notification, extract_cursor_from_request},
+    goals::spawn_goal_fetch,
 };
+use crate::{lean_rpc::RpcClient, tui_ipc::SocketServer};
 
 /// Intercepts LSP messages, extracts cursor position, and forwards to inner
 /// service.
-pub struct Intercept<S> {
+pub struct InterceptService<S> {
     pub service: S,
     pub socket_server: Arc<SocketServer>,
     pub rpc_client: Option<Arc<RpcClient>>,
 }
 
-impl<S: LspService> Intercept<S> {
+impl<S: LspService> InterceptService<S> {
     pub const fn new(
         service: S,
         socket_server: Arc<SocketServer>,
@@ -38,7 +38,7 @@ impl<S: LspService> Intercept<S> {
     }
 
     fn handle_request(&self, req: &AnyRequest) {
-        if let Some(cursor) = extract_cursor(req) {
+        if let Some(cursor) = extract_cursor_from_request(req) {
             let _span = tracing::info_span!(
                 "cursor",
                 file = cursor.filename(),
@@ -76,7 +76,7 @@ impl<S: LspService> Intercept<S> {
     }
 }
 
-impl<S: LspService> tower_service::Service<AnyRequest> for Intercept<S>
+impl<S: LspService> tower_service::Service<AnyRequest> for InterceptService<S>
 where
     S::Future: Send + 'static,
 {
@@ -95,7 +95,7 @@ where
     }
 }
 
-impl<S: LspService> LspService for Intercept<S>
+impl<S: LspService> LspService for InterceptService<S>
 where
     S::Future: Send + 'static,
 {
@@ -106,5 +106,45 @@ where
 
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<async_lsp::Result<()>> {
         self.service.emit(event)
+    }
+}
+
+/// Wrapper for deferred service initialization.
+/// Used when the inner service isn't available at construction time.
+pub struct DeferredService<S>(pub Option<S>);
+
+impl<S: LspService> tower_service::Service<AnyRequest> for DeferredService<S> {
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
+        self.0
+            .as_mut()
+            .expect("DeferredService must be initialized before use")
+            .poll_ready(cx)
+    }
+
+    fn call(&mut self, req: AnyRequest) -> Self::Future {
+        self.0
+            .as_mut()
+            .expect("DeferredService must be initialized before use")
+            .call(req)
+    }
+}
+
+impl<S: LspService> LspService for DeferredService<S> {
+    fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
+        self.0
+            .as_mut()
+            .expect("DeferredService must be initialized before use")
+            .notify(notif)
+    }
+
+    fn emit(&mut self, event: AnyEvent) -> ControlFlow<async_lsp::Result<()>> {
+        self.0
+            .as_mut()
+            .expect("DeferredService must be initialized before use")
+            .emit(event)
     }
 }

@@ -1,6 +1,6 @@
 mod error;
-mod lake_ipc;
-mod lake_lsp_proxy;
+mod lean_rpc;
+mod proxy;
 mod tui;
 mod tui_ipc;
 
@@ -43,7 +43,7 @@ async fn main() {
     }
 
     let result = match cli.command {
-        Commands::Serve => lake_lsp_proxy::run().await,
+        Commands::Serve => proxy::run().await,
         Commands::Tui => tui::run(),
     };
 

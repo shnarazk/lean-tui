@@ -80,7 +80,7 @@ fn render_goals(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(content, area);
 }
 
-fn render_goal(lines: &mut Vec<Line<'_>>, goal: &crate::lake_ipc::Goal, goal_idx: usize, selection: Option<&SelectableItem>) {
+fn render_goal(lines: &mut Vec<Line<'_>>, goal: &crate::lean_rpc::Goal, goal_idx: usize, selection: Option<&SelectableItem>) {
     // Goal header
     lines.push(
         Line::from(format!("Goal {}:", goal_idx + 1)).style(
@@ -106,7 +106,7 @@ fn render_goal(lines: &mut Vec<Line<'_>>, goal: &crate::lake_ipc::Goal, goal_idx
     lines.push(Line::from(""));
 }
 
-fn render_hypothesis_line(hyp: &crate::lake_ipc::Hypothesis, is_selected: bool) -> Line<'static> {
+fn render_hypothesis_line(hyp: &crate::lean_rpc::Hypothesis, is_selected: bool) -> Line<'static> {
     let names = hyp.names.join(", ");
     let style = selected_style(is_selected, Color::White);
     let prefix = selection_prefix(is_selected);

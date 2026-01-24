@@ -5,11 +5,9 @@
 //! - `$/lean/rpc/keepAlive` - maintain session
 //! - `$/lean/rpc/call` - invoke Lean methods like `getInteractiveGoals`
 
-mod goal_fetcher;
-mod rpc_client;
+mod client;
 
-pub use goal_fetcher::spawn_goal_fetch;
-pub use rpc_client::RpcClient;
+pub use client::RpcClient;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -149,4 +147,3 @@ impl InteractiveGoalsResponse {
 pub const RPC_CONNECT: &str = "$/lean/rpc/connect";
 pub const RPC_CALL: &str = "$/lean/rpc/call";
 pub const GET_INTERACTIVE_GOALS: &str = "Lean.Widget.getInteractiveGoals";
-pub const GET_GO_TO_LOCATION: &str = "Lean.Widget.getGoToLocation";

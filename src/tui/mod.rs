@@ -1,7 +1,6 @@
 //! TUI module for displaying Lean proof goals.
 
 mod app;
-mod socket;
 mod ui;
 
 use std::{io::stdout, time::Duration};
@@ -13,10 +12,9 @@ use crossterm::{
     ExecutableCommand,
 };
 use ratatui::prelude::*;
-use socket::spawn_socket_handler;
 use ui::render;
 
-use crate::error::Result;
+use crate::{error::Result, tui_ipc::spawn_socket_handler};
 
 /// Run the TUI application.
 pub fn run() -> Result<()> {

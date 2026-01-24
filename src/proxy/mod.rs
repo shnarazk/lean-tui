@@ -1,39 +1,30 @@
-//! LSP proxy orchestration: spawning lake serve and managing bidirectional
-//! communication.
+//! LSP proxy that sits between editor and lake serve.
+//!
+//! Architecture:
+//! ```text
+//! Editor ↔ [Service] ↔ lake serve
+//!             ↓
+//!        SocketServer → TUI clients
+//! ```
+
+mod commands;
+mod cursor;
+mod goals;
+mod service;
 
 use std::{process::Stdio, sync::Arc};
 
 use async_lsp::MainLoop;
-use tokio::process::Command;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use super::{forward::Forward, intercept::Intercept};
 use crate::{
     error::{Error, Result},
-    lake_ipc::RpcClient,
+    lean_rpc::RpcClient,
     tui_ipc::{CommandHandler, SocketServer},
 };
 
-/// Spawn lake serve child process.
-fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
-    let mut child = Command::new("lake")
-        .arg("serve")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| Error::Lsp("Failed to capture lake serve stdin".to_string()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| Error::Lsp("Failed to capture lake serve stdout".to_string()))?;
-
-    Ok((stdin, stdout))
-}
+use commands::process_command;
+use service::{DeferredService, InterceptService};
 
 /// Run the LSP proxy: editor ↔ lean-tui ↔ lake serve.
 pub async fn run() -> Result<()> {
@@ -42,15 +33,16 @@ pub async fn run() -> Result<()> {
     let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
     // Client-side: lean-tui → lake serve
-    let (mut client_mainloop, server_socket) =
-        MainLoop::new_client(|_| Intercept::new(Forward(None), socket_server.clone(), None));
+    let (mut client_mainloop, server_socket) = MainLoop::new_client(|_| {
+        InterceptService::new(DeferredService(None), socket_server.clone(), None)
+    });
 
     // Create RPC client from server socket
     let rpc_client = Arc::new(RpcClient::new(server_socket.clone()));
 
     // Server-side: editor → lean-tui
     let (server_mainloop, client_socket) = MainLoop::new_server(|_| {
-        Intercept::new(
+        InterceptService::new(
             server_socket,
             socket_server.clone(),
             Some(rpc_client.clone()),
@@ -63,10 +55,13 @@ pub async fn run() -> Result<()> {
     // Create command handler to process TUI commands
     let (cmd_handler, cmd_tx) = CommandHandler::new(client_socket.clone());
 
-    // Forward commands from socket server to command handler
+    // Forward commands from socket server to command handler,
+    // intercepting GetHypothesisLocation to do RPC lookup first
+    let rpc_for_commands = rpc_client.clone();
     tokio::spawn(async move {
         let mut cmd_rx = cmd_rx;
         while let Some(cmd) = cmd_rx.recv().await {
+            let cmd = process_command(cmd, &rpc_for_commands).await;
             if cmd_tx.send(cmd).await.is_err() {
                 break;
             }
@@ -109,4 +104,25 @@ pub async fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Spawn lake serve child process.
+fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
+    let mut child = tokio::process::Command::new("lake")
+        .arg("serve")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| Error::Lsp("Failed to capture lake serve stdin".to_string()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| Error::Lsp("Failed to capture lake serve stdout".to_string()))?;
+
+    Ok((stdin, stdout))
 }

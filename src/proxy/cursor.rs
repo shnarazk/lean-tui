@@ -28,7 +28,7 @@ const POSITION_METHODS: &[&str] = &[
 
 /// Extract cursor position from LSP requests that contain
 /// `TextDocumentPositionParams`.
-pub fn extract_cursor(req: &AnyRequest) -> Option<CursorInfo> {
+pub fn extract_cursor_from_request(req: &AnyRequest) -> Option<CursorInfo> {
     POSITION_METHODS
         .contains(&req.method.as_str())
         .then(|| {

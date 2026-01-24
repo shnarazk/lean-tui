@@ -1,8 +1,19 @@
 //! Inter-process communication between the LSP proxy and TUI clients.
-mod command_handler;
-mod protocol;
-mod server;
+//!
+//! This module provides:
+//! - `protocol`: Shared types for serialization over Unix socket
+//! - `proxy_endpoint`: Proxy-side server and command handler
+//! - `tui_endpoint`: TUI-side client connection
 
-pub use command_handler::CommandHandler;
+mod protocol;
+mod proxy_endpoint;
+mod tui_endpoint;
+
+// Re-export protocol types (shared between both processes)
 pub use protocol::{Command, CursorInfo, Message, Position, SOCKET_PATH};
-pub use server::SocketServer;
+
+// Re-export proxy-side types
+pub use proxy_endpoint::{CommandHandler, SocketServer};
+
+// Re-export TUI-side types
+pub use tui_endpoint::spawn_socket_handler;

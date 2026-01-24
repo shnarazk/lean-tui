@@ -4,7 +4,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::widgets::ListState;
 
 use crate::{
-    lake_ipc::Goal,
+    lean_rpc::Goal,
     tui_ipc::{Command, CursorInfo, Message, Position},
 };
 
