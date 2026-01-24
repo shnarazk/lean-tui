@@ -1,7 +1,9 @@
 //! Forward wrapper for deferred service initialization.
 
-use std::ops::ControlFlow;
-use std::task::{Context, Poll};
+use std::{
+    ops::ControlFlow,
+    task::{Context, Poll},
+};
 
 use async_lsp::{AnyEvent, AnyNotification, AnyRequest, LspService};
 

@@ -1,85 +1,53 @@
-mod draw;
+//! TUI module for displaying Lean proof goals.
+//!
+//! Architecture:
+//! - `app.rs`: Application state and event handling
+//! - `ui.rs`: UI rendering
+//! - `socket.rs`: Unix socket connection to proxy
+
+mod app;
 mod socket;
+mod ui;
 
-use std::io::stdout;
-use std::time::Duration;
+use std::{io::stdout, time::Duration};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+use app::App;
+use crossterm::{
+    event,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
 };
-use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
+use socket::spawn_socket_reader;
+use ui::render;
 
 use crate::error::Result;
-use crate::lake_ipc::Goal;
-use crate::tui_ipc::{CursorInfo, Message, Position};
-use draw::draw_ui;
-use socket::spawn_socket_reader;
 
-/// TUI application state
-#[derive(Default)]
-pub(crate) struct AppState {
-    pub cursor: CursorInfo,
-    pub goals: Vec<Goal>,
-    pub goals_position: Option<Position>,
-    pub error: Option<String>,
-    pub connected: bool,
-}
-
-impl AppState {
-    fn handle_message(&mut self, msg: Message) {
-        match msg {
-            Message::Cursor(cursor) => {
-                self.cursor = cursor;
-                self.connected = true;
-                self.error = None; // Clear errors on new cursor position
-            }
-            Message::Goals {
-                uri: _,
-                position,
-                goals,
-            } => {
-                self.goals = goals;
-                self.goals_position = Some(position);
-                self.connected = true;
-                self.error = None; // Clear errors on successful goals
-            }
-            Message::Error { error } => {
-                self.error = Some(error);
-                self.connected = true;
-            }
-        }
-    }
-}
-
-pub async fn run() -> Result<()> {
-    // Set up terminal
+/// Run the TUI application.
+pub fn run() -> Result<()> {
+    // Initialize terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    // Spawn socket reader task and get receiver
+    // Spawn socket reader and create app
     let mut rx = spawn_socket_reader();
+    let mut app = App::new();
 
-    let mut state = AppState::default();
-
-    loop {
-        // Process all pending messages
+    // Main event loop
+    while !app.should_exit {
+        // Process all pending messages from proxy
         while let Ok(msg) = rx.try_recv() {
-            state.handle_message(msg);
+            app.handle_message(msg);
         }
 
-        // Draw UI
-        terminal.draw(|frame| draw_ui(frame, &state))?;
+        // Render UI
+        terminal.draw(|frame| render(frame, &app))?;
 
-        // Handle input (with timeout for responsiveness)
+        // Poll for terminal events
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') {
-                    break;
-                }
-            }
+            let event = event::read()?;
+            app.handle_event(&event);
         }
     }
 

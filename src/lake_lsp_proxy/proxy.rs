@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// Spawn lake serve child process.
-async fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
+fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
     let mut child = Command::new("lake")
         .arg("serve")
         .stdin(Stdio::piped())
@@ -40,7 +40,7 @@ pub async fn run() -> Result<()> {
     let broadcaster = Arc::new(Broadcaster::new());
     broadcaster.clone().start_listener();
 
-    let (child_stdin, child_stdout) = spawn_lake_serve().await?;
+    let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
     // Client-side: lean-tui → lake serve
     let (mut client_mainloop, server_socket) =

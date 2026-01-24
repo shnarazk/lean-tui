@@ -25,7 +25,7 @@ pub struct Intercept<S> {
 }
 
 impl<S: LspService> Intercept<S> {
-    pub fn new(
+    pub const fn new(
         service: S,
         broadcaster: Arc<Broadcaster>,
         rpc_client: Option<Arc<RpcClient>>,
@@ -38,7 +38,7 @@ impl<S: LspService> Intercept<S> {
     }
 
     fn handle_request(&self, req: &AnyRequest) {
-        extract_cursor(req).iter().for_each(|cursor| {
+        if let Some(cursor) = extract_cursor(req) {
             let _span = tracing::info_span!(
                 "cursor",
                 file = cursor.filename(),
@@ -51,30 +51,28 @@ impl<S: LspService> Intercept<S> {
             self.broadcaster.broadcast_cursor(cursor.clone());
 
             if let Some(rpc) = &self.rpc_client {
-                spawn_goal_fetch(cursor, &self.broadcaster, rpc);
+                spawn_goal_fetch(&cursor, &self.broadcaster, rpc);
             }
-        });
+        }
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
-        extract_cursor_from_notification(notif)
-            .iter()
-            .for_each(|cursor| {
-                let _span = tracing::info_span!(
-                    "cursor",
-                    file = cursor.filename(),
-                    line = cursor.line(),
-                    char = cursor.character()
-                )
-                .entered();
-                tracing::info!("cursor position");
+        if let Some(cursor) = extract_cursor_from_notification(notif) {
+            let _span = tracing::info_span!(
+                "cursor",
+                file = cursor.filename(),
+                line = cursor.line(),
+                char = cursor.character()
+            )
+            .entered();
+            tracing::info!("cursor position");
 
-                self.broadcaster.broadcast_cursor(cursor.clone());
+            self.broadcaster.broadcast_cursor(cursor.clone());
 
-                if let Some(rpc) = &self.rpc_client {
-                    spawn_goal_fetch(cursor, &self.broadcaster, rpc);
-                }
-            });
+            if let Some(rpc) = &self.rpc_client {
+                spawn_goal_fetch(&cursor, &self.broadcaster, rpc);
+            }
+        }
     }
 }
 

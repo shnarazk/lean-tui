@@ -44,7 +44,7 @@ async fn main() {
 
     let result = match cli.command {
         Commands::Serve => lake_lsp_proxy::run().await,
-        Commands::Tui => tui::run().await,
+        Commands::Tui => tui::run(),
     };
 
     if let Err(e) = result {

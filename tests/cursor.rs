@@ -1,7 +1,8 @@
 mod common;
 
-use common::LspTestHarness;
 use std::time::Duration;
+
+use common::LspTestHarness;
 
 #[test]
 fn test_did_change_logs_cursor_position() {

@@ -1,8 +1,6 @@
-use std::path::Path;
-use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
-use tokio::net::UnixListener;
-use tokio::sync::broadcast;
+use std::{path::Path, sync::Arc};
+
+use tokio::{io::AsyncWriteExt, net::UnixListener, sync::broadcast};
 
 use super::message::{CursorInfo, Message, Position, SOCKET_PATH};
 use crate::lake_ipc::Goal;

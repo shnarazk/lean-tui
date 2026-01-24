@@ -1,14 +1,16 @@
 //! Cursor position extraction from LSP messages.
 
-use async_lsp::lsp_types::{
-    self,
-    notification::DidChangeTextDocument,
-    request::{
-        Completion, DocumentHighlightRequest, GotoDefinition, GotoImplementation,
-        GotoTypeDefinition, HoverRequest, References, SignatureHelpRequest,
+use async_lsp::{
+    lsp_types::{
+        self,
+        notification::DidChangeTextDocument,
+        request::{
+            Completion, DocumentHighlightRequest, GotoDefinition, GotoImplementation,
+            GotoTypeDefinition, HoverRequest, References, SignatureHelpRequest,
+        },
     },
+    AnyNotification, AnyRequest,
 };
-use async_lsp::{AnyNotification, AnyRequest};
 
 use crate::tui_ipc::CursorInfo;
 
@@ -24,7 +26,8 @@ const POSITION_METHODS: &[&str] = &[
     <Completion as lsp_types::request::Request>::METHOD,
 ];
 
-/// Extract cursor position from LSP requests that contain `TextDocumentPositionParams`.
+/// Extract cursor position from LSP requests that contain
+/// `TextDocumentPositionParams`.
 pub fn extract_cursor(req: &AnyRequest) -> Option<CursorInfo> {
     POSITION_METHODS
         .contains(&req.method.as_str())

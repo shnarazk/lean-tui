@@ -90,7 +90,7 @@ impl RpcClient {
         }
     }
 
-    fn start_keepalive() {
+    const fn start_keepalive() {
         // TODO: Implement keepalive once we figure out how to send raw
         // notifications with ServerSocket. For now, sessions will time
         // out after ~60s without keepalive, but we'll reconnect

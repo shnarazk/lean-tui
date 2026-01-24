@@ -1,8 +1,10 @@
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::net::UnixStream;
-use tokio::sync::mpsc;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::UnixStream,
+    sync::mpsc,
+};
 
 use crate::tui_ipc::{Message, SOCKET_PATH};
 

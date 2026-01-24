@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::time::Duration;
+use std::{
+    io::{BufRead, BufReader, Write},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
+    time::Duration,
+};
 
 pub struct LspTestHarness {
     child: Option<Child>,
