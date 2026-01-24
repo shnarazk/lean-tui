@@ -1,7 +1,7 @@
 //! Application state and event handling.
 
-use crossterm::event::{Event, KeyCode, KeyEventKind};
-use ratatui::widgets::ListState;
+use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
+use ratatui::{layout::Rect, widgets::ListState};
 
 use crate::{
     lean_rpc::Goal,
@@ -13,6 +13,13 @@ use crate::{
 pub enum SelectableItem {
     Hypothesis { goal_idx: usize, hyp_idx: usize },
     GoalTarget { goal_idx: usize },
+}
+
+/// A clickable region mapped to a selectable item.
+#[derive(Debug, Clone)]
+pub struct ClickRegion {
+    pub area: Rect,
+    pub item: SelectableItem,
 }
 
 /// Application state.
@@ -34,6 +41,8 @@ pub struct App {
     pub should_exit: bool,
     /// Pending navigation command to send.
     pub pending_navigation: Option<Command>,
+    /// Click regions for mouse interaction (updated each render).
+    pub click_regions: Vec<ClickRegion>,
 }
 
 impl App {
@@ -121,39 +130,70 @@ impl App {
 
     /// Handle terminal event. Returns true if event was handled.
     pub fn handle_event(&mut self, event: &Event) -> bool {
-        if let Event::Key(key) = event {
-            if key.kind != KeyEventKind::Press {
-                return false;
+        match event {
+            Event::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    return false;
+                }
+                match key.code {
+                    KeyCode::Char('q') => {
+                        self.should_exit = true;
+                        true
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.select_next();
+                        true
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.select_previous();
+                        true
+                    }
+                    KeyCode::Enter => {
+                        self.navigate_to_selection();
+                        true
+                    }
+                    _ => false,
+                }
             }
-            match key.code {
-                KeyCode::Char('q') => {
-                    self.should_exit = true;
-                    true
+            Event::Mouse(mouse) => {
+                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                    self.handle_click(mouse.column, mouse.row)
+                } else {
+                    false
                 }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.select_next();
-                    true
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.select_previous();
-                    true
-                }
-                KeyCode::Enter => {
-                    self.navigate_to_selection();
-                    true
-                }
-                _ => false,
             }
-        } else {
-            false
+            _ => false,
         }
+    }
+
+    /// Handle mouse click at given coordinates.
+    fn handle_click(&mut self, x: u16, y: u16) -> bool {
+        // Find which item was clicked
+        for region in &self.click_regions {
+            if region.area.x <= x
+                && x < region.area.x + region.area.width
+                && region.area.y <= y
+                && y < region.area.y + region.area.height
+            {
+                // Find index of this item
+                let items = self.selectable_items();
+                if let Some(idx) = items.iter().position(|item| *item == region.item) {
+                    self.list_state.select(Some(idx));
+                    // Navigate immediately on click
+                    self.navigate_to_selection();
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Navigate to the currently selected item.
     ///
-    /// For hypotheses with `info` (from `SubexprInfo`), sends a `GetHypothesisLocation`
-    /// command to look up the actual definition location via `getGoToLocation` RPC.
-    /// Falls back to `goals_position` if no info is available.
+    /// For hypotheses with `info` (from `SubexprInfo`), sends a
+    /// `GetHypothesisLocation` command to look up the actual definition
+    /// location via `getGoToLocation` RPC. Falls back to `goals_position`
+    /// if no info is available.
     fn navigate_to_selection(&mut self) {
         let Some(selection) = self.current_selection() else {
             return;

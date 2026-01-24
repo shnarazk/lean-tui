@@ -1,16 +1,16 @@
 //! UI rendering for the TUI.
 
 use ratatui::{
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
 
-use super::app::{App, SelectableItem};
+use super::app::{App, ClickRegion, SelectableItem};
 use crate::tui_ipc::SOCKET_PATH;
 
 /// Render the UI.
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let [main_area, help_area] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
@@ -19,7 +19,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 /// Render the main content area.
-fn render_main(frame: &mut Frame, app: &App, area: Rect) {
+fn render_main(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title(" lean-tui ")
         .borders(Borders::ALL)
@@ -59,20 +59,46 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Render goals and hypotheses.
-fn render_goals(frame: &mut Frame, app: &App, area: Rect) {
+fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Clear previous click regions
+    app.click_regions.clear();
+
     let mut lines: Vec<Line> = Vec::new();
+    let mut click_items: Vec<Option<SelectableItem>> = Vec::new();
 
     if let Some(error) = &app.error {
         lines.push(Line::from(format!("Error: {error}")).style(Style::default().fg(Color::Red)));
+        click_items.push(None);
         lines.push(Line::from(""));
+        click_items.push(None);
     }
 
     if app.goals.is_empty() {
         lines.push(Line::from("No goals").style(Style::default().fg(Color::DarkGray)));
+        click_items.push(None);
     } else {
         let selection = app.current_selection();
         for (goal_idx, goal) in app.goals.iter().enumerate() {
-            render_goal(&mut lines, goal, goal_idx, selection.as_ref());
+            render_goal(
+                &mut lines,
+                &mut click_items,
+                goal,
+                goal_idx,
+                selection.as_ref(),
+            );
+        }
+    }
+
+    // Record click regions based on line positions
+    for (line_idx, item) in click_items.into_iter().enumerate() {
+        if let Some(selectable) = item {
+            let line_y = area.y + line_idx as u16;
+            if line_y < area.y + area.height {
+                app.click_regions.push(ClickRegion {
+                    area: Rect::new(area.x, line_y, area.width, 1),
+                    item: selectable,
+                });
+            }
         }
     }
 
@@ -80,8 +106,14 @@ fn render_goals(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(content, area);
 }
 
-fn render_goal(lines: &mut Vec<Line<'_>>, goal: &crate::lean_rpc::Goal, goal_idx: usize, selection: Option<&SelectableItem>) {
-    // Goal header
+fn render_goal(
+    lines: &mut Vec<Line<'_>>,
+    click_items: &mut Vec<Option<SelectableItem>>,
+    goal: &crate::lean_rpc::Goal,
+    goal_idx: usize,
+    selection: Option<&SelectableItem>,
+) {
+    // Goal header (not clickable)
     lines.push(
         Line::from(format!("Goal {}:", goal_idx + 1)).style(
             Style::default()
@@ -89,21 +121,26 @@ fn render_goal(lines: &mut Vec<Line<'_>>, goal: &crate::lean_rpc::Goal, goal_idx
                 .add_modifier(Modifier::BOLD),
         ),
     );
+    click_items.push(None);
 
-    // Hypotheses
+    // Hypotheses (clickable)
     for (hyp_idx, hyp) in goal.hyps.iter().enumerate() {
         let is_selected = selection == Some(&SelectableItem::Hypothesis { goal_idx, hyp_idx });
         let line = render_hypothesis_line(hyp, is_selected);
         lines.push(line);
+        click_items.push(Some(SelectableItem::Hypothesis { goal_idx, hyp_idx }));
     }
 
-    // Goal target
+    // Goal target (clickable)
     let is_target_selected = selection == Some(&SelectableItem::GoalTarget { goal_idx });
     let target_style = selected_style(is_target_selected, Color::Cyan);
     let prefix = selection_prefix(is_target_selected);
     lines.push(Line::from(format!("{prefix}⊢ {}", goal.target)).style(target_style));
+    click_items.push(Some(SelectableItem::GoalTarget { goal_idx }));
 
+    // Empty line (not clickable)
     lines.push(Line::from(""));
+    click_items.push(None);
 }
 
 fn render_hypothesis_line(hyp: &crate::lean_rpc::Hypothesis, is_selected: bool) -> Line<'static> {
@@ -122,7 +159,11 @@ const fn selected_style(is_selected: bool, fg_color: Color) -> Style {
 }
 
 const fn selection_prefix(is_selected: bool) -> &'static str {
-    if is_selected { "▶ " } else { "  " }
+    if is_selected {
+        "▶ "
+    } else {
+        "  "
+    }
 }
 
 /// Render the help bar at the bottom.
@@ -130,7 +171,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
     let help = Line::from(vec![
         Span::styled("j/k", Style::default().fg(Color::Cyan)),
         Span::raw(": navigate  "),
-        Span::styled("Enter", Style::default().fg(Color::Cyan)),
+        Span::styled("Enter/Click", Style::default().fg(Color::Cyan)),
         Span::raw(": go to  "),
         Span::styled("q", Style::default().fg(Color::Cyan)),
         Span::raw(": quit"),

@@ -2,7 +2,10 @@
 
 use async_lsp::lsp_types::TextDocumentIdentifier;
 
-use crate::{lean_rpc::RpcClient, tui_ipc::Command};
+use crate::{
+    lean_rpc::{GoToKind, RpcClient},
+    tui_ipc::Command,
+};
 
 /// Process a command from TUI, potentially doing RPC lookups.
 /// Returns a (possibly modified) command to forward to the handler.
@@ -12,11 +15,11 @@ pub async fn process_command(cmd: Command, rpc_client: &RpcClient) -> Command {
             uri,
             line,
             character,
-            info: _,
+            info,
         } => {
-            // Use standard textDocument/definition LSP method.
-            // This has access to the full InfoTree and can resolve binder locations
-            // (where a hypothesis was introduced by `intro`, `fun`, etc.).
+            // Use Lean's getGoToLocation RPC with the InfoWithCtx reference.
+            // This can resolve hypothesis locations even though they don't exist
+            // at the cursor position in the source text.
             let Ok(url) = async_lsp::lsp_types::Url::parse(uri) else {
                 tracing::error!("Invalid URI: {uri}");
                 return cmd;
@@ -25,7 +28,10 @@ pub async fn process_command(cmd: Command, rpc_client: &RpcClient) -> Command {
             let text_document = TextDocumentIdentifier { uri: url };
             let position = async_lsp::lsp_types::Position::new(*line, *character);
 
-            match rpc_client.get_definition(&text_document, position).await {
+            match rpc_client
+                .get_goto_location(&text_document, position, GoToKind::Definition, info.clone())
+                .await
+            {
                 Ok(Some(location)) => {
                     tracing::info!(
                         "Resolved hypothesis location to {}:{}:{}",
@@ -44,7 +50,7 @@ pub async fn process_command(cmd: Command, rpc_client: &RpcClient) -> Command {
                     cmd
                 }
                 Err(e) => {
-                    tracing::error!("textDocument/definition failed: {e}");
+                    tracing::error!("getGoToLocation failed: {e}");
                     cmd
                 }
             }

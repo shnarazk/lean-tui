@@ -190,7 +190,9 @@ impl CommandHandler {
                 // Note: The actual RPC lookup using getGoToLocation happens in
                 // the proxy module before the command reaches here. If we receive
                 // this command, it means the lookup failed or returned the fallback.
-                tracing::info!("GetHypothesisLocation fallback: navigating to {uri}:{line}:{character}");
+                tracing::info!(
+                    "GetHypothesisLocation fallback: navigating to {uri}:{line}:{character}"
+                );
                 self.send_show_document(&uri, line, character).await;
             }
         }

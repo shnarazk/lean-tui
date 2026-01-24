@@ -7,7 +7,7 @@
 
 mod client;
 
-pub use client::RpcClient;
+pub use client::{GoToKind, RpcClient};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -147,3 +147,4 @@ impl InteractiveGoalsResponse {
 pub const RPC_CONNECT: &str = "$/lean/rpc/connect";
 pub const RPC_CALL: &str = "$/lean/rpc/call";
 pub const GET_INTERACTIVE_GOALS: &str = "Lean.Widget.getInteractiveGoals";
+pub const GET_GOTO_LOCATION: &str = "Lean.Widget.getGoToLocation";

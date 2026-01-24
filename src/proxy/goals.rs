@@ -31,11 +31,7 @@ pub fn spawn_goal_fetch(
 
         match rpc.get_goals(&text_document, position).await {
             Ok(goals) => {
-                socket_server.broadcast_goals(
-                    uri_string,
-                    TuiPosition { line, character },
-                    goals,
-                );
+                socket_server.broadcast_goals(uri_string, TuiPosition { line, character }, goals);
             }
             Err(e) => {
                 tracing::warn!("Could not fetch goals at {uri_string}:{line}:{character}: {e}");

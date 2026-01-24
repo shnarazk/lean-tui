@@ -11,9 +11,7 @@ mod tui_endpoint;
 
 // Re-export protocol types (shared between both processes)
 pub use protocol::{Command, CursorInfo, Message, Position, SOCKET_PATH};
-
 // Re-export proxy-side types
 pub use proxy_endpoint::{CommandHandler, SocketServer};
-
 // Re-export TUI-side types
 pub use tui_endpoint::spawn_socket_handler;

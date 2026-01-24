@@ -6,18 +6,16 @@ use std::{
 };
 
 use async_lsp::{lsp_types, ServerSocket};
-use lsp_types::{
-    GotoDefinitionParams, LocationLink, Position, TextDocumentIdentifier,
-    TextDocumentPositionParams, Url,
-};
+use lsp_types::{LocationLink, Position, TextDocumentIdentifier, Url};
 use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Mutex;
 use tower_service::Service;
 
-use super::{Goal, InteractiveGoalsResponse, RpcConnectResponse, GET_INTERACTIVE_GOALS, RPC_CALL, RPC_CONNECT};
-
-const TEXTDOCUMENT_DEFINITION: &str = "textDocument/definition";
+use super::{
+    Goal, InteractiveGoalsResponse, RpcConnectResponse, GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS,
+    RPC_CALL, RPC_CONNECT,
+};
 
 /// Lean RPC connect request parameters.
 #[derive(Serialize)]
@@ -44,6 +42,29 @@ struct GetInteractiveGoalsParams {
     position: Position,
 }
 
+/// Navigation target kind for `Lean.Widget.getGoToLocation`.
+///
+/// Specifies what location to navigate to when looking up a symbol.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // Declaration and Type are documented for completeness
+pub enum GoToKind {
+    /// Navigate to the declaration site (where the symbol is first declared).
+    Declaration,
+    /// Navigate to the definition site (where the symbol is
+    /// defined/implemented).
+    Definition,
+    /// Navigate to the type of the expression.
+    Type,
+}
+
+/// Parameters for `Lean.Widget.getGoToLocation` inner call.
+#[derive(Serialize, Clone)]
+struct GetGoToLocationParams {
+    kind: GoToKind,
+    info: serde_json::Value,
+}
+
 /// RPC client that manages sessions and sends requests to lake serve.
 pub struct RpcClient {
     socket: ServerSocket,
@@ -66,7 +87,11 @@ impl RpcClient {
     }
 
     /// Send an LSP request and return the response.
-    async fn request(&self, method: &str, params: impl Serialize) -> Result<serde_json::Value, String> {
+    async fn request(
+        &self,
+        method: &str,
+        params: impl Serialize,
+    ) -> Result<serde_json::Value, String> {
         let id = self.next_request_id();
         let request_json = json!({ "id": id, "method": method, "params": params });
         let request: async_lsp::AnyRequest =
@@ -81,7 +106,9 @@ impl RpcClient {
 
     /// Connect to RPC for a given file URI. Returns session ID on success.
     async fn connect(&self, uri: &Url) -> Result<String, String> {
-        let params = RpcConnectParams { uri: uri.to_string() };
+        let params = RpcConnectParams {
+            uri: uri.to_string(),
+        };
         let response = self.request(RPC_CONNECT, params).await?;
 
         let resp: RpcConnectResponse =
@@ -90,7 +117,10 @@ impl RpcClient {
         let session_id = resp.session_id;
         tracing::info!("RPC session for {uri}: {session_id}");
 
-        self.sessions.lock().await.insert(uri.to_string(), session_id.clone());
+        self.sessions
+            .lock()
+            .await
+            .insert(uri.to_string(), session_id.clone());
         Ok(session_id)
     }
 
@@ -147,7 +177,13 @@ impl RpcClient {
         };
 
         let result = self
-            .rpc_call(uri, text_document, position, GET_INTERACTIVE_GOALS, inner_params.clone())
+            .rpc_call(
+                uri,
+                text_document,
+                position,
+                GET_INTERACTIVE_GOALS,
+                inner_params.clone(),
+            )
             .await;
 
         // Retry once on session expiry
@@ -156,13 +192,65 @@ impl RpcClient {
             Err(e) if Self::is_session_expired(&e) => {
                 tracing::info!("Session expired, reconnecting...");
                 self.invalidate_session(uri).await;
-                self.rpc_call(uri, text_document, position, GET_INTERACTIVE_GOALS, inner_params)
-                    .await?
+                self.rpc_call(
+                    uri,
+                    text_document,
+                    position,
+                    GET_INTERACTIVE_GOALS,
+                    inner_params,
+                )
+                .await?
             }
             Err(e) => return Err(e),
         };
 
         Self::parse_goals_response(&response)
+    }
+
+    /// Get location using Lean's widget RPC (for hypothesis navigation).
+    /// Uses `Lean.Widget.getGoToLocation` with an `InfoWithCtx` reference.
+    pub async fn get_goto_location(
+        &self,
+        text_document: &TextDocumentIdentifier,
+        position: Position,
+        kind: GoToKind,
+        info: serde_json::Value,
+    ) -> Result<Option<LocationLink>, String> {
+        let uri = &text_document.uri;
+        let inner_params = GetGoToLocationParams {
+            kind,
+            info: info.clone(),
+        };
+
+        let result = self
+            .rpc_call(
+                uri,
+                text_document,
+                position,
+                GET_GOTO_LOCATION,
+                inner_params.clone(),
+            )
+            .await;
+
+        // Retry once on session expiry
+        let response = match result {
+            Ok(r) => r,
+            Err(e) if Self::is_session_expired(&e) => {
+                tracing::info!("Session expired, reconnecting...");
+                self.invalidate_session(uri).await;
+                self.rpc_call(
+                    uri,
+                    text_document,
+                    position,
+                    GET_GOTO_LOCATION,
+                    inner_params,
+                )
+                .await?
+            }
+            Err(e) => return Err(e),
+        };
+
+        Ok(Self::parse_definition_response(&response))
     }
 
     fn parse_goals_response(response: &serde_json::Value) -> Result<Vec<Goal>, String> {
@@ -180,26 +268,7 @@ impl RpcClient {
         Ok(goals)
     }
 
-    /// Get definition using standard LSP `textDocument/definition`.
-    pub async fn get_definition(
-        &self,
-        text_document: &TextDocumentIdentifier,
-        position: Position,
-    ) -> Result<Option<LocationLink>, String> {
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: text_document.clone(),
-                position,
-            },
-            work_done_progress_params: lsp_types::WorkDoneProgressParams::default(),
-            partial_result_params: lsp_types::PartialResultParams::default(),
-        };
-
-        let response = self.request(TEXTDOCUMENT_DEFINITION, params).await?;
-        Ok(Self::parse_definition_response(&response))
-    }
-
-    /// Parse `textDocument/definition` response (`Location`, `Location[]`, or `LocationLink[]`).
+    /// Parse `getGoToLocation` response (`LocationLink[]`).
     fn parse_definition_response(response: &serde_json::Value) -> Option<LocationLink> {
         if response.is_null() {
             return None;
@@ -208,7 +277,11 @@ impl RpcClient {
         // Try LocationLink[]
         if let Ok(locs) = serde_json::from_value::<Vec<LocationLink>>(response.clone()) {
             if let Some(loc) = locs.into_iter().next() {
-                tracing::info!("Definition: {}:{}", loc.target_uri, loc.target_selection_range.start.line);
+                tracing::info!(
+                    "Definition: {}:{}",
+                    loc.target_uri,
+                    loc.target_selection_range.start.line
+                );
                 return Some(loc);
             }
         }

@@ -15,6 +15,8 @@ mod service;
 use std::{process::Stdio, sync::Arc};
 
 use async_lsp::MainLoop;
+use commands::process_command;
+use service::{DeferredService, InterceptService};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
@@ -22,9 +24,6 @@ use crate::{
     lean_rpc::RpcClient,
     tui_ipc::{CommandHandler, SocketServer},
 };
-
-use commands::process_command;
-use service::{DeferredService, InterceptService};
 
 /// Run the LSP proxy: editor ↔ lean-tui ↔ lake serve.
 pub async fn run() -> Result<()> {
