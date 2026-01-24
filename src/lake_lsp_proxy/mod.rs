@@ -4,21 +4,22 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use async_lsp::{AnyEvent, AnyNotification, AnyRequest, LspService, MainLoop};
-use futures::Future;
-use lsp_types::{
-    DidChangeTextDocumentParams, TextDocumentPositionParams,
+use async_lsp::lsp_types::{
+    self,
     notification::DidChangeTextDocument,
     request::{
-        Completion, GotoDefinition, GotoTypeDefinition, GotoImplementation,
-        HoverRequest, References, DocumentHighlightRequest, SignatureHelpRequest,
+        Completion, DocumentHighlightRequest, GotoDefinition, GotoImplementation,
+        GotoTypeDefinition, HoverRequest, References, SignatureHelpRequest,
     },
 };
+use async_lsp::{AnyEvent, AnyNotification, AnyRequest, LspService, MainLoop};
+use futures::Future;
 use tokio::process::Command;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::cursor::{CursorBroadcaster, CursorInfo};
 use crate::error::Result;
+use crate::lake_ipc::RpcClient;
+use crate::tui_ipc::{Broadcaster, CursorInfo, Position};
 
 /// Forwards all LSP calls to an inner service.
 struct Forward<S>(Option<S>);
@@ -51,7 +52,8 @@ impl<S: LspService> LspService for Forward<S> {
 struct Intercept<S> {
     service: S,
     direction: &'static str,
-    broadcaster: Arc<CursorBroadcaster>,
+    broadcaster: Arc<Broadcaster>,
+    rpc_client: Option<Arc<RpcClient>>,
 }
 
 impl<S: LspService> tower_service::Service<AnyRequest> for Intercept<S>
@@ -69,14 +71,29 @@ where
     fn call(&mut self, req: AnyRequest) -> Self::Future {
         // Extract cursor position from position-containing requests
         if let Some(cursor) = extract_cursor(&req) {
-            eprintln!(
-                "[lean-tui] {} {}:{} ({})",
-                cursor.filename(),
-                cursor.line(),
-                cursor.character(),
-                cursor.method
-            );
-            self.broadcaster.broadcast_cursor(cursor);
+            let _span = tracing::info_span!(
+                "cursor",
+                file = cursor.filename(),
+                line = cursor.line(),
+                char = cursor.character(),
+                method = cursor.method.as_str()
+            )
+            .entered();
+            tracing::info!("request cursor");
+            self.broadcaster.broadcast_cursor(cursor.clone());
+
+            // Fetch goals asynchronously
+            if let Some(rpc) = &self.rpc_client {
+                let rpc = rpc.clone();
+                let broadcaster = self.broadcaster.clone();
+                let uri = cursor.uri.clone();
+                let line = cursor.line();
+                let character = cursor.character();
+                tokio::spawn(async move {
+                    let goals = rpc.get_goals(&uri, line, character).await;
+                    broadcaster.broadcast_goals(uri, Position { line, character }, goals);
+                });
+            }
         }
 
         let method = req.method.clone();
@@ -98,14 +115,29 @@ where
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
         // Extract cursor from didChange notifications (insert mode live tracking)
         if let Some(cursor) = extract_cursor_from_notification(&notif) {
-            eprintln!(
-                "[lean-tui] {} {}:{} ({})",
-                cursor.filename(),
-                cursor.line(),
-                cursor.character(),
-                cursor.method
-            );
-            self.broadcaster.broadcast_cursor(cursor);
+            let _span = tracing::info_span!(
+                "cursor",
+                file = cursor.filename(),
+                line = cursor.line(),
+                char = cursor.character(),
+                method = cursor.method.as_str()
+            )
+            .entered();
+            tracing::info!("notification cursor");
+            self.broadcaster.broadcast_cursor(cursor.clone());
+
+            // Fetch goals asynchronously
+            if let Some(rpc) = &self.rpc_client {
+                let rpc = rpc.clone();
+                let broadcaster = self.broadcaster.clone();
+                let uri = cursor.uri.clone();
+                let line = cursor.line();
+                let character = cursor.character();
+                tokio::spawn(async move {
+                    let goals = rpc.get_goals(&uri, line, character).await;
+                    broadcaster.broadcast_goals(uri, Position { line, character }, goals);
+                });
+            }
         }
 
         tracing::debug!("{} notification {}", self.direction, notif.method);
@@ -124,7 +156,8 @@ fn extract_cursor_from_notification(notif: &AnyNotification) -> Option<CursorInf
         return None;
     }
 
-    let params: DidChangeTextDocumentParams = serde_json::from_value(notif.params.clone()).ok()?;
+    let params: lsp_types::DidChangeTextDocumentParams =
+        serde_json::from_value(notif.params.clone()).ok()?;
     let uri = params.text_document.uri.to_string();
 
     // Get the first content change - its range.start is the edit position
@@ -158,7 +191,7 @@ fn extract_cursor(req: &AnyRequest) -> Option<CursorInfo> {
         return None;
     }
 
-    let params: TextDocumentPositionParams =
+    let params: lsp_types::TextDocumentPositionParams =
         serde_json::from_value(req.params.clone()).ok()?;
 
     Some(CursorInfo::new(
@@ -171,7 +204,7 @@ fn extract_cursor(req: &AnyRequest) -> Option<CursorInfo> {
 
 pub async fn run() -> Result<()> {
     // Create broadcaster for TUI clients
-    let broadcaster = Arc::new(CursorBroadcaster::new());
+    let broadcaster = Arc::new(Broadcaster::new());
     broadcaster.clone().start_listener();
 
     // Spawn lake serve as child process
@@ -191,14 +224,21 @@ pub async fn run() -> Result<()> {
         service: Forward(None),
         direction: "<-",
         broadcaster: broadcaster_client,
+        rpc_client: None, // Client-side doesn't need RPC client
     });
+
+    // Clone socket for RPC client before consuming it
+    let rpc_socket = server_socket.clone();
+    let rpc_client = Arc::new(RpcClient::new(rpc_socket));
 
     // Create server connection from editor (stdin/stdout)
     let broadcaster_server = broadcaster.clone();
+    let rpc_client_server = rpc_client.clone();
     let (server_mainloop, client_socket) = MainLoop::new_server(|_| Intercept {
         service: server_socket,
         direction: "->",
         broadcaster: broadcaster_server,
+        rpc_client: Some(rpc_client_server),
     });
 
     // Link the two sides

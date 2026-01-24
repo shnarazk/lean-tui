@@ -1,0 +1,175 @@
+//! RPC client for communicating with Lean server via `$/lean/rpc/*` methods.
+
+use std::collections::HashMap;
+use std::time::Instant;
+
+use async_lsp::ServerSocket;
+use serde_json::json;
+use tokio::sync::Mutex;
+use tower_service::Service;
+
+use super::{
+    Goal, InteractiveGoalsResponse, RpcConnectResponse, GET_INTERACTIVE_GOALS, RPC_CALL,
+    RPC_CONNECT,
+};
+
+/// Session state for a single file
+struct Session {
+    session_id: String,
+    #[allow(dead_code)]
+    last_keepalive: Instant,
+}
+
+/// RPC client that manages sessions and sends requests to lake serve.
+pub struct RpcClient {
+    socket: ServerSocket,
+    sessions: Mutex<HashMap<String, Session>>,
+    next_id: Mutex<i64>,
+}
+
+impl RpcClient {
+    pub fn new(socket: ServerSocket) -> Self {
+        Self {
+            socket,
+            sessions: Mutex::new(HashMap::new()),
+            next_id: Mutex::new(1000), // Start at 1000 to avoid conflicts with editor
+        }
+    }
+
+    async fn next_request_id(&self) -> i64 {
+        let mut id = self.next_id.lock().await;
+        let current = *id;
+        *id += 1;
+        current
+    }
+
+    /// Connect to RPC for a given file URI. Returns session ID on success.
+    pub async fn connect(&self, uri: &str) -> Option<String> {
+        let id = self.next_request_id().await;
+        let params = json!({ "uri": uri });
+
+        tracing::info!("RPC connect for {}", uri);
+
+        // Construct request via JSON to work around non-exhaustive struct
+        let request_json = json!({
+            "id": id,
+            "method": RPC_CONNECT,
+            "params": params
+        });
+        let request: async_lsp::AnyRequest = serde_json::from_value(request_json).ok()?;
+
+        match self.socket.clone().call(request).await {
+            Ok(response) => {
+                tracing::debug!("RPC connect response: {}", response);
+                match serde_json::from_value::<RpcConnectResponse>(response.clone()) {
+                    Ok(resp) => {
+                        let session_id = resp.session_id.clone();
+                        tracing::info!("RPC session: {}", session_id);
+
+                        let mut sessions = self.sessions.lock().await;
+                        sessions.insert(
+                            uri.to_string(),
+                            Session {
+                                session_id: session_id.clone(),
+                                last_keepalive: Instant::now(),
+                            },
+                        );
+
+                        // Start keepalive task
+                        self.start_keepalive(uri.to_string(), session_id.clone());
+
+                        Some(session_id)
+                    }
+                    Err(e) => {
+                        tracing::error!("RPC connect parse error: {}", e);
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("RPC connect error: {:?}", e);
+                None
+            }
+        }
+    }
+
+    fn start_keepalive(&self, _uri: String, _session_id: String) {
+        // TODO: Implement keepalive once we figure out how to send raw notifications
+        // with ServerSocket. For now, sessions will time out after ~60s without
+        // keepalive, but we'll reconnect automatically when that happens.
+        //
+        // The issue is that ServerSocket::notify expects a typed Notification,
+        // but Lean's $/lean/rpc/keepAlive is a custom method not in lsp-types.
+    }
+
+    /// Check if we have a session for the given URI.
+    pub async fn has_session(&self, uri: &str) -> bool {
+        self.sessions.lock().await.contains_key(uri)
+    }
+
+    /// Get interactive goals at a position.
+    pub async fn get_goals(&self, uri: &str, line: u32, character: u32) -> Vec<Goal> {
+        let session_id = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(uri).map(|s| s.session_id.clone())
+        };
+
+        let session_id = match session_id {
+            Some(id) => id,
+            None => {
+                // Try to connect first
+                match self.connect(uri).await {
+                    Some(id) => id,
+                    None => return vec![],
+                }
+            }
+        };
+
+        let id = self.next_request_id().await;
+        // Structure from lean.nvim: textDocument/position at top level AND inside params
+        // See: https://github.com/Julian/lean.nvim/blob/main/lua/lean/rpc.lua#L183-L186
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "sessionId": session_id,
+            "method": GET_INTERACTIVE_GOALS,
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }
+        });
+
+        let request_json = json!({
+            "id": id,
+            "method": RPC_CALL,
+            "params": params
+        });
+        let request: async_lsp::AnyRequest = match serde_json::from_value(request_json) {
+            Ok(r) => r,
+            Err(_) => return vec![],
+        };
+
+        tracing::debug!("Calling getInteractiveGoals at {}:{}:{}", uri, line, character);
+
+        match self.socket.clone().call(request).await {
+            Ok(response) => {
+                tracing::debug!("RPC response: {}", response);
+                match serde_json::from_value::<InteractiveGoalsResponse>(response.clone()) {
+                    Ok(resp) => {
+                        let goals = resp.to_goals();
+                        tracing::info!("Parsed {} goals", goals.len());
+                        goals
+                    }
+                    Err(e) => {
+                        tracing::error!("Goals parse error: {} - raw: {}", e, response);
+                        vec![]
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("RPC call error: {:?}", e);
+                vec![]
+            }
+        }
+    }
+}

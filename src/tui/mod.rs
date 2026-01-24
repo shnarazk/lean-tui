@@ -12,13 +12,16 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
-use crate::cursor::{CursorInfo, Message, SOCKET_PATH};
+use crate::lake_ipc::Goal;
+use crate::tui_ipc::{CursorInfo, Message, Position, SOCKET_PATH};
 use crate::error::Result;
 
 /// TUI application state
 #[derive(Default)]
 struct AppState {
     cursor: CursorInfo,
+    goals: Vec<Goal>,
+    goals_position: Option<Position>,
     connected: bool,
 }
 
@@ -27,6 +30,15 @@ impl AppState {
         match msg {
             Message::Cursor(cursor) => {
                 self.cursor = cursor;
+                self.connected = true;
+            }
+            Message::Goals {
+                uri: _,
+                position,
+                goals,
+            } => {
+                self.goals = goals;
+                self.goals_position = Some(position);
                 self.connected = true;
             }
         }
@@ -102,13 +114,36 @@ fn draw_ui(frame: &mut Frame, state: &AppState) {
         .border_style(Style::default().fg(Color::Cyan));
 
     let content = if state.connected {
-        format!(
-            "File: {}\nLine: {}\nColumn: {}\nMethod: {}",
-            state.cursor.filename(),
-            state.cursor.line() + 1, // 1-indexed for display
-            state.cursor.character() + 1,
-            state.cursor.method
-        )
+        let mut lines = vec![
+            format!(
+                "File: {}  Pos: {}:{}  ({})",
+                state.cursor.filename(),
+                state.cursor.line() + 1,
+                state.cursor.character() + 1,
+                state.cursor.method
+            ),
+            String::new(),
+        ];
+
+        if state.goals.is_empty() {
+            lines.push("No goals".to_string());
+        } else {
+            for (i, goal) in state.goals.iter().enumerate() {
+                lines.push(format!("Goal {}:", i + 1));
+                for hyp in &goal.hyps {
+                    let names = hyp.names.join(", ");
+                    if let Some(val) = &hyp.value {
+                        lines.push(format!("  {} : {} := {}", names, hyp.type_, val));
+                    } else {
+                        lines.push(format!("  {} : {}", names, hyp.type_));
+                    }
+                }
+                lines.push(format!("  ⊢ {}", goal.target));
+                lines.push(String::new());
+            }
+        }
+
+        lines.join("\n")
     } else {
         format!("Connecting to {}...", SOCKET_PATH)
     };

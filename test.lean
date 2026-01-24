@@ -1,7 +1,9 @@
 inductive MyNat where
 | zero: MyNat
-| succ: MyNat -> MyNat
+| succ: (n: MyNat) -> MyNat
+open MyNat
 
-example: 1 = 1 := by
 
-  rfl
+example (h: 1 = 2): (succ zero) = zero := by
+
+ sorry

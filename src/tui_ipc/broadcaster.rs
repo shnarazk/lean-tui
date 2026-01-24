@@ -1,62 +1,11 @@
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
 
-pub const SOCKET_PATH: &str = "/tmp/lean-tui.sock";
-
-/// Position in a document (0-indexed line and character)
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Position {
-    pub line: u32,
-    pub character: u32,
-}
-
-/// Cursor location with document URI and trigger method
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CursorInfo {
-    pub uri: String,
-    pub position: Position,
-    pub method: String,
-}
-
-impl CursorInfo {
-    pub fn new(uri: String, line: u32, character: u32, method: &str) -> Self {
-        Self {
-            uri,
-            position: Position { line, character },
-            method: method.to_string(),
-        }
-    }
-
-    /// Extract filename from URI for display
-    pub fn filename(&self) -> &str {
-        self.uri.rsplit('/').next().unwrap_or(&self.uri)
-    }
-
-    /// Convenience accessor for line
-    pub fn line(&self) -> u32 {
-        self.position.line
-    }
-
-    /// Convenience accessor for character
-    pub fn character(&self) -> u32 {
-        self.position.character
-    }
-}
-
-/// Messages sent from proxy to TUI over the Unix socket.
-/// Tagged enum for type-safe protocol extensibility.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Message {
-    /// Cursor position update
-    Cursor(CursorInfo),
-    // Future: Goals { goals: Vec<Goal> }
-    // Future: Diagnostics { diagnostics: Vec<Diagnostic> }
-}
+use super::message::{CursorInfo, Message, Position, SOCKET_PATH};
+use crate::lake_ipc::Goal;
 
 /// Broadcasts messages to connected TUI clients via Unix socket.
 #[derive(Clone)]
@@ -84,12 +33,12 @@ impl Broadcaster {
             let listener = match UnixListener::bind(SOCKET_PATH) {
                 Ok(l) => l,
                 Err(e) => {
-                    eprintln!("[lean-tui] Failed to bind socket: {}", e);
+                    tracing::error!("Failed to bind socket: {}", e);
                     return;
                 }
             };
 
-            eprintln!("[lean-tui] Listening on {}", SOCKET_PATH);
+            tracing::info!("Listening on {}", SOCKET_PATH);
 
             loop {
                 match listener.accept().await {
@@ -110,7 +59,7 @@ impl Broadcaster {
                         });
                     }
                     Err(e) => {
-                        eprintln!("[lean-tui] Accept error: {}", e);
+                        tracing::error!("Accept error: {}", e);
                     }
                 }
             }
@@ -126,7 +75,9 @@ impl Broadcaster {
     pub fn broadcast_cursor(&self, cursor: CursorInfo) {
         self.send(Message::Cursor(cursor));
     }
-}
 
-/// Type alias for backwards compatibility
-pub type CursorBroadcaster = Broadcaster;
+    /// Broadcast goals to all connected clients.
+    pub fn broadcast_goals(&self, uri: String, position: Position, goals: Vec<Goal>) {
+        self.send(Message::Goals { uri, position, goals });
+    }
+}

@@ -1,7 +1,8 @@
-mod cursor;
 mod error;
-mod proxy;
+mod lake_ipc;
+mod lake_lsp_proxy;
 mod tui;
+mod tui_ipc;
 
 use clap::{Parser, Subcommand};
 
@@ -27,14 +28,21 @@ async fn main() {
 
     // Only init tracing for serve (TUI uses terminal)
     if matches!(cli.command, Commands::Serve) {
+        let log_file = std::fs::File::create("/tmp/lean-tui.log")
+            .expect("Failed to create log file");
         tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .with_writer(std::io::stderr)
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive("lean_tui=debug".parse().unwrap()),
+            )
+            .with_writer(log_file)
+            .with_ansi(true)
+            .pretty()
             .init();
     }
 
     let result = match cli.command {
-        Commands::Serve => proxy::run().await,
+        Commands::Serve => lake_lsp_proxy::run().await,
         Commands::Tui => tui::run().await,
     };
 

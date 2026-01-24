@@ -14,7 +14,6 @@ futures = "0.3"
 
 # LSP
 async-lsp = { version = "0.2", features = ["forward", "tracing", "tokio"] }
-lsp-types = "0.97"
 tower-service = "0.3"
 
 # Serialization
