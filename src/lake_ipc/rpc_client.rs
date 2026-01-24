@@ -156,21 +156,29 @@ impl RpcClient {
 
         match self.socket.clone().call(request).await {
             Ok(response) => {
-                tracing::debug!("RPC response: {}", response);
+                // Handle null response (no goals at this position)
+                if response.is_null() {
+                    tracing::debug!("No goals at {}:{}:{}", uri, line, character);
+                    return Ok(vec![]);
+                }
+
                 match serde_json::from_value::<InteractiveGoalsResponse>(response.clone()) {
                     Ok(resp) => {
                         let goals = resp.to_goals();
-                        tracing::info!("Parsed {} goals", goals.len());
+                        if !goals.is_empty() {
+                            tracing::info!("Found {} goal(s)", goals.len());
+                        }
                         Ok(goals)
                     }
                     Err(e) => {
-                        tracing::error!("Goals parse error: {} - raw: {}", e, response);
+                        tracing::error!("Failed to parse goals response: {e}");
+                        tracing::debug!("Raw response: {}", response);
                         Err(format!("Failed to parse goals: {e}"))
                     }
                 }
             }
             Err(e) => {
-                tracing::error!("RPC call error: {:?}", e);
+                tracing::error!("RPC call failed: {e:?}");
                 Err(format!("RPC call failed: {e:?}"))
             }
         }
