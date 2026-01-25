@@ -4,7 +4,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind
 use ratatui::{layout::Rect, widgets::ListState};
 
 use crate::{
-    lean_rpc::Goal,
+    lean_rpc::{Goal, Hypothesis},
     tui_ipc::{Command, CursorInfo, Message, Position},
 };
 
@@ -31,6 +31,38 @@ pub struct ColumnVisibility {
     pub next: bool,
 }
 
+/// Filter settings for hypothesis display (VSCode-lean4 compatible).
+#[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct HypothesisFilters {
+    /// Hide typeclass instance hypotheses.
+    pub hide_instances: bool,
+    /// Hide type hypotheses.
+    pub hide_types: bool,
+    /// Hide inaccessible names (names containing dagger U+2020).
+    pub hide_inaccessible: bool,
+    /// Hide let-binding values (show `x : T` instead of `x : T := v`).
+    pub hide_let_values: bool,
+    /// Reverse hypothesis order (newest first).
+    pub reverse_order: bool,
+}
+
+impl HypothesisFilters {
+    /// Check if a hypothesis should be shown based on current filters.
+    pub fn should_show(self, hyp: &Hypothesis) -> bool {
+        if self.hide_instances && hyp.is_instance {
+            return false;
+        }
+        if self.hide_types && hyp.is_type {
+            return false;
+        }
+        if self.hide_inaccessible && hyp.names.iter().any(|n| n.contains('\u{2020}')) {
+            return false;
+        }
+        true
+    }
+}
+
 /// Application state.
 #[derive(Default)]
 pub struct App {
@@ -54,16 +86,31 @@ pub struct App {
     pub click_regions: Vec<ClickRegion>,
     /// Visibility settings for diff columns.
     pub columns: ColumnVisibility,
+    /// Filter settings for hypothesis display.
+    pub filters: HypothesisFilters,
+    /// Whether to show the help popup.
+    pub show_help: bool,
 }
 
 impl App {
-    /// Get all selectable items as a flat list.
+    /// Get all selectable items as a flat list, respecting current filters.
     pub fn selectable_items(&self) -> Vec<SelectableItem> {
         let mut items = Vec::new();
         for (goal_idx, goal) in self.goals.iter().enumerate() {
-            for hyp_idx in 0..goal.hyps.len() {
-                items.push(SelectableItem::Hypothesis { goal_idx, hyp_idx });
-            }
+            // Build hypothesis indices, respecting reverse order
+            let hyp_indices: Vec<usize> = if self.filters.reverse_order {
+                (0..goal.hyps.len()).rev().collect()
+            } else {
+                (0..goal.hyps.len()).collect()
+            };
+
+            // Only include hypotheses that pass the filter
+            items.extend(
+                hyp_indices
+                    .into_iter()
+                    .filter(|&hyp_idx| self.filters.should_show(&goal.hyps[hyp_idx]))
+                    .map(|hyp_idx| SelectableItem::Hypothesis { goal_idx, hyp_idx }),
+            );
             items.push(SelectableItem::GoalTarget { goal_idx });
         }
         items
@@ -164,6 +211,35 @@ impl App {
                     }
                     KeyCode::Char('n') => {
                         self.columns.next = !self.columns.next;
+                        true
+                    }
+                    // Hypothesis filter toggles
+                    KeyCode::Char('i') => {
+                        self.filters.hide_instances = !self.filters.hide_instances;
+                        true
+                    }
+                    KeyCode::Char('t') => {
+                        self.filters.hide_types = !self.filters.hide_types;
+                        true
+                    }
+                    KeyCode::Char('a') => {
+                        self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
+                        true
+                    }
+                    KeyCode::Char('l') => {
+                        self.filters.hide_let_values = !self.filters.hide_let_values;
+                        true
+                    }
+                    KeyCode::Char('r') => {
+                        self.filters.reverse_order = !self.filters.reverse_order;
+                        true
+                    }
+                    KeyCode::Char('?') => {
+                        self.show_help = !self.show_help;
+                        true
+                    }
+                    KeyCode::Esc if self.show_help => {
+                        self.show_help = false;
                         true
                     }
                     _ => false,
