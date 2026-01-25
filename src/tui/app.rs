@@ -77,12 +77,33 @@ pub struct App {
     pub should_exit: bool,
     /// Pending navigation command to send.
     pub pending_navigation: Option<Command>,
-    /// Pending command to send (for temporal goal fetching).
-    pub pending_command: Option<Command>,
+    /// Pending commands to send (for temporal goal fetching).
+    pub pending_commands: Vec<Command>,
     /// Click regions for mouse interaction (updated each render).
     pub click_regions: Vec<ClickRegion>,
     /// Visibility settings for diff columns.
     pub columns: ColumnVisibility,
+}
+
+/// Convert a goal result to a goal state.
+fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> GoalState {
+    match result {
+        GoalResult::Ready { position, goals } => GoalState {
+            goals,
+            position,
+            status: LoadStatus::Ready,
+        },
+        GoalResult::NotAvailable => GoalState {
+            goals: vec![],
+            position: cursor_position,
+            status: LoadStatus::NotAvailable,
+        },
+        GoalResult::Error { error } => GoalState {
+            goals: vec![],
+            position: cursor_position,
+            status: LoadStatus::Error(error),
+        },
+    }
 }
 
 impl App {
@@ -92,7 +113,7 @@ impl App {
     }
 
     /// Get position where current goals were fetched.
-    pub fn goals_position(&self) -> Option<Position> {
+    pub const fn goals_position(&self) -> Option<Position> {
         if self.temporal_goals.current.goals.is_empty() {
             None
         } else {
@@ -151,12 +172,10 @@ impl App {
     /// Handle incoming message from proxy.
     pub fn handle_message(&mut self, msg: Message) {
         match msg {
+            Message::Connected => {
+                self.connected = true;
+            }
             Message::Cursor(cursor) => {
-                // Clear temporal goals when cursor moves (they'll be re-fetched)
-                if cursor.position != self.cursor.position || cursor.uri != self.cursor.uri {
-                    self.temporal_goals.previous = None;
-                    self.temporal_goals.next = None;
-                }
                 self.cursor = cursor;
                 self.connected = true;
                 self.error = None;
@@ -166,23 +185,16 @@ impl App {
                 position,
                 goals,
             } => {
-                // Legacy Goals message - treat as current slot
                 self.temporal_goals.current = GoalState {
                     goals,
                     position,
                     status: LoadStatus::Ready,
                 };
-                // Clear previous/next when current changes
-                self.temporal_goals.previous = None;
-                self.temporal_goals.next = None;
                 self.connected = true;
                 self.error = None;
-                // Reset selection when goals change
-                if self.selectable_items().is_empty() {
-                    self.list_state.select(None);
-                } else {
-                    self.list_state.select(Some(0));
-                }
+                self.reset_selection();
+                // Re-request temporal goals if columns are visible
+                self.refresh_temporal_columns();
             }
             Message::TemporalGoals {
                 uri: _,
@@ -190,45 +202,13 @@ impl App {
                 slot,
                 result,
             } => {
-                // Only apply if still at same cursor position
-                if cursor_position == self.cursor.position {
-                    let goal_state = match result {
-                        GoalResult::Ready { position, goals } => GoalState {
-                            goals,
-                            position,
-                            status: LoadStatus::Ready,
-                        },
-                        GoalResult::NotAvailable => GoalState {
-                            goals: vec![],
-                            position: cursor_position,
-                            status: LoadStatus::NotAvailable,
-                        },
-                        GoalResult::Error { error } => GoalState {
-                            goals: vec![],
-                            position: cursor_position,
-                            status: LoadStatus::Error(error),
-                        },
-                    };
-
-                    match slot {
-                        TemporalSlot::Previous => {
-                            self.temporal_goals.previous = Some(goal_state);
-                        }
-                        TemporalSlot::Current => {
-                            self.temporal_goals.current = goal_state;
-                            // Reset selection when current goals change
-                            if self.selectable_items().is_empty() {
-                                self.list_state.select(None);
-                            } else {
-                                self.list_state.select(Some(0));
-                            }
-                        }
-                        TemporalSlot::Next => {
-                            self.temporal_goals.next = Some(goal_state);
-                        }
-                    }
-                }
                 self.connected = true;
+                // Only apply if still at same cursor position
+                if cursor_position != self.cursor.position {
+                    return;
+                }
+                let goal_state = goal_state_from_result(result, cursor_position);
+                self.apply_temporal_goal(slot, goal_state);
             }
             Message::Error { error } => {
                 self.error = Some(error);
@@ -262,19 +242,11 @@ impl App {
                         true
                     }
                     KeyCode::Char('p') => {
-                        self.columns.previous = !self.columns.previous;
-                        // Request previous goals if column toggled on and not already loaded
-                        if self.columns.previous && self.temporal_goals.previous.is_none() {
-                            self.request_temporal_goals(TemporalSlot::Previous);
-                        }
+                        self.toggle_previous_column();
                         true
                     }
                     KeyCode::Char('n') => {
-                        self.columns.next = !self.columns.next;
-                        // Request next goals if column toggled on and not already loaded
-                        if self.columns.next && self.temporal_goals.next.is_none() {
-                            self.request_temporal_goals(TemporalSlot::Next);
-                        }
+                        self.toggle_next_column();
                         true
                     }
                     _ => false,
@@ -317,6 +289,32 @@ impl App {
         })
     }
 
+    /// Re-request temporal goals for visible columns.
+    fn refresh_temporal_columns(&mut self) {
+        if self.columns.previous {
+            self.request_temporal_goals(TemporalSlot::Previous);
+        }
+        if self.columns.next {
+            self.request_temporal_goals(TemporalSlot::Next);
+        }
+    }
+
+    /// Toggle the previous column visibility.
+    fn toggle_previous_column(&mut self) {
+        self.columns.previous = !self.columns.previous;
+        if self.columns.previous && self.temporal_goals.previous.is_none() {
+            self.request_temporal_goals(TemporalSlot::Previous);
+        }
+    }
+
+    /// Toggle the next column visibility.
+    fn toggle_next_column(&mut self) {
+        self.columns.next = !self.columns.next;
+        if self.columns.next && self.temporal_goals.next.is_none() {
+            self.request_temporal_goals(TemporalSlot::Next);
+        }
+    }
+
     /// Request temporal goals for a slot.
     fn request_temporal_goals(&mut self, slot: TemporalSlot) {
         let uri = self.cursor.uri.clone();
@@ -343,11 +341,32 @@ impl App {
             TemporalSlot::Current => {}
         }
 
-        self.pending_command = Some(Command::FetchTemporalGoals {
+        self.pending_commands.push(Command::FetchTemporalGoals {
             uri,
             cursor_position: self.cursor.position,
             slot,
         });
+    }
+
+    /// Apply a temporal goal state to the appropriate slot.
+    fn apply_temporal_goal(&mut self, slot: TemporalSlot, goal_state: GoalState) {
+        match slot {
+            TemporalSlot::Previous => self.temporal_goals.previous = Some(goal_state),
+            TemporalSlot::Current => {
+                self.temporal_goals.current = goal_state;
+                self.reset_selection();
+            }
+            TemporalSlot::Next => self.temporal_goals.next = Some(goal_state),
+        }
+    }
+
+    /// Reset selection state based on available items.
+    fn reset_selection(&mut self) {
+        if self.selectable_items().is_empty() {
+            self.list_state.select(None);
+        } else {
+            self.list_state.select(Some(0));
+        }
     }
 
     /// Navigate to the currently selected item.
@@ -414,9 +433,8 @@ impl App {
         self.pending_navigation.take()
     }
 
-    /// Take the pending command, if any (for temporal goal fetching).
-    #[allow(clippy::missing_const_for_fn)]
-    pub fn take_pending_command(&mut self) -> Option<Command> {
-        self.pending_command.take()
+    /// Take all pending commands (for temporal goal fetching).
+    pub fn take_pending_commands(&mut self) -> Vec<Command> {
+        std::mem::take(&mut self.pending_commands)
     }
 }

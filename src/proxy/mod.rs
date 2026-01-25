@@ -44,7 +44,7 @@ pub async fn run() -> Result<()> {
             DeferredService(None),
             socket_server_client.clone(),
             None,
-            doc_cache_client.clone(),
+            doc_cache_client,
         )
     });
 
@@ -60,7 +60,7 @@ pub async fn run() -> Result<()> {
             server_socket,
             socket_server_server.clone(),
             Some(rpc_client_server.clone()),
-            doc_cache_server.clone(),
+            doc_cache_server,
         )
     });
 

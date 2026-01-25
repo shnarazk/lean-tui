@@ -137,7 +137,7 @@ fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 /// Determine the column layout based on app state and terminal width.
-fn determine_column_layout(app: &App, width: u16) -> ColumnLayout {
+const fn determine_column_layout(app: &App, width: u16) -> ColumnLayout {
     // Check if we have temporal columns enabled and available
     let has_previous = app.columns.previous && app.temporal_goals.previous.is_some();
     let has_next = app.columns.next && app.temporal_goals.next.is_some();

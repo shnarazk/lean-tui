@@ -82,7 +82,7 @@ pub async fn process_command(
     }
 }
 
-/// Handle FetchTemporalGoals command: find target position and fetch goals.
+/// Handle `FetchTemporalGoals` command: find target position and fetch goals.
 async fn handle_fetch_temporal_goals(
     uri: &str,
     cursor_position: TuiPosition,
@@ -91,8 +91,8 @@ async fn handle_fetch_temporal_goals(
     document_cache: &Arc<DocumentCache>,
     socket_server: &Arc<SocketServer>,
 ) {
-    // Get document content for heuristic-based tactic finding
-    let Some(content) = document_cache.get(uri).await else {
+    // Get parsed syntax tree for AST-based tactic finding (sync, uses cached tree)
+    let Some(tree) = document_cache.get_tree(uri) else {
         tracing::warn!("Document not in cache: {uri}");
         socket_server.broadcast_temporal_goals(
             uri.to_string(),
@@ -103,11 +103,11 @@ async fn handle_fetch_temporal_goals(
         return;
     };
 
-    // Find target position based on slot using line/semicolon heuristics
+    // Find target position based on slot using tree-sitter
     let target_position = match slot {
-        TemporalSlot::Previous => tactic_finder::find_previous_tactic(&content, cursor_position),
+        TemporalSlot::Previous => tactic_finder::find_previous_tactic(&tree, cursor_position),
         TemporalSlot::Current => Some(cursor_position),
-        TemporalSlot::Next => tactic_finder::find_next_tactic(&content, cursor_position),
+        TemporalSlot::Next => tactic_finder::find_next_tactic(&tree, cursor_position),
     };
 
     let Some(target) = target_position else {

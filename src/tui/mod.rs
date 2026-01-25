@@ -53,7 +53,7 @@ pub async fn run() -> Result<()> {
                 if let Some(cmd) = app.take_pending_navigation() {
                     let _ = socket.tx.send(cmd).await;
                 }
-                if let Some(cmd) = app.take_pending_command() {
+                for cmd in app.take_pending_commands() {
                     let _ = socket.tx.send(cmd).await;
                 }
             }

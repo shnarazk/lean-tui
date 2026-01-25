@@ -1,96 +1,106 @@
-//! Document content cache for tactic position detection.
+//! Document content cache with tree-sitter parsing.
 //!
-//! Tracks open document contents by intercepting `textDocument/didOpen`
-//! and `textDocument/didChange` notifications.
+//! Caches document content and syntax trees for efficient tactic position detection.
+//! Tree-sitter's incremental parsing reuses unchanged subtrees automatically.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use async_lsp::{
     lsp_types::{
-        notification::{DidChangeTextDocument, DidOpenTextDocument},
-        TextDocumentContentChangeEvent,
+        notification::{DidChangeTextDocument, DidOpenTextDocument, Notification},
+        DidChangeTextDocumentParams, DidOpenTextDocumentParams,
     },
     AnyNotification,
 };
-use tokio::sync::RwLock;
+use tree_sitter::{Parser, Tree};
 
-/// Cache of open document contents for tactic position detection.
+/// Cached document with content and syntax tree.
+struct Document {
+    content: String,
+    tree: Option<Tree>,
+}
+
+/// Document cache with tree-sitter parsing.
+/// Uses `std::sync::Mutex` because tree-sitter's `Tree` is not `Send`.
 pub struct DocumentCache {
-    documents: RwLock<HashMap<String, String>>,
+    documents: Mutex<HashMap<String, Document>>,
+    parser: Mutex<Parser>,
 }
 
 impl DocumentCache {
     pub fn new() -> Self {
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_lean::language())
+            .expect("Error loading Lean grammar");
+
         Self {
-            documents: RwLock::new(HashMap::new()),
+            documents: Mutex::new(HashMap::new()),
+            parser: Mutex::new(parser),
         }
     }
 
-    /// Process an LSP notification, updating cache if it's a document event.
-    pub async fn handle_notification(&self, notif: &AnyNotification) {
-        if notif.method
-            == <DidOpenTextDocument as async_lsp::lsp_types::notification::Notification>::METHOD
-        {
-            if let Ok(params) =
-                serde_json::from_value::<async_lsp::lsp_types::DidOpenTextDocumentParams>(
-                    notif.params.clone(),
-                )
-            {
-                self.set(
-                    params.text_document.uri.to_string(),
-                    params.text_document.text,
-                )
-                .await;
-            }
-        } else if notif.method
-            == <DidChangeTextDocument as async_lsp::lsp_types::notification::Notification>::METHOD
-        {
-            if let Ok(params) =
-                serde_json::from_value::<async_lsp::lsp_types::DidChangeTextDocumentParams>(
-                    notif.params.clone(),
-                )
-            {
-                let uri = params.text_document.uri.to_string();
-                self.apply_changes(&uri, &params.content_changes).await;
+    /// Process LSP notification, updating cache for document events.
+    pub fn handle_notification(&self, notif: &AnyNotification) {
+        if notif.method == DidOpenTextDocument::METHOD {
+            let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone())
+            else {
+                return;
+            };
+            self.update(p.text_document.uri.as_str(), p.text_document.text);
+        } else if notif.method == DidChangeTextDocument::METHOD {
+            let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone())
+            else {
+                return;
+            };
+            let uri = p.text_document.uri.to_string();
+            if let Some(content) = self.apply_changes(&uri, &p.content_changes) {
+                self.update(&uri, content);
             }
         }
     }
 
-    /// Set document content (from didOpen).
-    async fn set(&self, uri: String, content: String) {
-        let mut docs = self.documents.write().await;
-        docs.insert(uri, content);
+    /// Update document content and re-parse with old tree for incremental benefit.
+    fn update(&self, uri: &str, content: String) {
+        let mut docs = self.documents.lock().expect("lock poisoned");
+        let old_tree = docs.get(uri).and_then(|d| d.tree.as_ref());
+        let tree = self.parse(&content, old_tree);
+        docs.insert(uri.to_string(), Document { content, tree });
     }
 
-    /// Apply incremental changes from didChange.
-    async fn apply_changes(&self, uri: &str, changes: &[TextDocumentContentChangeEvent]) {
-        let mut docs = self.documents.write().await;
-        let Some(content) = docs.get_mut(uri) else {
-            return;
-        };
+    /// Apply LSP content changes and return the new content.
+    fn apply_changes(
+        &self,
+        uri: &str,
+        changes: &[async_lsp::lsp_types::TextDocumentContentChangeEvent],
+    ) -> Option<String> {
+        let docs = self.documents.lock().expect("lock poisoned");
+        let mut content = docs.get(uri)?.content.clone();
+        drop(docs);
 
         for change in changes {
-            if let Some(range) = change.range {
-                // Incremental change: replace the specified range
-                let start_offset =
-                    line_char_to_offset(content, range.start.line, range.start.character);
-                let end_offset =
-                    line_char_to_offset(content, range.end.line, range.end.character);
-
-                if start_offset <= content.len() && end_offset <= content.len() {
-                    content.replace_range(start_offset..end_offset, &change.text);
-                }
-            } else {
-                // Full document replacement
-                *content = change.text.clone();
+            let Some(range) = change.range else {
+                content.clone_from(&change.text);
+                continue;
+            };
+            let start = position_to_offset(&content, range.start);
+            let end = position_to_offset(&content, range.end);
+            if start <= content.len() && end <= content.len() {
+                content.replace_range(start..end, &change.text);
             }
         }
+        Some(content)
     }
 
-    /// Get document content for tactic search.
-    pub async fn get(&self, uri: &str) -> Option<String> {
-        let docs = self.documents.read().await;
-        docs.get(uri).cloned()
+    fn parse(&self, content: &str, old_tree: Option<&Tree>) -> Option<Tree> {
+        self.parser.lock().expect("lock poisoned").parse(content, old_tree)
+    }
+
+    /// Get cached syntax tree for a document.
+    pub fn get_tree(&self, uri: &str) -> Option<Tree> {
+        self.documents.lock().expect("lock poisoned")
+            .get(uri)
+            .and_then(|d| d.tree.clone())
     }
 }
 
@@ -100,17 +110,12 @@ impl Default for DocumentCache {
     }
 }
 
-/// Convert line/character position to byte offset.
-fn line_char_to_offset(content: &str, line: u32, character: u32) -> usize {
-    let mut offset = 0;
-    for (i, line_content) in content.lines().enumerate() {
-        if i == line as usize {
-            // Found the target line, add character offset
-            // Note: LSP uses UTF-16 code units, but for simplicity we use byte offset
-            // This may be slightly off for non-ASCII, but acceptable for line detection
-            return offset + (character as usize).min(line_content.len());
-        }
-        offset += line_content.len() + 1; // +1 for newline
-    }
-    content.len()
+/// Convert LSP position to byte offset.
+fn position_to_offset(content: &str, pos: async_lsp::lsp_types::Position) -> usize {
+    content
+        .lines()
+        .take(pos.line as usize)
+        .map(|line| line.len() + 1)
+        .sum::<usize>()
+        + pos.character as usize
 }

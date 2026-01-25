@@ -77,6 +77,8 @@ impl CursorInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Message {
+    /// Connection established
+    Connected,
     /// Cursor position update
     Cursor(CursorInfo),
     /// Proof goals at cursor position (legacy, kept for compatibility)

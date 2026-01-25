@@ -1,251 +1,180 @@
-//! Tactic position finder using line/semicolon heuristics.
+//! Tactic position finder using tree-sitter.
 //!
-//! Finds previous/next tactic positions. Tactics are separated by:
-//! - Newlines (each non-trivial line is a tactic)
-//! - Semicolons (`;` separates tactics on the same line)
+//! Uses the tree-sitter-lean grammar to find previous/next tactic positions.
+//! A tactic is identified as a direct child of a "tactics" node.
+
+use tree_sitter::{Node, Point, Tree};
 
 use crate::tui_ipc::Position;
 
 /// Find the position of the previous tactic before the current position.
-pub fn find_previous_tactic(content: &str, current: Position) -> Option<Position> {
-    let lines: Vec<&str> = content.lines().collect();
-    let current_line = current.line as usize;
-    let current_char = current.character as usize;
+pub fn find_previous_tactic(tree: &Tree, current: Position) -> Option<Position> {
+    let point = Point::new(current.line as usize, current.character as usize);
+    let tactics_block = find_enclosing_tactics(tree.root_node(), point)?;
 
-    // First check: previous tactic on same line (before semicolon)
-    if let Some(line) = lines.get(current_line) {
-        if let Some(pos) = find_prev_tactic_on_line(line, current_char) {
-            return Some(Position {
-                line: current.line,
-                character: pos as u32,
-            });
+    // Find the last tactic that starts before our position
+    let mut prev_tactic: Option<Node> = None;
+    let mut cursor = tactics_block.walk();
+    for child in tactics_block.children(&mut cursor) {
+        if !child.is_named() {
+            continue;
+        }
+        if child.start_position() < point {
+            prev_tactic = Some(child);
+        } else {
+            break;
         }
     }
 
-    // Second: scan backward through previous lines
-    for line_idx in (0..current_line).rev() {
-        let line = lines.get(line_idx).copied().unwrap_or("");
-        if let Some(pos) = find_last_tactic_on_line(line) {
-            return Some(Position {
-                line: line_idx as u32,
-                character: pos as u32,
-            });
-        }
-    }
-
-    None
+    prev_tactic.map(node_to_position)
 }
 
 /// Find the position of the next tactic after the current position.
-pub fn find_next_tactic(content: &str, current: Position) -> Option<Position> {
-    let lines: Vec<&str> = content.lines().collect();
-    let current_line = current.line as usize;
-    let current_char = current.character as usize;
+pub fn find_next_tactic(tree: &Tree, current: Position) -> Option<Position> {
+    let point = Point::new(current.line as usize, current.character as usize);
+    let tactics_block = find_enclosing_tactics(tree.root_node(), point)?;
 
-    // First check: next tactic on same line (after semicolon)
-    if let Some(line) = lines.get(current_line) {
-        if let Some(pos) = find_next_tactic_on_line(line, current_char) {
-            return Some(Position {
-                line: current.line,
-                character: pos as u32,
-            });
+    // Find the first tactic that starts after our position
+    let mut cursor = tactics_block.walk();
+    for child in tactics_block.children(&mut cursor) {
+        if !child.is_named() {
+            continue;
         }
-    }
-
-    // Second: scan forward through following lines
-    for line_idx in (current_line + 1)..lines.len() {
-        let line = lines.get(line_idx).copied().unwrap_or("");
-        if let Some(pos) = find_first_tactic_on_line(line) {
-            return Some(Position {
-                line: line_idx as u32,
-                character: pos as u32,
-            });
+        // Must start strictly after current position (not at same position)
+        if child.start_position() > point {
+            return Some(node_to_position(child));
         }
     }
 
     None
 }
 
-/// Find the previous tactic on the same line (before a semicolon).
-fn find_prev_tactic_on_line(line: &str, current_char: usize) -> Option<usize> {
-    let before = &line[..current_char.min(line.len())];
-
-    // Find the last semicolon before cursor
-    let last_semi = before.rfind(';')?;
-
-    // The previous tactic starts at the beginning of line or after the semicolon before that
-    let segment_start = before[..last_semi].rfind(';').map_or(0, |i| i + 1);
-
-    // Skip leading whitespace
-    let segment = &before[segment_start..last_semi];
-    let trimmed_start = segment.len() - segment.trim_start().len();
-
-    if segment.trim().is_empty() || segment.trim().starts_with("--") {
-        None
-    } else {
-        Some(segment_start + trimmed_start)
-    }
+/// Find the "tactics" node that contains the given position.
+fn find_enclosing_tactics<'a>(root: Node<'a>, point: Point) -> Option<Node<'a>> {
+    find_tactics_recursive(root, point)
 }
 
-/// Find the next tactic on the same line (after a semicolon).
-fn find_next_tactic_on_line(line: &str, current_char: usize) -> Option<usize> {
-    let after_start = current_char.min(line.len());
-    let after = &line[after_start..];
-
-    // Find the next semicolon after cursor
-    let semi_offset = after.find(';')?;
-    let next_start = after_start + semi_offset + 1;
-
-    if next_start >= line.len() {
+fn find_tactics_recursive<'a>(node: Node<'a>, point: Point) -> Option<Node<'a>> {
+    // Check if this node contains our point
+    if point < node.start_position() || point > node.end_position() {
         return None;
     }
 
-    // Skip whitespace after semicolon
-    let remaining = &line[next_start..];
-    let ws_len = remaining.len() - remaining.trim_start().len();
-    let tactic_start = next_start + ws_len;
-
-    let tactic = remaining.trim();
-    if tactic.is_empty() || tactic.starts_with("--") {
-        None
-    } else {
-        Some(tactic_start)
-    }
-}
-
-/// Find the first tactic position on a line.
-fn find_first_tactic_on_line(line: &str) -> Option<usize> {
-    let trimmed = line.trim();
-
-    // Skip empty, comment, or block comment lines
-    if trimmed.is_empty() || trimmed.starts_with("--") || trimmed.starts_with("/-") {
-        return None;
+    // If this is a tactics node, return it
+    if node.kind() == "tactics" {
+        return Some(node);
     }
 
-    // Return position after leading whitespace
-    Some(line.len() - line.trim_start().len())
-}
-
-/// Find the last tactic position on a line.
-fn find_last_tactic_on_line(line: &str) -> Option<usize> {
-    let trimmed = line.trim();
-
-    // Skip empty, comment, or block comment lines
-    if trimmed.is_empty() || trimmed.starts_with("--") || trimmed.starts_with("/-") {
-        return None;
-    }
-
-    // Check if line has semicolons (multiple tactics)
-    if let Some(last_semi) = line.rfind(';') {
-        let after_semi = &line[last_semi + 1..];
-        let ws_len = after_semi.len() - after_semi.trim_start().len();
-        let tactic = after_semi.trim();
-
-        if !tactic.is_empty() && !tactic.starts_with("--") {
-            return Some(last_semi + 1 + ws_len);
-        }
-
-        // Last segment is empty/comment, find the one before
-        let before_semi = &line[..last_semi];
-        if let Some(prev_semi) = before_semi.rfind(';') {
-            let segment = &line[prev_semi + 1..last_semi];
-            let ws_len = segment.len() - segment.trim_start().len();
-            if !segment.trim().is_empty() {
-                return Some(prev_semi + 1 + ws_len);
-            }
-        } else {
-            // No previous semicolon, use start of line
-            let ws_len = before_semi.len() - before_semi.trim_start().len();
-            if !before_semi.trim().is_empty() {
-                return Some(ws_len);
-            }
+    // Search children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if let Some(found) = find_tactics_recursive(child, point) {
+            return Some(found);
         }
     }
 
-    // No semicolons, return start of content
-    Some(line.len() - line.trim_start().len())
+    None
+}
+
+/// Convert a tree-sitter node's start position to our Position type.
+#[allow(clippy::cast_possible_truncation)] // Source positions won't exceed u32
+fn node_to_position(node: Node<'_>) -> Position {
+    let start = node.start_position();
+    Position {
+        line: start.row as u32,
+        character: start.column as u32,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tree_sitter::Parser;
 
-    #[test]
-    fn test_simple_lines_previous() {
-        let content = "theorem foo : True := by\n  trivial\n  done";
-
-        // From "done" (line 2), should find "trivial" (line 1)
-        let result = find_previous_tactic(content, Position { line: 2, character: 2 });
-        assert_eq!(result, Some(Position { line: 1, character: 2 }));
-
-        // From "trivial" (line 1), should find "theorem" (line 0)
-        let result = find_previous_tactic(content, Position { line: 1, character: 2 });
-        assert_eq!(result, Some(Position { line: 0, character: 0 }));
+    fn parse(code: &str) -> Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_lean::language())
+            .expect("Error loading Lean grammar");
+        parser.parse(code, None).expect("Failed to parse")
     }
 
     #[test]
-    fn test_simple_lines_next() {
-        let content = "theorem foo : True := by\n  trivial\n  done";
+    fn test_parse_simple_proof() {
+        let code = "theorem foo : True := by\n  trivial";
+        let tree = parse(code);
+        assert!(!tree.root_node().has_error());
+    }
 
-        // From "theorem" (line 0), should find "trivial" (line 1)
-        let result = find_next_tactic(content, Position { line: 0, character: 0 });
-        assert_eq!(result, Some(Position { line: 1, character: 2 }));
-
-        // From "trivial" (line 1), should find "done" (line 2)
-        let result = find_next_tactic(content, Position { line: 1, character: 2 });
-        assert_eq!(result, Some(Position { line: 2, character: 2 }));
+    fn print_tree(node: tree_sitter::Node, code: &str, indent: usize) {
+        let text = &code[node.byte_range()];
+        let short = if text.len() > 20 {
+            format!("{}...", &text[..20])
+        } else {
+            text.to_string()
+        };
+        println!(
+            "{:indent$}{} [{}:{}] {:?}",
+            "",
+            node.kind(),
+            node.start_position().row,
+            node.start_position().column,
+            short.replace('\n', "\\n"),
+            indent = indent
+        );
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            print_tree(child, code, indent + 2);
+        }
     }
 
     #[test]
-    fn test_no_previous_at_start() {
-        let content = "trivial";
-        let result = find_previous_tactic(content, Position { line: 0, character: 0 });
-        assert_eq!(result, None);
+    fn test_find_tactics_structure() {
+        let code = "theorem foo : True := by\n  trivial\n  done";
+        let tree = parse(code);
+        print_tree(tree.root_node(), code, 0);
     }
 
     #[test]
-    fn test_no_next_at_end() {
-        let content = "trivial";
-        let result = find_next_tactic(content, Position { line: 0, character: 0 });
-        assert_eq!(result, None);
+    fn test_have_declarations_structure() {
+        // Simplified version similar to user's test.lean lines 47-54
+        let code = r#"theorem foo : True := by
+  intro n
+
+  have : 1 < 2 := by grind
+
+  have : 2 < 3 := by grind
+
+  have := Nat.add_comm 1 2
+  grind"#;
+        let tree = parse(code);
+        println!("=== Have declarations tree structure ===");
+        print_tree(tree.root_node(), code, 0);
     }
 
     #[test]
-    fn test_skip_comments_and_blanks() {
-        let content = "line0\n\n-- comment\nline3";
+    fn test_find_previous_with_empty_lines() {
+        // Tactics with empty line between them
+        let code = "theorem foo : True := by\n  trivial\n\n  done";
+        let tree = parse(code);
 
-        // From line 3, should skip comment and blank, find line 0
-        let result = find_previous_tactic(content, Position { line: 3, character: 0 });
-        assert_eq!(result, Some(Position { line: 0, character: 0 }));
-
-        // From line 0, should skip blank and comment, find line 3
-        let result = find_next_tactic(content, Position { line: 0, character: 0 });
-        assert_eq!(result, Some(Position { line: 3, character: 0 }));
+        // Cursor on "done" (line 3) should find "trivial" (line 1) as previous
+        let pos = Position { line: 3, character: 2 };
+        let prev = find_previous_tactic(&tree, pos);
+        assert!(prev.is_some(), "Should find previous tactic");
+        assert_eq!(prev.unwrap().line, 1, "Previous should be on line 1 (trivial)");
     }
 
     #[test]
-    fn test_semicolon_next() {
-        let content = "  simp; ring; done";
+    fn test_find_next_with_empty_lines() {
+        // Tactics with empty line between them
+        let code = "theorem foo : True := by\n  trivial\n\n  done";
+        let tree = parse(code);
 
-        // From simp (char 2), next should be ring (char 8)
-        let result = find_next_tactic(content, Position { line: 0, character: 2 });
-        assert_eq!(result, Some(Position { line: 0, character: 8 }));
-
-        // From ring (char 8), next should be done (char 14)
-        let result = find_next_tactic(content, Position { line: 0, character: 8 });
-        assert_eq!(result, Some(Position { line: 0, character: 14 }));
-    }
-
-    #[test]
-    fn test_semicolon_previous() {
-        let content = "  simp; ring; done";
-
-        // From done (char 14), previous should be ring (char 8)
-        let result = find_previous_tactic(content, Position { line: 0, character: 14 });
-        assert_eq!(result, Some(Position { line: 0, character: 8 }));
-
-        // From ring (char 8), previous should be simp (char 2)
-        let result = find_previous_tactic(content, Position { line: 0, character: 8 });
-        assert_eq!(result, Some(Position { line: 0, character: 2 }));
+        // Cursor on "trivial" (line 1) should find "done" (line 3) as next
+        let pos = Position { line: 1, character: 2 };
+        let next = find_next_tactic(&tree, pos);
+        assert!(next.is_some(), "Should find next tactic");
+        assert_eq!(next.unwrap().line, 3, "Next should be on line 3 (done)");
     }
 }

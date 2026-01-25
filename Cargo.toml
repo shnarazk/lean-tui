@@ -38,3 +38,7 @@ clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 ratatui = "0.29"
 
+# Parsing
+tree-sitter = "0.20"
+tree-sitter-lean = { git = "https://github.com/wvhulle/tree-sitter-lean" }
+

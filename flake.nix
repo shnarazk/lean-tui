@@ -11,8 +11,16 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, tree-sitter-lean }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      crane,
+      tree-sitter-lean,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         craneLib = crane.mkLib pkgs;
@@ -32,9 +40,12 @@
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
         # Build the actual crate
-        lean-tui = craneLib.buildPackage (commonArgs // {
-          inherit cargoArtifacts;
-        });
+        lean-tui = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+          }
+        );
       in
       {
         packages = {
@@ -44,10 +55,13 @@
 
         checks = {
           inherit lean-tui;
-          clippy = craneLib.cargoClippy (commonArgs // {
-            inherit cargoArtifacts;
-            cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-          });
+          clippy = craneLib.cargoClippy (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+            }
+          );
           fmt = craneLib.cargoFmt { src = ./.; };
         };
 
@@ -55,9 +69,9 @@
           checks = self.checks.${system};
 
           packages = with pkgs; [
-            rust-analyzer
+            # tree-sitter CLI for debugging/testing parse trees
             tree-sitter
-            nodejs
+            elan
           ];
 
           TREE_SITTER_LEAN_PATH = treeSitterLean;

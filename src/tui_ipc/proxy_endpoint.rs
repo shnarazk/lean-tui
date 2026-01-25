@@ -134,6 +134,11 @@ async fn handle_client(
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
 
+    // Send Connected message immediately
+    if let Ok(json) = serde_json::to_string(&Message::Connected) {
+        let _ = writer.write_all(format!("{json}\n").as_bytes()).await;
+    }
+
     loop {
         tokio::select! {
             // Send messages to TUI

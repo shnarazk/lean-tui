@@ -42,7 +42,7 @@ impl<S: LspService> InterceptService<S> {
     }
 
     /// Create with a shared document cache (for sharing between client/server sides).
-    pub fn with_document_cache(
+    pub const fn with_document_cache(
         service: S,
         socket_server: Arc<SocketServer>,
         rpc_client: Option<Arc<RpcClient>>,
@@ -76,12 +76,8 @@ impl<S: LspService> InterceptService<S> {
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
-        // Track document content for tactic position detection
-        let doc_cache = self.document_cache.clone();
-        let notif_clone = notif.clone();
-        tokio::spawn(async move {
-            doc_cache.handle_notification(&notif_clone).await;
-        });
+        // Track document content for tactic position detection (sync, uses std::sync::Mutex)
+        self.document_cache.handle_notification(notif);
 
         if let Some(cursor) = extract_cursor_from_notification(notif) {
             let _span = tracing::info_span!(
