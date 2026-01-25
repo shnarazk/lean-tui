@@ -3,10 +3,10 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     prelude::*,
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Clear, Paragraph, Wrap},
 };
 
-use super::app::{App, ClickRegion, LoadStatus, SelectableItem};
+use super::app::{App, ClickRegion, LoadStatus, HypothesisFilters, SelectableItem};
 use crate::{
     lean_rpc::{DiffTag, Goal, Hypothesis},
     tui_ipc::SOCKET_PATH,
@@ -42,7 +42,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
     render_main(frame, app, main_area);
-    render_help(frame, help_area);
+    render_status_bar(frame, help_area, app.filters);
+
+    // Render help popup on top if visible
+    if app.show_help {
+        render_help_popup(frame);
+    }
 }
 
 /// Render the main content area.
@@ -304,7 +309,7 @@ fn render_goal_cell(frame: &mut Frame, app: &App, area: Rect, goal_idx: usize, k
     // For temporal columns, use CellKind::Current to show their own diff markers
     // (the goals from Lean already have diff info relative to their position)
     let render_kind = CellKind::Current;
-    let lines = build_goal_lines(goal, goal_idx, None, render_kind);
+    let lines = build_goal_lines(goal, goal_idx, None, render_kind, app.filters);
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
@@ -332,21 +337,32 @@ fn render_goal_cell_interactive(
     goal_idx: usize,
     selection: Option<&SelectableItem>,
 ) {
-    let Some(goal) = app.goals().get(goal_idx) else {
+    let Some(goal) = app.goals().get(goal_idx).cloned() else {
         return;
     };
-    let lines = build_goal_lines(goal, goal_idx, selection, CellKind::Current);
+    let lines = build_goal_lines(&goal, goal_idx, selection, CellKind::Current, app.filters);
 
     // Register click regions (header at line 0, then hypotheses, then target)
+    // Must match the order used in build_goal_lines
     let mut line_offset = 1u16;
-    for hyp_idx in 0..goal.hyps.len() {
-        register_click_region(
-            &mut app.click_regions,
-            area,
-            line_offset,
-            SelectableItem::Hypothesis { goal_idx, hyp_idx },
-        );
-        line_offset += 1;
+
+    let hyp_indices: Vec<usize> = if app.filters.reverse_order {
+        (0..goal.hyps.len()).rev().collect()
+    } else {
+        (0..goal.hyps.len()).collect()
+    };
+
+    for hyp_idx in hyp_indices {
+        let hyp = &goal.hyps[hyp_idx];
+        if app.filters.should_show(hyp) {
+            register_click_region(
+                &mut app.click_regions,
+                area,
+                line_offset,
+                SelectableItem::Hypothesis { goal_idx, hyp_idx },
+            );
+            line_offset += 1;
+        }
     }
     register_click_region(
         &mut app.click_regions,
@@ -364,6 +380,7 @@ fn build_goal_lines(
     goal_idx: usize,
     selection: Option<&SelectableItem>,
     kind: CellKind,
+    filters: HypothesisFilters,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -372,12 +389,23 @@ fn build_goal_lines(
             .style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
     );
 
-    for (hyp_idx, hyp) in goal.hyps.iter().enumerate() {
+    // Build hypothesis indices, respecting reverse order
+    let hyp_indices: Vec<usize> = if filters.reverse_order {
+        (0..goal.hyps.len()).rev().collect()
+    } else {
+        (0..goal.hyps.len()).collect()
+    };
+
+    for hyp_idx in hyp_indices {
+        let hyp = &goal.hyps[hyp_idx];
         if should_skip_hyp(hyp, kind) {
             continue;
         }
+        if !filters.should_show(hyp) {
+            continue;
+        }
         let is_selected = selection == Some(&SelectableItem::Hypothesis { goal_idx, hyp_idx });
-        lines.push(render_hypothesis_line(hyp, is_selected, kind));
+        lines.push(render_hypothesis_line(hyp, is_selected, kind, filters));
     }
 
     let is_target_selected = selection == Some(&SelectableItem::GoalTarget { goal_idx });
@@ -407,10 +435,26 @@ fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
         );
         click_items.push(None);
 
-        // Hypotheses (clickable)
-        for (hyp_idx, hyp) in goal.hyps.iter().enumerate() {
+        // Build hypothesis indices, respecting reverse order
+        let hyp_indices: Vec<usize> = if app.filters.reverse_order {
+            (0..goal.hyps.len()).rev().collect()
+        } else {
+            (0..goal.hyps.len()).collect()
+        };
+
+        // Hypotheses (clickable, filtered)
+        for hyp_idx in hyp_indices {
+            let hyp = &goal.hyps[hyp_idx];
+            if !app.filters.should_show(hyp) {
+                continue;
+            }
             let is_selected = selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
-            lines.push(render_hypothesis_line(hyp, is_selected, CellKind::Current));
+            lines.push(render_hypothesis_line(
+                hyp,
+                is_selected,
+                CellKind::Current,
+                app.filters,
+            ));
             click_items.push(Some(SelectableItem::Hypothesis { goal_idx, hyp_idx }));
         }
 
@@ -450,16 +494,32 @@ const fn should_skip_hyp(hyp: &Hypothesis, kind: CellKind) -> bool {
 
 /// Build goal header string.
 fn goal_header(goal: &Goal, goal_idx: usize) -> String {
-    goal.user_name.as_ref().map_or_else(
-        || format!("Goal {}:", goal_idx + 1),
-        |name| format!("case {name}"),
-    )
+    match goal.user_name.as_deref() {
+        Some("Expected") => "Expected:".to_string(),
+        Some(name) => format!("case {name}:"),
+        None => format!("Goal {}:", goal_idx + 1),
+    }
 }
 
 /// Render hypothesis line with cell-aware styling.
-fn render_hypothesis_line(hyp: &Hypothesis, is_selected: bool, kind: CellKind) -> Line<'static> {
+fn render_hypothesis_line(
+    hyp: &Hypothesis,
+    is_selected: bool,
+    kind: CellKind,
+    filters: HypothesisFilters,
+) -> Line<'static> {
     let names = hyp.names.join(", ");
     let prefix = selection_prefix(is_selected);
+
+    // Build type string, optionally including let-value
+    let type_str = if filters.hide_let_values {
+        hyp.type_.clone()
+    } else {
+        hyp.val.as_ref().map_or_else(
+            || hyp.type_.clone(),
+            |val| format!("{} := {val}", hyp.type_),
+        )
+    };
 
     // In non-Current columns, don't show diff markers (items are already filtered)
     let (style, diff_marker) = match kind {
@@ -479,7 +539,7 @@ fn render_hypothesis_line(hyp: &Hypothesis, is_selected: bool, kind: CellKind) -
         },
     };
 
-    Line::from(format!("{prefix}{names} : {}{diff_marker}", hyp.type_)).style(style)
+    Line::from(format!("{prefix}{names} : {type_str}{diff_marker}")).style(style)
 }
 
 /// Render goal target line with cell-aware styling.
@@ -518,17 +578,150 @@ const fn selection_prefix(is_selected: bool) -> &'static str {
     }
 }
 
-/// Render the help bar at the bottom.
-fn render_help(frame: &mut Frame, area: Rect) {
-    let help = Line::from(vec![
+/// Render the status bar at the bottom.
+fn render_status_bar(frame: &mut Frame, area: Rect, filters: HypothesisFilters) {
+    // Build filter indicator string
+    let mut filter_chars = Vec::new();
+    if filters.hide_instances {
+        filter_chars.push('i');
+    }
+    if filters.hide_types {
+        filter_chars.push('t');
+    }
+    if filters.hide_inaccessible {
+        filter_chars.push('a');
+    }
+    if filters.hide_let_values {
+        filter_chars.push('l');
+    }
+    if filters.reverse_order {
+        filter_chars.push('r');
+    }
+
+    let filter_status: String = if filter_chars.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", filter_chars.into_iter().collect::<String>())
+    };
+
+    let status = Line::from(vec![
+        Span::styled("?", Style::new().fg(Color::Cyan)),
+        ": help  ".into(),
         Span::styled("j/k", Style::new().fg(Color::Cyan)),
-        ": navigate  ".into(),
+        ": nav  ".into(),
         Span::styled("Enter", Style::new().fg(Color::Cyan)),
-        ": go to  ".into(),
-        Span::styled("p/n", Style::new().fg(Color::Cyan)),
-        ": toggle prev/next  ".into(),
+        ": go".into(),
+        Span::styled(filter_status, Style::new().fg(Color::Green)),
+        "  ".into(),
         Span::styled("q", Style::new().fg(Color::Cyan)),
         ": quit".into(),
     ]);
-    frame.render_widget(Paragraph::new(help), area);
+    frame.render_widget(Paragraph::new(status), area);
+}
+
+/// Center a rect within another rect.
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(r);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(popup_layout[1])[1]
+}
+
+/// Render the help popup overlay.
+fn render_help_popup(frame: &mut Frame) {
+    let area = centered_rect(60, 70, frame.area());
+
+    // Clear background
+    frame.render_widget(Clear, area);
+
+    let block = Block::bordered()
+        .title(" Keyboard Shortcuts ")
+        .title_bottom(" Press ? or Esc to close ")
+        .border_style(Style::new().fg(Color::Cyan));
+
+    let help_text = vec![
+        Line::from(vec![Span::styled(
+            "Navigation",
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  j / ↓    ", Style::new().fg(Color::Cyan)),
+            "Move selection down".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  k / ↑    ", Style::new().fg(Color::Cyan)),
+            "Move selection up".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter    ", Style::new().fg(Color::Cyan)),
+            "Go to definition".into(),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Hypothesis Filters",
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  i        ", Style::new().fg(Color::Cyan)),
+            "Toggle hide instances".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  t        ", Style::new().fg(Color::Cyan)),
+            "Toggle hide types".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  a        ", Style::new().fg(Color::Cyan)),
+            "Toggle hide inaccessible".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  l        ", Style::new().fg(Color::Cyan)),
+            "Toggle show let := values".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  r        ", Style::new().fg(Color::Cyan)),
+            "Reverse hypothesis order".into(),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Diff View",
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  p        ", Style::new().fg(Color::Cyan)),
+            "Toggle Previous column".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  n        ", Style::new().fg(Color::Cyan)),
+            "Toggle Next column".into(),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "General",
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ?        ", Style::new().fg(Color::Cyan)),
+            "Toggle this help".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("  q        ", Style::new().fg(Color::Cyan)),
+            "Quit".into(),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(help_text).block(block);
+    frame.render_widget(paragraph, area);
 }

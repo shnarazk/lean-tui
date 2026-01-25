@@ -26,23 +26,20 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
 
-    // Only init tracing for serve (TUI uses terminal)
-    if matches!(cli.command, Commands::Serve) {
-        if let Ok(log_file) = std::fs::File::create("/tmp/lean-tui.log") {
-            let filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(
-                "lean_tui=info"
-                    .parse()
-                    .unwrap_or_else(|_| "info".parse().unwrap()),
-            );
-            tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .with_writer(log_file)
-                .with_ansi(true)
-                .with_target(false)
-                .pretty()
-                .init();
-        }
-        // If log file creation fails, continue without file logging
+    // Init tracing to log file (both commands write to same file)
+    if let Ok(log_file) = std::fs::File::create("/tmp/lean-tui.log") {
+        let filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(
+            "lean_tui=debug"
+                .parse()
+                .unwrap_or_else(|_| "debug".parse().unwrap()),
+        );
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(log_file)
+            .with_ansi(true)
+            .with_target(false)
+            .pretty()
+            .init();
     }
 
     let result = match cli.command {

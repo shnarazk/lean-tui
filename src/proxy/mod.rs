@@ -132,10 +132,20 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Spawn lake serve child process.
+/// Lean pretty-printer options for the server.
+const LEAN_PP_OPTIONS: &[&str] = &[
+    "pp.showLetValues=true", // Show full let-binding values (not ⋯)
+];
+
+/// Spawn lake serve child process with configured Lean options.
 fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
-    let mut child = tokio::process::Command::new("lake")
-        .arg("serve")
+    let mut cmd = tokio::process::Command::new("lake");
+    cmd.arg("serve").arg("--");
+    for opt in LEAN_PP_OPTIONS {
+        cmd.args(["-D", opt]);
+    }
+
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

@@ -13,8 +13,8 @@ use tokio::sync::Mutex;
 use tower_service::Service;
 
 use super::{
-    Goal, InteractiveGoalsResponse, RpcConnectResponse, GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS,
-    RPC_CALL, RPC_CONNECT,
+    Goal, InteractiveGoalsResponse, InteractiveTermGoalResponse, RpcConnectResponse,
+    GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, RPC_CALL, RPC_CONNECT,
 };
 use crate::error::LspError;
 
@@ -27,7 +27,7 @@ struct RpcConnectParams {
 /// Lean RPC call wrapper parameters.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RpcCallParams<P: Serialize> {
+struct RpcCallParams<P> {
     text_document: TextDocumentIdentifier,
     position: Position,
     session_id: String,
@@ -131,7 +131,8 @@ impl RpcClient {
 
     /// Get or create a session for a URI.
     async fn get_session(&self, uri: &Url) -> Result<String, LspError> {
-        if let Some(id) = self.sessions.lock().await.get(uri.as_str()).cloned() {
+        let existing = self.sessions.lock().await.get(uri.as_str()).cloned();
+        if let Some(id) = existing {
             return Ok(id);
         }
         self.connect(uri).await
@@ -206,6 +207,39 @@ impl RpcClient {
             .await?;
 
         Self::parse_goals_response(&response)
+    }
+
+    /// Get interactive term goal at a position (expected type in term mode).
+    /// Returns `None` if cursor is not on a term or is in tactic mode.
+    pub async fn get_term_goal(
+        &self,
+        text_document: &TextDocumentIdentifier,
+        position: Position,
+    ) -> Result<Option<Goal>, LspError> {
+        let uri = &text_document.uri;
+        let params = GetInteractiveGoalsParams {
+            text_document: text_document.clone(),
+            position,
+        };
+
+        let response = self
+            .rpc_call_with_retry(
+                uri,
+                text_document,
+                position,
+                GET_INTERACTIVE_TERM_GOAL,
+                params,
+            )
+            .await?;
+
+        if response.is_null() {
+            return Ok(None);
+        }
+
+        let resp: InteractiveTermGoalResponse =
+            serde_json::from_value(response).map_err(|e| LspError::ParseError(e.to_string()))?;
+
+        Ok(Some(resp.to_goal()))
     }
 
     /// Get location using Lean's widget RPC (for hypothesis navigation).

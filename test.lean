@@ -19,7 +19,10 @@ theorem exists_prime_factor :
 /-- The factorial, defined recursively, with custom notation -/
 def factorial : Nat → Nat
   | 0 => 1
-  | n+1 => (n + 1) * factorial n
+  | n+1 =>
+    let r := factorial n
+
+    (n + 1) * r
 notation:10000 n "!" => factorial n
 
 /-- The factorial is always positive -/

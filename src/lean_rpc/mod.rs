@@ -7,6 +7,7 @@
 
 mod client;
 
+use async_lsp::lsp_types;
 pub use client::{GoToKind, RpcClient};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -62,9 +63,19 @@ pub struct Goal {
 
 /// A hypothesis in the local context
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Hypothesis {
     pub names: Vec<String>,
     pub type_: String,
+    /// Value for let-bindings (e.g., `let x := 5`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub val: Option<String>,
+    /// Is this a typeclass instance hypothesis?
+    #[serde(default)]
+    pub is_instance: bool,
+    /// Is this hypothesis a type?
+    #[serde(default)]
+    pub is_type: bool,
     /// `FVarIds` for go-to-definition support
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fvar_ids: Option<Vec<String>>,
@@ -121,8 +132,15 @@ pub struct InteractiveHypothesis {
     pub fvar_ids: Option<Vec<String>>,
     #[serde(rename = "type")]
     pub type_: CodeWithInfos,
+    /// Value for let-bindings (e.g., `let x := 5`)
     #[serde(default)]
     pub val: Option<CodeWithInfos>,
+    /// Is this a typeclass instance hypothesis?
+    #[serde(default)]
+    pub is_instance: Option<bool>,
+    /// Is this hypothesis a type?
+    #[serde(default)]
+    pub is_type: Option<bool>,
     /// Hypothesis was inserted (new in diff comparison)
     #[serde(default)]
     pub is_inserted: bool,
@@ -180,13 +198,34 @@ impl CodeWithInfos {
             Self::Text { .. } => None,
             Self::Tag { tag } => {
                 // tag.0 is the SubexprInfo which may contain {"diffStatus": "wasChanged", ...}
-                if let Some(status) = tag.0.get("diffStatus") {
-                    serde_json::from_value(status.clone()).ok()
-                } else {
-                    tag.1.first_diff_status()
-                }
+                tag.0.get("diffStatus").map_or_else(
+                    || tag.1.first_diff_status(),
+                    |status| serde_json::from_value(status.clone()).ok(),
+                )
             }
             Self::Append { append } => append.iter().find_map(Self::first_diff_status),
+        }
+    }
+}
+
+impl InteractiveHypothesis {
+    /// Convert to simplified Hypothesis for TUI display
+    pub fn to_hypothesis(&self) -> Hypothesis {
+        let val = self.val.as_ref().map(CodeWithInfos::to_plain_text);
+        if let Some(ref v) = val {
+            tracing::debug!("Hypothesis {:?} val: {:?}", self.names, v);
+        }
+        Hypothesis {
+            names: self.names.clone(),
+            type_: self.type_.to_plain_text(),
+            val,
+            is_instance: self.is_instance.unwrap_or(false),
+            is_type: self.is_type.unwrap_or(false),
+            fvar_ids: self.fvar_ids.clone(),
+            info: self.type_.first_subexpr_info(),
+            is_inserted: self.is_inserted,
+            is_removed: self.is_removed,
+            diff_status: self.type_.first_diff_status(),
         }
     }
 }
@@ -198,15 +237,7 @@ impl InteractiveGoal {
             hyps: self
                 .hyps
                 .iter()
-                .map(|h| Hypothesis {
-                    names: h.names.clone(),
-                    type_: h.type_.to_plain_text(),
-                    fvar_ids: h.fvar_ids.clone(),
-                    info: h.type_.first_subexpr_info(),
-                    is_inserted: h.is_inserted,
-                    is_removed: h.is_removed,
-                    diff_status: h.type_.first_diff_status(),
-                })
+                .map(InteractiveHypothesis::to_hypothesis)
                 .collect(),
             target: self.type_.to_plain_text(),
             prefix: if self.goal_prefix.is_empty() {
@@ -228,8 +259,41 @@ impl InteractiveGoalsResponse {
     }
 }
 
+/// Response from `Lean.Widget.getInteractiveTermGoal`
+/// Shows expected type when cursor is on a term (not in tactic mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractiveTermGoalResponse {
+    #[serde(default)]
+    pub hyps: Vec<InteractiveHypothesis>,
+    #[serde(rename = "type")]
+    pub type_: CodeWithInfos,
+    /// Syntactic range of the term
+    #[serde(default)]
+    pub range: Option<lsp_types::Range>,
+}
+
+impl InteractiveTermGoalResponse {
+    /// Convert to Goal with "Expected" marker for unified display.
+    pub fn to_goal(&self) -> Goal {
+        Goal {
+            hyps: self
+                .hyps
+                .iter()
+                .map(InteractiveHypothesis::to_hypothesis)
+                .collect(),
+            target: self.type_.to_plain_text(),
+            prefix: "⊢ ".to_string(),
+            user_name: Some("Expected".to_string()), // Marker for term goal
+            is_inserted: false,
+            is_removed: false,
+        }
+    }
+}
+
 /// RPC method names
 pub const RPC_CONNECT: &str = "$/lean/rpc/connect";
 pub const RPC_CALL: &str = "$/lean/rpc/call";
 pub const GET_INTERACTIVE_GOALS: &str = "Lean.Widget.getInteractiveGoals";
+pub const GET_INTERACTIVE_TERM_GOAL: &str = "Lean.Widget.getInteractiveTermGoal";
 pub const GET_GOTO_LOCATION: &str = "Lean.Widget.getGoToLocation";
