@@ -37,3 +37,4 @@ clap = { version = "4", features = ["derive"] }
 # TUI
 crossterm = { version = "0.28", features = ["event-stream"] }
 ratatui = "0.29"
+

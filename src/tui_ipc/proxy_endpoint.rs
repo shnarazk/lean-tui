@@ -16,7 +16,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use super::protocol::{Command, CursorInfo, Message, SOCKET_PATH};
+use super::protocol::{Command, CursorInfo, GoalResult, Message, TemporalSlot, SOCKET_PATH};
 use crate::lean_rpc::Goal;
 
 // ============================================================================
@@ -74,6 +74,22 @@ impl SocketServer {
     /// Broadcast error to all connected clients.
     pub fn broadcast_error(&self, error: String) {
         self.send(Message::Error { error });
+    }
+
+    /// Broadcast temporal goals to all connected clients.
+    pub fn broadcast_temporal_goals(
+        &self,
+        uri: String,
+        cursor_position: super::Position,
+        slot: TemporalSlot,
+        result: GoalResult,
+    ) {
+        self.send(Message::TemporalGoals {
+            uri,
+            cursor_position,
+            slot,
+            result,
+        });
     }
 }
 
@@ -202,6 +218,11 @@ impl CommandHandler {
                     "GetHypothesisLocation fallback: navigating to {uri}:{line}:{character}"
                 );
                 self.send_show_document(&uri, line, character).await;
+            }
+            Command::FetchTemporalGoals { .. } => {
+                // This is handled by process_command before reaching here.
+                // Should never reach this point.
+                tracing::warn!("FetchTemporalGoals reached CommandHandler unexpectedly");
             }
         }
     }

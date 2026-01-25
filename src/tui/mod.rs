@@ -53,6 +53,9 @@ pub async fn run() -> Result<()> {
                 if let Some(cmd) = app.take_pending_navigation() {
                     let _ = socket.tx.send(cmd).await;
                 }
+                if let Some(cmd) = app.take_pending_command() {
+                    let _ = socket.tx.send(cmd).await;
+                }
             }
         }
     }

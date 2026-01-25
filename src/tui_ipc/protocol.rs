@@ -5,6 +5,33 @@ use crate::lean_rpc::Goal;
 
 pub const SOCKET_PATH: &str = "/tmp/lean-tui.sock";
 
+/// Which temporal slot a goal state belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TemporalSlot {
+    /// Goals before the last tactic (at previous line)
+    Previous,
+    /// Goals at current cursor position
+    Current,
+    /// Goals after the next tactic (at next line)
+    Next,
+}
+
+/// Result of fetching goals for a temporal slot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum GoalResult {
+    /// Successfully fetched goals at the position.
+    Ready {
+        position: Position,
+        goals: Vec<Goal>,
+    },
+    /// No goals available (at proof boundary or outside proof).
+    NotAvailable,
+    /// Error fetching goals.
+    Error { error: String },
+}
+
 /// Position in a document (0-indexed line and character)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
@@ -52,11 +79,21 @@ impl CursorInfo {
 pub enum Message {
     /// Cursor position update
     Cursor(CursorInfo),
-    /// Proof goals at cursor position
+    /// Proof goals at cursor position (legacy, kept for compatibility)
     Goals {
         uri: String,
         position: Position,
         goals: Vec<Goal>,
+    },
+    /// Goals for a specific temporal slot (previous/current/next)
+    TemporalGoals {
+        uri: String,
+        /// The cursor position these goals are relative to
+        cursor_position: Position,
+        /// Which temporal slot this is
+        slot: TemporalSlot,
+        /// The result of fetching goals
+        result: GoalResult,
     },
     /// Error message
     Error { error: String },
@@ -84,5 +121,14 @@ pub enum Command {
         character: u32,
         /// The `InfoWithCtx` reference from the hypothesis type's `SubexprInfo`
         info: Value,
+    },
+    /// Request goals for a temporal slot (previous/next line)
+    FetchTemporalGoals {
+        /// Document URI
+        uri: String,
+        /// Current cursor position
+        cursor_position: Position,
+        /// Which slot to fetch
+        slot: TemporalSlot,
     },
 }

@@ -12,6 +12,7 @@ use futures::Future;
 
 use super::{
     cursor::{extract_cursor_from_notification, extract_cursor_from_request},
+    documents::DocumentCache,
     goals::spawn_goal_fetch,
 };
 use crate::{lean_rpc::RpcClient, tui_ipc::SocketServer};
@@ -22,10 +23,12 @@ pub struct InterceptService<S> {
     pub service: S,
     pub socket_server: Arc<SocketServer>,
     pub rpc_client: Option<Arc<RpcClient>>,
+    pub document_cache: Arc<DocumentCache>,
 }
 
 impl<S: LspService> InterceptService<S> {
-    pub const fn new(
+    #[allow(dead_code)]
+    pub fn new(
         service: S,
         socket_server: Arc<SocketServer>,
         rpc_client: Option<Arc<RpcClient>>,
@@ -34,6 +37,22 @@ impl<S: LspService> InterceptService<S> {
             service,
             socket_server,
             rpc_client,
+            document_cache: Arc::new(DocumentCache::new()),
+        }
+    }
+
+    /// Create with a shared document cache (for sharing between client/server sides).
+    pub fn with_document_cache(
+        service: S,
+        socket_server: Arc<SocketServer>,
+        rpc_client: Option<Arc<RpcClient>>,
+        document_cache: Arc<DocumentCache>,
+    ) -> Self {
+        Self {
+            service,
+            socket_server,
+            rpc_client,
+            document_cache,
         }
     }
 
@@ -57,6 +76,13 @@ impl<S: LspService> InterceptService<S> {
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
+        // Track document content for tactic position detection
+        let doc_cache = self.document_cache.clone();
+        let notif_clone = notif.clone();
+        tokio::spawn(async move {
+            doc_cache.handle_notification(&notif_clone).await;
+        });
+
         if let Some(cursor) = extract_cursor_from_notification(notif) {
             let _span = tracing::info_span!(
                 "cursor",

@@ -9,8 +9,12 @@
 
 mod commands;
 mod cursor;
+mod documents;
 mod goals;
 mod service;
+mod tactic_finder;
+
+pub use documents::DocumentCache;
 
 use std::{process::Stdio, sync::Arc};
 
@@ -28,23 +32,35 @@ use crate::{
 /// Run the LSP proxy: editor ↔ lean-tui ↔ lake serve.
 pub async fn run() -> Result<()> {
     let socket_server = Arc::new(SocketServer::new());
+    let document_cache = Arc::new(DocumentCache::new());
 
     let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
     // Client-side: lean-tui → lake serve
-    let (mut client_mainloop, server_socket) = MainLoop::new_client(|_| {
-        InterceptService::new(DeferredService(None), socket_server.clone(), None)
+    let doc_cache_client = document_cache.clone();
+    let socket_server_client = socket_server.clone();
+    let (mut client_mainloop, server_socket) = MainLoop::new_client(move |_| {
+        InterceptService::with_document_cache(
+            DeferredService(None),
+            socket_server_client.clone(),
+            None,
+            doc_cache_client.clone(),
+        )
     });
 
     // Create RPC client from server socket
     let rpc_client = Arc::new(RpcClient::new(server_socket.clone()));
 
     // Server-side: editor → lean-tui
-    let (server_mainloop, client_socket) = MainLoop::new_server(|_| {
-        InterceptService::new(
+    let doc_cache_server = document_cache.clone();
+    let socket_server_server = socket_server.clone();
+    let rpc_client_server = rpc_client.clone();
+    let (server_mainloop, client_socket) = MainLoop::new_server(move |_| {
+        InterceptService::with_document_cache(
             server_socket,
-            socket_server.clone(),
-            Some(rpc_client.clone()),
+            socket_server_server.clone(),
+            Some(rpc_client_server.clone()),
+            doc_cache_server.clone(),
         )
     });
 
@@ -55,12 +71,21 @@ pub async fn run() -> Result<()> {
     let (cmd_handler, cmd_tx) = CommandHandler::new(client_socket.clone());
 
     // Forward commands from socket server to command handler,
-    // intercepting GetHypothesisLocation for RPC lookup
+    // intercepting GetHypothesisLocation for RPC lookup and FetchTemporalGoals
     let rpc_for_commands = rpc_client.clone();
+    let doc_cache_for_commands = document_cache.clone();
+    let socket_server_for_commands = socket_server.clone();
     tokio::spawn(async move {
         let mut cmd_rx = cmd_rx;
         while let Some(cmd) = cmd_rx.recv().await {
-            let Some(cmd) = process_command(cmd, &rpc_for_commands).await else {
+            let Some(cmd) = process_command(
+                cmd,
+                &rpc_for_commands,
+                &doc_cache_for_commands,
+                &socket_server_for_commands,
+            )
+            .await
+            else {
                 continue;
             };
             if cmd_tx.send(cmd).await.is_err() {

@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Paragraph, Wrap},
 };
 
-use super::app::{App, ClickRegion, SelectableItem};
+use super::app::{App, ClickRegion, LoadStatus, SelectableItem};
 use crate::{
     lean_rpc::{DiffTag, Goal, Hypothesis},
     tui_ipc::SOCKET_PATH,
@@ -91,7 +91,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
     app.click_regions.clear();
 
-    if app.goals.is_empty() {
+    if app.goals().is_empty() {
         frame.render_widget(
             Paragraph::new("No goals").style(Style::new().fg(Color::DarkGray)),
             area,
@@ -109,7 +109,7 @@ fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Create header row + one row per goal
     let mut row_constraints = vec![Constraint::Length(1)]; // Header row
-    for goal in &app.goals {
+    for goal in app.goals() {
         // Each goal needs: header + hypotheses + target + blank line
         let height = 1 + goal.hyps.len() + 1 + 1;
         #[allow(clippy::cast_possible_truncation)]
@@ -123,7 +123,7 @@ fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Render each goal as a row (use index to avoid borrow conflict)
     let selection = app.current_selection();
-    let num_goals = app.goals.len();
+    let num_goals = app.goals().len();
     for goal_idx in 0..num_goals {
         render_goal_row(
             frame,
@@ -138,15 +138,15 @@ fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// Determine the column layout based on app state and terminal width.
 fn determine_column_layout(app: &App, width: u16) -> ColumnLayout {
-    let has_diffs = app.goals.iter().any(|g| {
-        g.is_inserted || g.is_removed || g.hyps.iter().any(|h| h.is_inserted || h.is_removed)
-    });
+    // Check if we have temporal columns enabled and available
+    let has_previous = app.columns.previous && app.temporal_goals.previous.is_some();
+    let has_next = app.columns.next && app.temporal_goals.next.is_some();
 
-    if !has_diffs || width < 80 {
+    if width < 80 || (!has_previous && !has_next) {
         return ColumnLayout::Single;
     }
 
-    match (app.columns.previous, app.columns.next, width >= 120) {
+    match (has_previous, has_next, width >= 120) {
         (true, true, true) => ColumnLayout::All,
         (true, _, _) => ColumnLayout::PreviousAndCurrent,
         (false, true, _) => ColumnLayout::CurrentAndNext,
@@ -255,14 +255,56 @@ fn render_goal_row(
 
 /// Render a non-interactive goal cell (Previous or Next column).
 fn render_goal_cell(frame: &mut Frame, app: &App, area: Rect, goal_idx: usize, kind: CellKind) {
-    let goal = &app.goals[goal_idx];
+    // Get the goal state for this temporal slot
+    let goal_state = match kind {
+        CellKind::Previous => app.temporal_goals.previous.as_ref(),
+        CellKind::Next => app.temporal_goals.next.as_ref(),
+        CellKind::Current => Some(&app.temporal_goals.current),
+    };
 
-    if should_skip_goal(goal, kind) {
+    let Some(state) = goal_state else {
         frame.render_widget(Paragraph::new("—").fg(Color::DarkGray).centered(), area);
         return;
+    };
+
+    // Handle loading/error/not available states
+    match &state.status {
+        LoadStatus::Loading => {
+            frame.render_widget(
+                Paragraph::new("Loading...").fg(Color::DarkGray).centered(),
+                area,
+            );
+            return;
+        }
+        LoadStatus::NotAvailable => {
+            let msg = match kind {
+                CellKind::Previous => "Start of proof",
+                CellKind::Next => "End of proof",
+                CellKind::Current => "No goals",
+            };
+            frame.render_widget(Paragraph::new(msg).fg(Color::DarkGray).centered(), area);
+            return;
+        }
+        LoadStatus::Error(e) => {
+            frame.render_widget(
+                Paragraph::new(format!("Error: {e}")).fg(Color::Red).centered(),
+                area,
+            );
+            return;
+        }
+        LoadStatus::Ready => {}
     }
 
-    let lines = build_goal_lines(goal, goal_idx, None, kind);
+    // Get the goal from this temporal slot's goals
+    let Some(goal) = state.goals.get(goal_idx) else {
+        frame.render_widget(Paragraph::new("—").fg(Color::DarkGray).centered(), area);
+        return;
+    };
+
+    // For temporal columns, use CellKind::Current to show their own diff markers
+    // (the goals from Lean already have diff info relative to their position)
+    let render_kind = CellKind::Current;
+    let lines = build_goal_lines(goal, goal_idx, None, render_kind);
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
@@ -290,7 +332,9 @@ fn render_goal_cell_interactive(
     goal_idx: usize,
     selection: Option<&SelectableItem>,
 ) {
-    let goal = &app.goals[goal_idx];
+    let Some(goal) = app.goals().get(goal_idx) else {
+        return;
+    };
     let lines = build_goal_lines(goal, goal_idx, selection, CellKind::Current);
 
     // Register click regions (header at line 0, then hypotheses, then target)
@@ -355,7 +399,7 @@ fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let selection = app.current_selection();
-    for (goal_idx, goal) in app.goals.iter().enumerate() {
+    for (goal_idx, goal) in app.goals().iter().enumerate() {
         // Goal header (not clickable)
         lines.push(
             Line::from(goal_header(goal, goal_idx))
@@ -393,15 +437,6 @@ fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
-}
-
-/// Check if a goal should be skipped based on cell kind.
-const fn should_skip_goal(goal: &Goal, kind: CellKind) -> bool {
-    match kind {
-        CellKind::Current => false,
-        CellKind::Previous => goal.is_inserted,
-        CellKind::Next => goal.is_removed,
-    }
 }
 
 /// Check if a hypothesis should be skipped based on cell kind.

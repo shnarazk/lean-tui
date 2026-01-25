@@ -5,7 +5,7 @@ use ratatui::{layout::Rect, widgets::ListState};
 
 use crate::{
     lean_rpc::Goal,
-    tui_ipc::{Command, CursorInfo, Message, Position},
+    tui_ipc::{Command, CursorInfo, GoalResult, Message, Position, TemporalSlot},
 };
 
 /// A selectable item in the TUI (hypothesis or goal target).
@@ -31,15 +31,42 @@ pub struct ColumnVisibility {
     pub next: bool,
 }
 
+/// Loading status for goal state.
+#[derive(Debug, Clone, Default)]
+pub enum LoadStatus {
+    #[default]
+    Ready,
+    Loading,
+    NotAvailable,
+    Error(String),
+}
+
+/// Goal state at a specific position.
+#[derive(Debug, Clone, Default)]
+pub struct GoalState {
+    pub goals: Vec<Goal>,
+    pub position: Position,
+    pub status: LoadStatus,
+}
+
+/// Goals at three temporal positions (previous, current, next tactic).
+#[derive(Debug, Clone, Default)]
+pub struct TemporalGoals {
+    /// Goals before the last tactic.
+    pub previous: Option<GoalState>,
+    /// Goals at current cursor position.
+    pub current: GoalState,
+    /// Goals after the next tactic.
+    pub next: Option<GoalState>,
+}
+
 /// Application state.
 #[derive(Default)]
 pub struct App {
     /// Current cursor position from editor.
     pub cursor: CursorInfo,
-    /// Goals at current position.
-    pub goals: Vec<Goal>,
-    /// Position where goals were fetched.
-    pub goals_position: Option<Position>,
+    /// Goals at three temporal positions.
+    pub temporal_goals: TemporalGoals,
     /// Current error message.
     pub error: Option<String>,
     /// Whether connected to proxy.
@@ -50,6 +77,8 @@ pub struct App {
     pub should_exit: bool,
     /// Pending navigation command to send.
     pub pending_navigation: Option<Command>,
+    /// Pending command to send (for temporal goal fetching).
+    pub pending_command: Option<Command>,
     /// Click regions for mouse interaction (updated each render).
     pub click_regions: Vec<ClickRegion>,
     /// Visibility settings for diff columns.
@@ -57,10 +86,26 @@ pub struct App {
 }
 
 impl App {
+    /// Get current goals (convenience accessor).
+    pub fn goals(&self) -> &[Goal] {
+        &self.temporal_goals.current.goals
+    }
+
+    /// Get position where current goals were fetched.
+    pub fn goals_position(&self) -> Option<Position> {
+        if self.temporal_goals.current.goals.is_empty() {
+            None
+        } else {
+            Some(self.temporal_goals.current.position)
+        }
+    }
+}
+
+impl App {
     /// Get all selectable items as a flat list.
     pub fn selectable_items(&self) -> Vec<SelectableItem> {
         let mut items = Vec::new();
-        for (goal_idx, goal) in self.goals.iter().enumerate() {
+        for (goal_idx, goal) in self.goals().iter().enumerate() {
             for hyp_idx in 0..goal.hyps.len() {
                 items.push(SelectableItem::Hypothesis { goal_idx, hyp_idx });
             }
@@ -107,6 +152,11 @@ impl App {
     pub fn handle_message(&mut self, msg: Message) {
         match msg {
             Message::Cursor(cursor) => {
+                // Clear temporal goals when cursor moves (they'll be re-fetched)
+                if cursor.position != self.cursor.position || cursor.uri != self.cursor.uri {
+                    self.temporal_goals.previous = None;
+                    self.temporal_goals.next = None;
+                }
                 self.cursor = cursor;
                 self.connected = true;
                 self.error = None;
@@ -116,8 +166,15 @@ impl App {
                 position,
                 goals,
             } => {
-                self.goals = goals;
-                self.goals_position = Some(position);
+                // Legacy Goals message - treat as current slot
+                self.temporal_goals.current = GoalState {
+                    goals,
+                    position,
+                    status: LoadStatus::Ready,
+                };
+                // Clear previous/next when current changes
+                self.temporal_goals.previous = None;
+                self.temporal_goals.next = None;
                 self.connected = true;
                 self.error = None;
                 // Reset selection when goals change
@@ -126,6 +183,52 @@ impl App {
                 } else {
                     self.list_state.select(Some(0));
                 }
+            }
+            Message::TemporalGoals {
+                uri: _,
+                cursor_position,
+                slot,
+                result,
+            } => {
+                // Only apply if still at same cursor position
+                if cursor_position == self.cursor.position {
+                    let goal_state = match result {
+                        GoalResult::Ready { position, goals } => GoalState {
+                            goals,
+                            position,
+                            status: LoadStatus::Ready,
+                        },
+                        GoalResult::NotAvailable => GoalState {
+                            goals: vec![],
+                            position: cursor_position,
+                            status: LoadStatus::NotAvailable,
+                        },
+                        GoalResult::Error { error } => GoalState {
+                            goals: vec![],
+                            position: cursor_position,
+                            status: LoadStatus::Error(error),
+                        },
+                    };
+
+                    match slot {
+                        TemporalSlot::Previous => {
+                            self.temporal_goals.previous = Some(goal_state);
+                        }
+                        TemporalSlot::Current => {
+                            self.temporal_goals.current = goal_state;
+                            // Reset selection when current goals change
+                            if self.selectable_items().is_empty() {
+                                self.list_state.select(None);
+                            } else {
+                                self.list_state.select(Some(0));
+                            }
+                        }
+                        TemporalSlot::Next => {
+                            self.temporal_goals.next = Some(goal_state);
+                        }
+                    }
+                }
+                self.connected = true;
             }
             Message::Error { error } => {
                 self.error = Some(error);
@@ -160,10 +263,18 @@ impl App {
                     }
                     KeyCode::Char('p') => {
                         self.columns.previous = !self.columns.previous;
+                        // Request previous goals if column toggled on and not already loaded
+                        if self.columns.previous && self.temporal_goals.previous.is_none() {
+                            self.request_temporal_goals(TemporalSlot::Previous);
+                        }
                         true
                     }
                     KeyCode::Char('n') => {
                         self.columns.next = !self.columns.next;
+                        // Request next goals if column toggled on and not already loaded
+                        if self.columns.next && self.temporal_goals.next.is_none() {
+                            self.request_temporal_goals(TemporalSlot::Next);
+                        }
                         true
                     }
                     _ => false,
@@ -206,6 +317,39 @@ impl App {
         })
     }
 
+    /// Request temporal goals for a slot.
+    fn request_temporal_goals(&mut self, slot: TemporalSlot) {
+        let uri = self.cursor.uri.clone();
+        if uri.is_empty() {
+            return;
+        }
+
+        // Mark as loading
+        match slot {
+            TemporalSlot::Previous => {
+                self.temporal_goals.previous = Some(GoalState {
+                    goals: vec![],
+                    position: self.cursor.position,
+                    status: LoadStatus::Loading,
+                });
+            }
+            TemporalSlot::Next => {
+                self.temporal_goals.next = Some(GoalState {
+                    goals: vec![],
+                    position: self.cursor.position,
+                    status: LoadStatus::Loading,
+                });
+            }
+            TemporalSlot::Current => {}
+        }
+
+        self.pending_command = Some(Command::FetchTemporalGoals {
+            uri,
+            cursor_position: self.cursor.position,
+            slot,
+        });
+    }
+
     /// Navigate to the currently selected item.
     ///
     /// For hypotheses with `info` (from `SubexprInfo`), sends a
@@ -224,7 +368,7 @@ impl App {
         }
 
         // Get the position where goals were fetched (for RPC session context)
-        let goals_pos = self.goals_position.unwrap_or(self.cursor.position);
+        let goals_pos = self.goals_position().unwrap_or(self.cursor.position);
 
         self.pending_navigation = Some(self.build_navigation_command(&selection, uri, goals_pos));
     }
@@ -239,7 +383,7 @@ impl App {
         // Try to get hypothesis info for go-to-definition
         let hyp_info = match selection {
             SelectableItem::Hypothesis { goal_idx, hyp_idx } => self
-                .goals
+                .goals()
                 .get(*goal_idx)
                 .and_then(|g| g.hyps.get(*hyp_idx))
                 .and_then(|h| h.info.clone()),
@@ -268,5 +412,11 @@ impl App {
     #[allow(clippy::missing_const_for_fn)] // Option::take is not const-stable
     pub fn take_pending_navigation(&mut self) -> Option<Command> {
         self.pending_navigation.take()
+    }
+
+    /// Take the pending command, if any (for temporal goal fetching).
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn take_pending_command(&mut self) -> Option<Command> {
+        self.pending_command.take()
     }
 }
