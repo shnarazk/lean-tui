@@ -3,9 +3,10 @@ description = "Standalone TUI infoview for Lean 4 theorem prover"
 edition = "2021"
 license = "MIT"
 name = "lean-tui"
+keywords = ["lean4", "proof-assistant", "tui", "mathematics"]
 repository = "https://codeberg.org/wvhulle/lean-tui"
 version = "0.0.1"
-
+authors = ["Willem Vanhulle <willemvanhulle@protonmail.com>"]
 
 [lints.clippy]
 excessive_nesting = { level = "deny", priority = 2 }
