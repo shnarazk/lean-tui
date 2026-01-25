@@ -31,7 +31,7 @@ impl DocumentCache {
     pub fn new() -> Self {
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_lean::language())
+            .set_language(&tree_sitter_lean4_source::language())
             .expect("Error loading Lean grammar");
 
         Self {

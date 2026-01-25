@@ -40,4 +40,4 @@ ratatui = "0.29"
 
 # Parsing
 tree-sitter = "0.25"
-tree-sitter-lean = { git = "https://github.com/wvhulle/tree-sitter-lean" }
+tree-sitter-lean4-source = { git = "https://github.com/wvhulle/tree-sitter-lean" }

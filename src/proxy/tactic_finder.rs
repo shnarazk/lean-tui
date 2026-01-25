@@ -94,7 +94,7 @@ mod tests {
     fn parse(code: &str) -> Tree {
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_lean::language())
+            .set_language(&tree_sitter_lean4_source::language())
             .expect("Error loading Lean grammar");
         parser.parse(code, None).expect("Failed to parse")
     }
