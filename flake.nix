@@ -31,13 +31,32 @@
         # Get the pre-built rust crate source with generated parser.c
         treeSitterLeanSrc = tree-sitter-lean.packages.${system}.rust-crate;
 
+        # Parse Cargo.lock and override tree-sitter-lean revision from flake input
+        # This ensures the vendored deps always match the flake input, regardless of Cargo.lock
+        cargoLockParsed =
+          let
+            original = builtins.fromTOML (builtins.readFile ./Cargo.lock);
+            tslRev = tree-sitter-lean.rev;
+            tslSource = "git+https://github.com/wvhulle/tree-sitter-lean#${tslRev}";
+          in
+          original
+          // {
+            package = map (
+              p:
+              if p.name == "tree-sitter-lean" then
+                p // { source = tslSource; }
+              else
+                p
+            ) original.package;
+          };
+
         # Helper to check if a package is tree-sitter-lean
         isTreeSitterLean =
           p: lib.hasPrefix "git+https://github.com/wvhulle/tree-sitter-lean" (p.source or "");
 
         # Vendor all dependencies, replacing tree-sitter-lean git checkout with our pre-built source
         cargoVendorDir = craneLib.vendorCargoDeps {
-          inherit src;
+          inherit src cargoLockParsed;
           overrideVendorGitCheckout = ps: drv: if lib.any isTreeSitterLean ps then treeSitterLeanSrc else drv;
         };
 
@@ -85,9 +104,6 @@
             tree-sitter
             elan
           ];
-
-          # Configure cargo to use vendored dependencies
-          CARGO_HOME = ".cargo-home";
 
           shellHook = ''
             echo "lean-tui development shell"

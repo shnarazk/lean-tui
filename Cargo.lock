@@ -1263,7 +1263,7 @@ checksum = "4ae62f7eae5eb549c71b76658648b72cc6111f2d87d24a1e31fa907f4943e3ce"
 [[package]]
 name = "tree-sitter-lean"
 version = "0.0.1"
-source = "git+https://github.com/wvhulle/tree-sitter-lean#d8e990033f0a36a197fbf9911044360f7aed9ac3"
+source = "git+https://github.com/wvhulle/tree-sitter-lean#0dcebaaefb758084a58d5612f18789709e5ce00a"
 dependencies = [
  "cc",
  "tree-sitter",
