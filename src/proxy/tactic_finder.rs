@@ -88,8 +88,9 @@ fn node_to_position(node: Node<'_>) -> Position {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tree_sitter::Parser;
+
+    use super::*;
 
     fn parse(code: &str) -> Tree {
         let mut parser = Parser::new();

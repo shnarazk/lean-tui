@@ -41,7 +41,8 @@ impl<S: LspService> InterceptService<S> {
         }
     }
 
-    /// Create with a shared document cache (for sharing between client/server sides).
+    /// Create with a shared document cache (for sharing between client/server
+    /// sides).
     pub const fn with_document_cache(
         service: S,
         socket_server: Arc<SocketServer>,
@@ -76,7 +77,8 @@ impl<S: LspService> InterceptService<S> {
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
-        // Track document content for tactic position detection (sync, uses std::sync::Mutex)
+        // Track document content for tactic position detection (sync, uses
+        // std::sync::Mutex)
         self.document_cache.handle_notification(notif);
 
         if let Some(cursor) = extract_cursor_from_notification(notif) {

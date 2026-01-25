@@ -1,7 +1,8 @@
 //! Document content cache with tree-sitter parsing.
 //!
-//! Caches document content and syntax trees for efficient tactic position detection.
-//! Tree-sitter's incremental parsing reuses unchanged subtrees automatically.
+//! Caches document content and syntax trees for efficient tactic position
+//! detection. Tree-sitter's incremental parsing reuses unchanged subtrees
+//! automatically.
 
 use std::{collections::HashMap, sync::Mutex};
 
@@ -60,7 +61,8 @@ impl DocumentCache {
         }
     }
 
-    /// Update document content and re-parse with old tree for incremental benefit.
+    /// Update document content and re-parse with old tree for incremental
+    /// benefit.
     fn update(&self, uri: &str, content: String) {
         let mut docs = self.documents.lock().expect("lock poisoned");
         let old_tree = docs.get(uri).and_then(|d| d.tree.as_ref());

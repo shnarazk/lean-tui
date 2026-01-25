@@ -14,12 +14,11 @@ mod goals;
 mod service;
 mod tactic_finder;
 
-pub use documents::DocumentCache;
-
 use std::{process::Stdio, sync::Arc};
 
 use async_lsp::MainLoop;
 use commands::process_command;
+pub use documents::DocumentCache;
 use service::{DeferredService, InterceptService};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 

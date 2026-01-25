@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 
-use super::documents::DocumentCache;
-use super::tactic_finder;
+use super::{documents::DocumentCache, tactic_finder};
 use crate::{
     lean_rpc::{GoToKind, RpcClient},
     tui_ipc::{Command, GoalResult, Position as TuiPosition, SocketServer, TemporalSlot},
