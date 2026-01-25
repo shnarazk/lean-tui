@@ -24,13 +24,26 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         craneLib = crane.mkLib pkgs;
+        lib = pkgs.lib;
 
-        # Get the tree-sitter-lean grammar with generated parser
-        treeSitterLean = tree-sitter-lean.packages.${system}.default;
+        src = craneLib.cleanCargoSource ./.;
+
+        # Get the pre-built rust crate source with generated parser.c
+        treeSitterLeanSrc = tree-sitter-lean.packages.${system}.rust-crate;
+
+        # Helper to check if a package is tree-sitter-lean
+        isTreeSitterLean =
+          p: lib.hasPrefix "git+https://github.com/wvhulle/tree-sitter-lean" (p.source or "");
+
+        # Vendor all dependencies, replacing tree-sitter-lean git checkout with our pre-built source
+        cargoVendorDir = craneLib.vendorCargoDeps {
+          inherit src;
+          overrideVendorGitCheckout = ps: drv: if lib.any isTreeSitterLean ps then treeSitterLeanSrc else drv;
+        };
 
         # Common arguments for crane builds
         commonArgs = {
-          src = craneLib.cleanCargoSource ./.;
+          inherit src cargoVendorDir;
           strictDeps = true;
           buildInputs = [ ];
           nativeBuildInputs = [ pkgs.pkg-config ];
@@ -69,24 +82,27 @@
           checks = self.checks.${system};
 
           packages = with pkgs; [
-            # tree-sitter CLI for debugging/testing parse trees
             tree-sitter
             elan
           ];
 
-          TREE_SITTER_LEAN_PATH = treeSitterLean;
+          # Configure cargo to use vendored dependencies
+          CARGO_HOME = ".cargo-home";
 
           shellHook = ''
             echo "lean-tui development shell"
             echo ""
-            echo "tree-sitter-lean grammar: $TREE_SITTER_LEAN_PATH"
-            echo ""
-            echo "Commands:"
-            echo "  cargo build    - Build the project"
-            echo "  cargo test     - Run tests"
-            echo "  cargo run      - Run lean-tui"
-            echo "  nix build      - Build with Nix"
-            echo "  nix flake check - Run checks (clippy, fmt)"
+
+            # Set up .cargo/config.toml to use vendored deps
+            mkdir -p .cargo
+            if [ ! -f .cargo/config.toml ] || ! grep -q "nix-sources" .cargo/config.toml 2>/dev/null; then
+              cat ${cargoVendorDir}/config.toml > .cargo/config.toml
+              echo "Configured cargo to use vendored dependencies."
+            fi
+
+            echo "Use 'cargo build' to build the project."
+            echo "Use 'cargo test' to run tests."
+            echo "Use 'nix build' for a reproducible build."
           '';
         };
       }

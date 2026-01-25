@@ -31,7 +31,7 @@ impl DocumentCache {
     pub fn new() -> Self {
         let mut parser = Parser::new();
         parser
-            .set_language(tree_sitter_lean::language())
+            .set_language(&tree_sitter_lean::language())
             .expect("Error loading Lean grammar");
 
         Self {
@@ -93,12 +93,17 @@ impl DocumentCache {
     }
 
     fn parse(&self, content: &str, old_tree: Option<&Tree>) -> Option<Tree> {
-        self.parser.lock().expect("lock poisoned").parse(content, old_tree)
+        self.parser
+            .lock()
+            .expect("lock poisoned")
+            .parse(content, old_tree)
     }
 
     /// Get cached syntax tree for a document.
     pub fn get_tree(&self, uri: &str) -> Option<Tree> {
-        self.documents.lock().expect("lock poisoned")
+        self.documents
+            .lock()
+            .expect("lock poisoned")
             .get(uri)
             .and_then(|d| d.tree.clone())
     }

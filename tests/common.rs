@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc)]
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -108,21 +110,15 @@ impl LspTestHarness {
         self.stdin.take();
 
         // Read all stderr lines
-        let mut output = String::new();
-        if let Some(stderr) = self.stderr.take() {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                match line {
-                    Ok(l) => {
-                        output.push_str(&l);
-                        output.push('\n');
-                    }
-                    Err(_) => break,
-                }
-            }
-        }
+        let Some(stderr) = self.stderr.take() else {
+            return String::new();
+        };
 
-        output
+        BufReader::new(stderr)
+            .lines()
+            .map_while(Result::ok)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 

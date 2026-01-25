@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Wrap},
 };
 
-use super::app::{App, ClickRegion, LoadStatus, HypothesisFilters, SelectableItem};
+use super::app::{App, ClickRegion, HypothesisFilters, LoadStatus, SelectableItem};
 use crate::{
     lean_rpc::{DiffTag, Goal, Hypothesis},
     tui_ipc::SOCKET_PATH,
@@ -292,7 +292,9 @@ fn render_goal_cell(frame: &mut Frame, app: &App, area: Rect, goal_idx: usize, k
         }
         LoadStatus::Error(e) => {
             frame.render_widget(
-                Paragraph::new(format!("Error: {e}")).fg(Color::Red).centered(),
+                Paragraph::new(format!("Error: {e}"))
+                    .fg(Color::Red)
+                    .centered(),
                 area,
             );
             return;

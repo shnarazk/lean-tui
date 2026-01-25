@@ -2,3 +2,5 @@
 .lake
 .direnv/
 result
+.cargo/
+.cargo-home/

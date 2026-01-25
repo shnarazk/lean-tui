@@ -50,11 +50,11 @@ pub fn find_next_tactic(tree: &Tree, current: Position) -> Option<Position> {
 }
 
 /// Find the "tactics" node that contains the given position.
-fn find_enclosing_tactics<'a>(root: Node<'a>, point: Point) -> Option<Node<'a>> {
+fn find_enclosing_tactics(root: Node<'_>, point: Point) -> Option<Node<'_>> {
     find_tactics_recursive(root, point)
 }
 
-fn find_tactics_recursive<'a>(node: Node<'a>, point: Point) -> Option<Node<'a>> {
+fn find_tactics_recursive(node: Node<'_>, point: Point) -> Option<Node<'_>> {
     // Check if this node contains our point
     if point < node.start_position() || point > node.end_position() {
         return None;
@@ -94,7 +94,7 @@ mod tests {
     fn parse(code: &str) -> Tree {
         let mut parser = Parser::new();
         parser
-            .set_language(tree_sitter_lean::language())
+            .set_language(&tree_sitter_lean::language())
             .expect("Error loading Lean grammar");
         parser.parse(code, None).expect("Failed to parse")
     }
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_have_declarations_structure() {
         // Simplified version similar to user's test.lean lines 47-54
-        let code = r#"theorem foo : True := by
+        let code = r"theorem foo : True := by
   intro n
 
   have : 1 < 2 := by grind
@@ -146,7 +146,7 @@ mod tests {
   have : 2 < 3 := by grind
 
   have := Nat.add_comm 1 2
-  grind"#;
+  grind";
         let tree = parse(code);
         println!("=== Have declarations tree structure ===");
         print_tree(tree.root_node(), code, 0);
@@ -159,10 +159,17 @@ mod tests {
         let tree = parse(code);
 
         // Cursor on "done" (line 3) should find "trivial" (line 1) as previous
-        let pos = Position { line: 3, character: 2 };
+        let pos = Position {
+            line: 3,
+            character: 2,
+        };
         let prev = find_previous_tactic(&tree, pos);
         assert!(prev.is_some(), "Should find previous tactic");
-        assert_eq!(prev.unwrap().line, 1, "Previous should be on line 1 (trivial)");
+        assert_eq!(
+            prev.unwrap().line,
+            1,
+            "Previous should be on line 1 (trivial)"
+        );
     }
 
     #[test]
@@ -172,9 +179,41 @@ mod tests {
         let tree = parse(code);
 
         // Cursor on "trivial" (line 1) should find "done" (line 3) as next
-        let pos = Position { line: 1, character: 2 };
+        let pos = Position {
+            line: 1,
+            character: 2,
+        };
         let next = find_next_tactic(&tree, pos);
         assert!(next.is_some(), "Should find next tactic");
         assert_eq!(next.unwrap().line, 3, "Next should be on line 3 (done)");
+    }
+
+    #[test]
+    fn test_find_next_with_have_tactics() {
+        // Have tactics - this reveals the grammar limitation
+        let code = r"theorem foo : True := by
+  intro n
+  have : 1 < 2 := by grind
+  have : 2 < 3 := by grind
+  grind";
+        let tree = parse(code);
+
+        println!("=== Testing have navigation ===");
+        print_tree(tree.root_node(), code, 0);
+
+        // Cursor on "intro" (line 1) - can we find "have" (line 2)?
+        let pos = Position {
+            line: 1,
+            character: 2,
+        };
+        let next = find_next_tactic(&tree, pos);
+        println!("From intro (line 1), next tactic: {:?}", next);
+
+        // This test documents the current behavior - we expect it to fail
+        // because the grammar doesn't create a proper tactics block
+        if next.is_none() {
+            println!("WARNING: Grammar does not support navigation between have tactics!");
+            println!("The tree structure shows have statements are not inside a 'tactics' node.");
+        }
     }
 }

@@ -113,11 +113,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1769339587,
-        "narHash": "sha256-GywGFq3nWym4NuPfCH/f6IRDL/+aCKVBJ2hay2/Q+50=",
+        "lastModified": 1769343906,
+        "narHash": "sha256-ItUqMUO6xEj4VB8JX836z5OPK6+2VFaXZCpCi53LKh0=",
         "owner": "wvhulle",
         "repo": "tree-sitter-lean",
-        "rev": "3db16048a16f09e0657cd97518c247665acc1588",
+        "rev": "b027f18da50b2bb1d100544cdd29541ad545efea",
         "type": "github"
       },
       "original": {

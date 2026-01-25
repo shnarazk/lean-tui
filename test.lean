@@ -27,7 +27,7 @@ notation:10000 n "!" => factorial n
 
 /-- The factorial is always positive -/
 theorem factorial_pos : ∀ n, 0 < n ! := by
-  intro n; induction n <;> grind [factorial]
+  intro n; induction n <;>  grind [factorial]
 
 /-- ... and divided by its constituent factors -/
 theorem dvd_factorial : ∀ n, ∀ k ≤ n, 0 < k → k ∣ n ! := by
@@ -41,7 +41,7 @@ and showing that `n! + 1` has a prime factor larger than `n`.
 -/
 theorem InfinitudeOfPrimes : ∀ n, ∃ p > n, IsPrime p := by
   intro n
-  :
+
   have : 1 < n ! + 1 := by grind [factorial_pos]
 
   obtain ⟨p, hp, _⟩ := exists_prime_factor (n ! + 1) this
