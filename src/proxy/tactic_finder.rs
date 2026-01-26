@@ -95,7 +95,7 @@ mod tests {
     fn parse(code: &str) -> Tree {
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_lean4_source::language())
+            .set_language(&tree_sitter_lean4::language())
             .expect("Error loading Lean grammar");
         parser.parse(code, None).expect("Failed to parse")
     }
@@ -208,7 +208,7 @@ mod tests {
             character: 2,
         };
         let next = find_next_tactic(&tree, pos);
-        println!("From intro (line 1), next tactic: {:?}", next);
+        println!("From intro (line 1), next tactic: {next:?}");
 
         // This test documents the current behavior - we expect it to fail
         // because the grammar doesn't create a proper tactics block

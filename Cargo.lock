@@ -606,7 +606,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tree-sitter",
- "tree-sitter-lean4-source",
+ "tree-sitter-lean4",
 ]
 
 [[package]]
@@ -1261,9 +1261,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ae62f7eae5eb549c71b76658648b72cc6111f2d87d24a1e31fa907f4943e3ce"
 
 [[package]]
-name = "tree-sitter-lean4-source"
-version = "0.1.0"
-source = "git+https://github.com/wvhulle/tree-sitter-lean#777cd6a140d578986d4e4b93e35ea337ca64594a"
+name = "tree-sitter-lean4"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2392a53c93b7cfa2da8690a28204486db1bfa0d20b7edbc0a9e684df0993b360"
 dependencies = [
  "cc",
  "tree-sitter",
