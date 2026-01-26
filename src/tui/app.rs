@@ -1,11 +1,13 @@
-//! Application state and event handling.
+//! Application state for the TUI.
 
-use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
-use ratatui::{layout::Rect, widgets::ListState};
+use ratatui::layout::Rect;
 
 use crate::{
     lean_rpc::{Goal, Hypothesis},
-    tui_ipc::{Command, CursorInfo, GoalResult, Message, Position, TemporalSlot, Url},
+    tui_ipc::{
+        CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
+        TemporalSlot,
+    },
 };
 
 /// Generate hypothesis indices, optionally reversed.
@@ -36,14 +38,13 @@ pub struct ClickRegion {
 /// Visibility settings for diff columns (both hidden by default).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ColumnVisibility {
-    /// Show the "Previous" column in diff view.
     pub previous: bool,
-    /// Show the "Next" column in diff view.
     pub next: bool,
 }
 
-/// Loading status for goal state.
+/// Loading status for goal state (used for temporal goals feature).
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub enum LoadStatus {
     #[default]
     Ready,
@@ -57,34 +58,42 @@ pub enum LoadStatus {
 pub struct GoalState {
     pub goals: Vec<Goal>,
     pub position: Position,
+    #[allow(dead_code)]
     pub status: LoadStatus,
 }
 
 /// Goals at three temporal positions (previous, current, next tactic).
 #[derive(Debug, Clone, Default)]
 pub struct TemporalGoals {
-    /// Goals before the last tactic.
     pub previous: Option<GoalState>,
-    /// Goals at current cursor position.
     pub current: GoalState,
-    /// Goals after the next tactic.
     pub next: Option<GoalState>,
 }
 
 /// Filter settings for hypothesis display (VSCode-lean4 compatible).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct HypothesisFilters {
-    /// Hide typeclass instance hypotheses.
     pub hide_instances: bool,
-    /// Hide type hypotheses.
     pub hide_types: bool,
-    /// Hide inaccessible names (names containing dagger U+2020).
     pub hide_inaccessible: bool,
-    /// Hide let-binding values (show `x : T` instead of `x : T := v`).
     pub hide_let_values: bool,
-    /// Reverse hypothesis order (newest first).
     pub reverse_order: bool,
+    /// Hide definition header and tree structure (default: true).
+    pub hide_definition: bool,
+}
+
+impl Default for HypothesisFilters {
+    fn default() -> Self {
+        Self {
+            hide_instances: false,
+            hide_types: false,
+            hide_inaccessible: false,
+            hide_let_values: false,
+            reverse_order: false,
+            hide_definition: true, // Off by default
+        }
+    }
 }
 
 impl HypothesisFilters {
@@ -106,31 +115,30 @@ impl HypothesisFilters {
 /// Application state.
 #[derive(Default)]
 pub struct App {
-    /// Current cursor position from editor (None until first cursor event).
+    /// Current cursor position from editor.
     pub cursor: Option<CursorInfo>,
     /// Goals at three temporal positions.
     pub temporal_goals: TemporalGoals,
+    /// Enclosing definition (theorem/lemma name).
+    pub definition: Option<DefinitionInfo>,
+    /// Case-splitting tactics affecting current position.
+    pub case_splits: Vec<CaseSplitInfo>,
     /// Current error message.
     pub error: Option<String>,
     /// Whether connected to proxy.
     pub connected: bool,
-    /// Selection state for the goal list.
-    pub list_state: ListState,
     /// Whether app should exit.
     pub should_exit: bool,
-    /// Outgoing commands queue (navigation + temporal fetching).
+    /// Outgoing commands queue.
     outgoing_commands: Vec<Command>,
-    /// Click regions for mouse interaction (computed before each render).
+    /// Click regions for mouse interaction (from GoalView component).
     pub click_regions: Vec<ClickRegion>,
     /// Visibility settings for diff columns.
     pub columns: ColumnVisibility,
     /// Filter settings for hypothesis display.
     pub filters: HypothesisFilters,
-    /// Whether to show the help popup.
-    pub show_help: bool,
 }
 
-/// Convert a goal result to a goal state.
 fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> GoalState {
     match result {
         GoalResult::Ready { position, goals } => GoalState {
@@ -152,7 +160,7 @@ fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> Goal
 }
 
 impl App {
-    /// Get current goals (convenience accessor).
+    /// Get current goals.
     pub fn goals(&self) -> &[Goal] {
         &self.temporal_goals.current.goals
     }
@@ -165,9 +173,7 @@ impl App {
             Some(self.temporal_goals.current.position)
         }
     }
-}
 
-impl App {
     /// Queue a command to be sent to the proxy.
     pub fn queue_command(&mut self, cmd: Command) {
         self.outgoing_commands.push(cmd);
@@ -176,55 +182,6 @@ impl App {
     /// Take all queued commands.
     pub fn take_commands(&mut self) -> Vec<Command> {
         std::mem::take(&mut self.outgoing_commands)
-    }
-
-    pub fn selectable_items(&self) -> Vec<SelectableItem> {
-        self.goals()
-            .iter()
-            .enumerate()
-            .flat_map(|(goal_idx, goal)| {
-                let hyp_items = hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
-                    .filter(|&hyp_idx| self.filters.should_show(&goal.hyps[hyp_idx]))
-                    .map(move |hyp_idx| SelectableItem::Hypothesis { goal_idx, hyp_idx });
-
-                hyp_items.chain(std::iter::once(SelectableItem::GoalTarget { goal_idx }))
-            })
-            .collect()
-    }
-
-    /// Get currently selected item.
-    pub fn current_selection(&self) -> Option<SelectableItem> {
-        let items = self.selectable_items();
-        self.list_state
-            .selected()
-            .and_then(|i| items.get(i).copied())
-    }
-
-    /// Move selection to previous item.
-    pub fn select_previous(&mut self) {
-        let count = self.selectable_items().len();
-        if count == 0 {
-            return;
-        }
-        let i = self
-            .list_state
-            .selected()
-            .map_or(0, |i| i.saturating_sub(1));
-        self.list_state.select(Some(i));
-    }
-
-    /// Move selection to next item.
-    pub fn select_next(&mut self) {
-        let count = self.selectable_items().len();
-        if count == 0 {
-            return;
-        }
-        let i = match self.list_state.selected() {
-            Some(i) if i < count - 1 => i + 1,
-            Some(i) => i,
-            None => 0,
-        };
-        self.list_state.select(Some(i));
     }
 
     /// Handle incoming message from proxy.
@@ -242,12 +199,23 @@ impl App {
                 uri: _,
                 position,
                 goals,
+                definition,
+                case_splits,
             } => {
                 let goals_changed = self.temporal_goals.current.goals != goals;
                 let line_changed = self.temporal_goals.current.position.line != position.line;
 
+                // Keep previous definition if new one is None and we're on the same line
+                let new_definition = if definition.is_none() && !line_changed {
+                    self.definition.clone()
+                } else {
+                    definition
+                };
+
                 if !goals_changed && !line_changed {
                     self.temporal_goals.current.position = position;
+                    self.definition = new_definition;
+                    self.case_splits = case_splits;
                     self.connected = true;
                     return;
                 }
@@ -257,9 +225,10 @@ impl App {
                     position,
                     status: LoadStatus::Ready,
                 };
+                self.definition = new_definition;
+                self.case_splits = case_splits;
                 self.connected = true;
                 self.error = None;
-                self.reset_selection();
                 self.refresh_temporal_columns();
             }
             Message::TemporalGoals {
@@ -283,109 +252,63 @@ impl App {
         }
     }
 
-    /// Handle terminal event. Returns true if event was handled.
-    pub fn handle_event(&mut self, event: &Event) -> bool {
-        match event {
-            Event::Key(key) => {
-                if key.kind != KeyEventKind::Press {
-                    return false;
-                }
-                match key.code {
-                    KeyCode::Char('q') => {
-                        self.should_exit = true;
-                        true
-                    }
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        self.select_next();
-                        true
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        self.select_previous();
-                        true
-                    }
-                    KeyCode::Enter => {
-                        self.navigate_to_selection();
-                        true
-                    }
-                    KeyCode::Char('p') => {
-                        self.toggle_previous_column();
-                        true
-                    }
-                    KeyCode::Char('n') => {
-                        self.toggle_next_column();
-                        true
-                    }
-                    // Hypothesis filter toggles
-                    KeyCode::Char('i') => {
-                        self.filters.hide_instances = !self.filters.hide_instances;
-                        true
-                    }
-                    KeyCode::Char('t') => {
-                        self.filters.hide_types = !self.filters.hide_types;
-                        true
-                    }
-                    KeyCode::Char('a') => {
-                        self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
-                        true
-                    }
-                    KeyCode::Char('l') => {
-                        self.filters.hide_let_values = !self.filters.hide_let_values;
-                        true
-                    }
-                    KeyCode::Char('r') => {
-                        self.filters.reverse_order = !self.filters.reverse_order;
-                        true
-                    }
-                    KeyCode::Char('?') => {
-                        self.show_help = !self.show_help;
-                        true
-                    }
-                    KeyCode::Esc if self.show_help => {
-                        self.show_help = false;
-                        true
-                    }
-                    _ => false,
-                }
-            }
-            Event::Mouse(mouse) => {
-                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                    self.handle_click(mouse.column, mouse.row)
-                } else {
-                    false
-                }
-            }
-            _ => false,
+    /// Toggle the previous column visibility.
+    pub fn toggle_previous_column(&mut self) {
+        self.columns.previous = !self.columns.previous;
+        if self.columns.previous && self.temporal_goals.previous.is_none() {
+            self.request_temporal_goals(TemporalSlot::Previous);
         }
     }
 
-    /// Handle mouse click at given coordinates.
-    fn handle_click(&mut self, x: u16, y: u16) -> bool {
-        let clicked_item = self.find_click_region(x, y).map(|r| r.item);
-        let Some(item) = clicked_item else {
-            return false;
-        };
-
-        let items = self.selectable_items();
-        let Some(idx) = items.iter().position(|i| *i == item) else {
-            return false;
-        };
-
-        self.list_state.select(Some(idx));
-        self.navigate_to_selection();
-        true
+    /// Toggle the next column visibility.
+    pub fn toggle_next_column(&mut self) {
+        self.columns.next = !self.columns.next;
+        if self.columns.next && self.temporal_goals.next.is_none() {
+            self.request_temporal_goals(TemporalSlot::Next);
+        }
     }
 
-    /// Find the click region containing the given coordinates.
-    fn find_click_region(&self, x: u16, y: u16) -> Option<&ClickRegion> {
-        self.click_regions.iter().find(|region| {
-            region.area.x <= x
-                && x < region.area.x + region.area.width
-                && region.area.y <= y
-                && y < region.area.y + region.area.height
-        })
+    /// Navigate to the given selection.
+    pub fn navigate_to_selection(&mut self, selection: Option<SelectableItem>) {
+        let Some(cursor) = &self.cursor else {
+            return;
+        };
+
+        let goals_pos = self.goals_position().unwrap_or(cursor.position);
+        let cmd = self.build_navigation_command(selection, cursor.uri.clone(), goals_pos);
+        self.queue_command(cmd);
     }
 
-    /// Re-request temporal goals for visible columns.
+    fn build_navigation_command(
+        &self,
+        selection: Option<SelectableItem>,
+        uri: async_lsp::lsp_types::Url,
+        position: Position,
+    ) -> Command {
+        let hyp_info = match selection {
+            Some(SelectableItem::Hypothesis { goal_idx, hyp_idx }) => self
+                .goals()
+                .get(goal_idx)
+                .and_then(|g| g.hyps.get(hyp_idx))
+                .and_then(|h| h.first_info()),
+            Some(SelectableItem::GoalTarget { goal_idx }) => self
+                .goals()
+                .get(goal_idx)
+                .and_then(|g| g.target.first_info()),
+            None => None,
+        };
+
+        if let Some(info) = hyp_info {
+            Command::GetHypothesisLocation {
+                uri,
+                position,
+                info,
+            }
+        } else {
+            Command::Navigate { uri, position }
+        }
+    }
+
     fn refresh_temporal_columns(&mut self) {
         if self.columns.previous {
             self.request_temporal_goals(TemporalSlot::Previous);
@@ -395,23 +318,6 @@ impl App {
         }
     }
 
-    /// Toggle the previous column visibility.
-    fn toggle_previous_column(&mut self) {
-        self.columns.previous = !self.columns.previous;
-        if self.columns.previous && self.temporal_goals.previous.is_none() {
-            self.request_temporal_goals(TemporalSlot::Previous);
-        }
-    }
-
-    /// Toggle the next column visibility.
-    fn toggle_next_column(&mut self) {
-        self.columns.next = !self.columns.next;
-        if self.columns.next && self.temporal_goals.next.is_none() {
-            self.request_temporal_goals(TemporalSlot::Next);
-        }
-    }
-
-    /// Request temporal goals for a slot.
     fn request_temporal_goals(&mut self, slot: TemporalSlot) {
         let Some(cursor) = &self.cursor else {
             return;
@@ -446,64 +352,11 @@ impl App {
         });
     }
 
-    /// Apply a temporal goal state to the appropriate slot.
     fn apply_temporal_goal(&mut self, slot: TemporalSlot, goal_state: GoalState) {
         match slot {
             TemporalSlot::Previous => self.temporal_goals.previous = Some(goal_state),
-            TemporalSlot::Current => {
-                self.temporal_goals.current = goal_state;
-                self.reset_selection();
-            }
+            TemporalSlot::Current => self.temporal_goals.current = goal_state,
             TemporalSlot::Next => self.temporal_goals.next = Some(goal_state),
-        }
-    }
-
-    /// Reset selection state based on available items.
-    fn reset_selection(&mut self) {
-        if self.selectable_items().is_empty() {
-            self.list_state.select(None);
-        } else {
-            self.list_state.select(Some(0));
-        }
-    }
-
-    /// Navigate to the currently selected item.
-    fn navigate_to_selection(&mut self) {
-        let Some(selection) = self.current_selection() else {
-            return;
-        };
-        let Some(cursor) = &self.cursor else {
-            return;
-        };
-
-        let goals_pos = self.goals_position().unwrap_or(cursor.position);
-        let cmd = self.build_navigation_command(&selection, cursor.uri.clone(), goals_pos);
-        self.queue_command(cmd);
-    }
-
-    fn build_navigation_command(
-        &self,
-        selection: &SelectableItem,
-        uri: Url,
-        position: Position,
-    ) -> Command {
-        let hyp_info = match selection {
-            SelectableItem::Hypothesis { goal_idx, hyp_idx } => self
-                .goals()
-                .get(*goal_idx)
-                .and_then(|g| g.hyps.get(*hyp_idx))
-                .and_then(Hypothesis::first_info),
-            SelectableItem::GoalTarget { .. } => None,
-        };
-
-        if let Some(info) = hyp_info {
-            Command::GetHypothesisLocation {
-                uri,
-                position,
-                info,
-            }
-        } else {
-            Command::Navigate { uri, position }
         }
     }
 }

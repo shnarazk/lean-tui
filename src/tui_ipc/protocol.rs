@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::lean_rpc::Goal;
+// Re-export AST-derived types from proxy for IPC consumers
+pub use crate::proxy::tactic_finder::{CaseSplitInfo, DefinitionInfo};
 
 /// Returns the path to the Unix socket for IPC.
 pub fn socket_path() -> PathBuf {
@@ -72,6 +74,12 @@ pub enum Message {
         uri: Url,
         position: Position,
         goals: Vec<Goal>,
+        /// The enclosing definition (theorem, lemma, etc.)
+        #[serde(default)]
+        definition: Option<DefinitionInfo>,
+        /// Case-splitting tactics that affect the current position.
+        #[serde(default)]
+        case_splits: Vec<CaseSplitInfo>,
     },
     TemporalGoals {
         uri: Url,

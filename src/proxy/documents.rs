@@ -48,15 +48,18 @@ impl DocumentCache {
             else {
                 return;
             };
-            self.update(p.text_document.uri.as_str(), p.text_document.text);
+            let uri = p.text_document.uri.as_str();
+            tracing::debug!("DidOpen URI: {uri}");
+            self.update(uri, p.text_document.text);
         } else if notif.method == DidChangeTextDocument::METHOD {
             let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone())
             else {
                 return;
             };
-            let uri = p.text_document.uri.to_string();
-            if let Some(content) = self.apply_changes(&uri, &p.content_changes) {
-                self.update(&uri, content);
+            let uri = p.text_document.uri.as_str();
+            tracing::debug!("DidChange URI: {uri}");
+            if let Some(content) = self.apply_changes(uri, &p.content_changes) {
+                self.update(uri, content);
             }
         }
     }
@@ -108,6 +111,15 @@ impl DocumentCache {
             .expect("lock poisoned")
             .get(uri)
             .and_then(|d| d.tree.clone())
+    }
+
+    /// Get both the syntax tree and content for a document.
+    pub fn get_tree_and_content(&self, uri: &str) -> Option<(Tree, String)> {
+        self.documents
+            .lock()
+            .expect("lock poisoned")
+            .get(uri)
+            .and_then(|d| d.tree.clone().map(|t| (t, d.content.clone())))
     }
 }
 

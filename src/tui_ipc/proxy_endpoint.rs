@@ -61,11 +61,20 @@ impl SocketServer {
     }
 
     /// Broadcast goals to all connected clients.
-    pub fn broadcast_goals(&self, uri: Url, position: super::Position, goals: Vec<Goal>) {
+    pub fn broadcast_goals(
+        &self,
+        uri: Url,
+        position: super::Position,
+        goals: Vec<Goal>,
+        definition: Option<super::DefinitionInfo>,
+        case_splits: Vec<super::CaseSplitInfo>,
+    ) {
         self.send(Message::Goals {
             uri,
             position,
             goals,
+            definition,
+            case_splits,
         });
     }
 

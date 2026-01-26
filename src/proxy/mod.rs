@@ -12,7 +12,7 @@ mod cursor;
 mod documents;
 mod goals;
 mod service;
-mod tactic_finder;
+pub mod tactic_finder;
 
 use std::{process::Stdio, sync::Arc};
 

@@ -7,6 +7,12 @@ use async_lsp::lsp_types::{Position, TextDocumentIdentifier};
 use crate::{
     error::LspError,
     lean_rpc::{Goal, RpcClient},
+    proxy::{
+        documents::DocumentCache,
+        tactic_finder::{
+            find_case_splits, find_enclosing_definition, CaseSplitInfo, DefinitionInfo,
+        },
+    },
     tui_ipc::{CursorInfo, SocketServer},
 };
 
@@ -37,9 +43,11 @@ pub fn spawn_goal_fetch(
     cursor: &CursorInfo,
     socket_server: &Arc<SocketServer>,
     rpc_client: &Arc<RpcClient>,
+    doc_cache: &Arc<DocumentCache>,
 ) {
     let rpc = rpc_client.clone();
     let socket_server = socket_server.clone();
+    let doc_cache = doc_cache.clone();
     let uri = cursor.uri.clone();
     let position = cursor.position;
 
@@ -48,7 +56,11 @@ pub fn spawn_goal_fetch(
 
         match fetch_combined_goals(&rpc, &text_document, position).await {
             Ok(goals) => {
-                socket_server.broadcast_goals(uri, position, goals);
+                // Extract AST info (definition name and case splits)
+                let (definition, case_splits) =
+                    extract_ast_info(&doc_cache, uri.as_str(), position);
+
+                socket_server.broadcast_goals(uri, position, goals, definition, case_splits);
             }
             Err(e) => {
                 tracing::warn!(
@@ -60,4 +72,33 @@ pub fn spawn_goal_fetch(
             }
         }
     });
+}
+
+/// Extract definition info and case splits from the AST.
+fn extract_ast_info(
+    doc_cache: &DocumentCache,
+    uri: &str,
+    position: Position,
+) -> (Option<DefinitionInfo>, Vec<CaseSplitInfo>) {
+    tracing::debug!("Looking up URI: {uri}");
+    let Some((tree, source)) = doc_cache.get_tree_and_content(uri) else {
+        tracing::warn!("No tree found for URI: {uri}");
+        return (None, vec![]);
+    };
+
+    let pos = crate::tui_ipc::Position {
+        line: position.line,
+        character: position.character,
+    };
+
+    let definition = find_enclosing_definition(&tree, &source, pos);
+    let case_splits = find_case_splits(&tree, &source, pos);
+
+    tracing::debug!(
+        "AST info at line {}: definition={:?}",
+        position.line,
+        definition.as_ref().map(|d| &d.name)
+    );
+
+    (definition, case_splits)
 }

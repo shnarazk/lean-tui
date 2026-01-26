@@ -71,7 +71,7 @@ impl<S: LspService> InterceptService<S> {
             self.socket_server.broadcast_cursor(cursor.clone());
 
             if let Some(rpc) = &self.rpc_client {
-                spawn_goal_fetch(&cursor, &self.socket_server, rpc);
+                spawn_goal_fetch(&cursor, &self.socket_server, rpc, &self.document_cache);
             }
         }
     }
@@ -92,7 +92,7 @@ impl<S: LspService> InterceptService<S> {
             self.socket_server.broadcast_cursor(cursor.clone());
 
             if let Some(rpc) = &self.rpc_client {
-                spawn_goal_fetch(&cursor, &self.socket_server, rpc);
+                spawn_goal_fetch(&cursor, &self.socket_server, rpc, &self.document_cache);
             }
         }
     }

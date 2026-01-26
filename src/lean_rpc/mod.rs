@@ -115,9 +115,7 @@ impl TaggedText {
     pub fn first_info(&self) -> Option<Value> {
         match self {
             Self::Text { .. } => None,
-            Self::Tag { info, content } => {
-                info.info.clone().or_else(|| content.first_info())
-            }
+            Self::Tag { info, content } => info.info.clone().or_else(|| content.first_info()),
             Self::Append { items } => items.iter().find_map(Self::first_info),
         }
     }
