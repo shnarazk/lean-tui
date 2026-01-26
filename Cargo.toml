@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+dirs = "6"
 
 # TUI
 crossterm = { version = "0.28", features = ["event-stream"] }
@@ -41,4 +42,4 @@ ratatui = "0.29"
 
 # Parsing
 tree-sitter = "0.25"
-tree-sitter-lean4 = "0.0.1"
+tree-sitter-lean4 = "0.0.2"

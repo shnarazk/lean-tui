@@ -1,6 +1,12 @@
 # Lean-TUI
 
-This is a **terminal-only info view**, comparable to the VS Code info view for [Lean 4](https://lean-lang.org/). It shows:
+(**Warning**: early release, under development)
+
+This is a **terminal-only info view**, comparable to the VS Code info view for [Lean 4](https://lean-lang.org/).
+
+_I developed this because not everyone wants to be stuck in the Microsoft ecosystem. Many people have an efficient workflow in their own (often modal) text editor. There existed a [Lean plugin for Neovim](https://github.com/Julian/lean.nvim) already, but not yet for the other ones. This is my attempt at a more generic one, not bound to any editor in particular, and usable from any terminal window._
+
+It shows:
 
 - The active variable bindings for a developer writing code (term mode).
 - The hypotheses and goals for a mathematician proving and formalizing proofs (tactic mode).
@@ -35,10 +41,8 @@ If you have never used Lean before, install `elan`, the Lean compiler toolchain 
 Install Rust (sorry, but currently my main language):
 
 ```bash
-cargo install --git https://codeberg.org/wvhulle/lean-tui
+cargo install lean-tui
 ```
-
-(Might take a long time first time because the Tree-Sitter parser is compiled)
 
 Make sure `~/.cargo/bin` is in your path.
 
@@ -46,13 +50,28 @@ Make sure `~/.cargo/bin` is in your path.
 
 Use your favorite (modal) editor that has a built-in LSP client (I recommend Helix, but Neovim, Zed, Kate also seem to have one).
 
-Go into the settings of your editor and configure the LSP command for lean to be `cargo run -- serve`. This will spawn a proxy LSP that intercepts communication with the Lake LSP every time you open a Lean file. Make sure to disable any other Lean LSP as this one will replace it and extend it.
+Go into the settings of your editor and configure the LSP command for lean to be `lean-tui proxy`.
+
+This will spawn a proxy LSP that intercepts communication with the Lake LSP every time you open a Lean file. Make sure to disable any other Lean LSP as this one will replace it and extend it.
+
+For example, for Helix, it would look like this:
+
+```toml
+# .helix/languages.toml
+[language-server.lean-tui]
+args = ["proxy"]
+command = "lean-tui"
+
+[[language]]
+language-servers = ["lean-tui"]
+name = "lean"
+```
 
 ## Usage
 
 Open your Lean file in your chosen editor.
 
-Split terminal. Or tile another terminal window next to your editor window. Launch the TUI in same directory in the second terminal with `lean-tui tui`.
+Split terminal. Or tile another terminal window next to your editor window. Launch the TUI in same directory in the second terminal with `lean-tui view`.
 
 Switch back to your editor:
 
@@ -64,10 +83,14 @@ Switch back to your editor:
 
 ## Debugging
 
-Follow logs with:
+Follow `lean-tui` logs with:
 
 ```bash
-tail -f /tmp/lean-tui.log
+tail -f ~/.cache/lean-tui/proxy.log
 ```
 
-_I developed this because not everyone wants to be stuck in the Microsoft ecosystem. Many people have an efficient workflow in their own (often modal) text editor. There existed a [Lean plugin for Neovim](https://github.com/Julian/lean.nvim) already, but not yet for the other ones. This is my attempt at a more generic one, not bound to any editor in particular, and usable from any terminal window._
+Some editors also have debug logs for the LSP client. For Helix:
+
+```bash
+tail -f ~/.cache/helix/helix.log
+```

@@ -13,7 +13,7 @@ use tokio::{
     sync::mpsc,
 };
 
-use super::protocol::{Command, Message, SOCKET_PATH};
+use super::protocol::{socket_path, Command, Message};
 
 /// Handle for communicating with the proxy.
 pub struct SocketHandle {
@@ -38,8 +38,9 @@ pub fn spawn_socket_handler() -> SocketHandle {
 }
 
 async fn connection_loop(msg_tx: mpsc::Sender<Message>, mut cmd_rx: mpsc::Receiver<Command>) {
+    let path = socket_path();
     loop {
-        match UnixStream::connect(SOCKET_PATH).await {
+        match UnixStream::connect(&path).await {
             Ok(stream) => {
                 handle_connection(stream, &msg_tx, &mut cmd_rx).await;
             }

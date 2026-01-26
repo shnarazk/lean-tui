@@ -1,9 +1,16 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::lean_rpc::Goal;
 
-pub const SOCKET_PATH: &str = "/tmp/lean-tui.sock";
+/// Returns the path to the Unix socket for IPC.
+pub fn socket_path() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("lean-tui/lean-tui.sock")
+}
 
 /// Which temporal slot a goal state belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

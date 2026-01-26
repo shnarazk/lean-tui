@@ -4,8 +4,6 @@
 //! - Broadcasting messages (cursor position, goals) to connected TUI clients
 //! - Processing commands from TUI clients (navigation requests)
 
-use std::path::Path;
-
 use async_lsp::{
     lsp_types::{Position, Range, ShowDocumentParams, Url},
     ClientSocket, LanguageClient,
@@ -16,7 +14,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use super::protocol::{Command, CursorInfo, GoalResult, Message, TemporalSlot, SOCKET_PATH};
+use super::protocol::{socket_path, Command, CursorInfo, GoalResult, Message, TemporalSlot};
 use crate::lean_rpc::Goal;
 
 // ============================================================================
@@ -95,21 +93,27 @@ impl SocketServer {
 
 /// Run the Unix socket listener.
 async fn run_listener(msg_sender: broadcast::Sender<Message>, cmd_tx: mpsc::Sender<Command>) {
-    // Remove existing socket file
-    let path = Path::new(SOCKET_PATH);
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
+    let path = socket_path();
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
     }
 
-    let listener = match UnixListener::bind(SOCKET_PATH) {
+    // Remove existing socket file
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+    }
+
+    let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) => {
-            tracing::error!("Failed to bind socket: {e}");
+            tracing::error!("Failed to bind socket at {}: {e}", path.display());
             return;
         }
     };
 
-    tracing::info!("Listening on {SOCKET_PATH}");
+    tracing::info!("Listening on {}", path.display());
 
     loop {
         match listener.accept().await {

@@ -9,7 +9,7 @@ use ratatui::{
 use super::app::{App, ClickRegion, HypothesisFilters, LoadStatus, SelectableItem};
 use crate::{
     lean_rpc::{DiffTag, Goal, Hypothesis},
-    tui_ipc::SOCKET_PATH,
+    tui_ipc::socket_path,
 };
 
 /// Kind of cell in the diff grid, combining filter and interactivity.
@@ -61,7 +61,7 @@ fn render_main(frame: &mut Frame, app: &mut App, area: Rect) {
 
     if !app.connected {
         frame.render_widget(
-            Paragraph::new(format!("Connecting to {SOCKET_PATH}...")),
+            Paragraph::new(format!("Connecting to {}...", socket_path().display())),
             inner,
         );
         return;

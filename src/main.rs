@@ -17,9 +17,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Run as LSP proxy between editor and lake serve
-    Serve,
+    Proxy,
     /// Run TUI viewer (connects to proxy)
-    Tui,
+    View,
 }
 
 #[tokio::main]
@@ -27,7 +27,15 @@ async fn main() {
     let cli = Cli::parse();
 
     // Init tracing to log file (both commands write to same file)
-    if let Ok(log_file) = std::fs::File::create("/tmp/lean-tui.log") {
+    let log_path = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("lean-tui/proxy.log");
+
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    if let Ok(log_file) = std::fs::File::create(&log_path) {
         let filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(
             "lean_tui=debug"
                 .parse()
@@ -43,8 +51,8 @@ async fn main() {
     }
 
     let result = match cli.command {
-        Commands::Serve => proxy::run().await,
-        Commands::Tui => tui::run().await,
+        Commands::Proxy => proxy::run().await,
+        Commands::View => tui::run().await,
     };
 
     if let Err(e) = result {

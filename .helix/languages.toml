@@ -1,5 +1,5 @@
 [language-server.lean-tui]
-args = ["run", "--quiet", "--", "serve"]
+args = ["run", "--quiet", "--", "proxy"]
 command = "cargo"
 
 [[language]]
