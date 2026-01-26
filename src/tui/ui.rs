@@ -36,8 +36,76 @@ enum ColumnLayout {
     All,
 }
 
+/// Column areas for a single row in grid layout.
+struct ColumnAreas {
+    previous: Option<Rect>,
+    current: Rect,
+    next: Option<Rect>,
+}
+
+/// Compute column areas for a row based on layout.
+fn split_row_columns(row: Rect, layout: ColumnLayout) -> ColumnAreas {
+    match layout {
+        ColumnLayout::Single => ColumnAreas {
+            previous: None,
+            current: row,
+            next: None,
+        },
+        ColumnLayout::All => {
+            let [prev, curr, next] = Layout::horizontal([
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+            ])
+            .spacing(COLUMN_SPACING)
+            .areas(row);
+            ColumnAreas {
+                previous: Some(prev),
+                current: curr,
+                next: Some(next),
+            }
+        }
+        ColumnLayout::PreviousAndCurrent => {
+            let [left, right] =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .spacing(COLUMN_SPACING)
+                    .areas(row);
+            ColumnAreas {
+                previous: Some(left),
+                current: right,
+                next: None,
+            }
+        }
+        ColumnLayout::CurrentAndNext => {
+            let [left, right] =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .spacing(COLUMN_SPACING)
+                    .areas(row);
+            ColumnAreas {
+                previous: None,
+                current: left,
+                next: Some(right),
+            }
+        }
+    }
+}
+
+/// Compute row constraints for grid layout.
+fn compute_row_constraints(goals: &[Goal]) -> Vec<Constraint> {
+    let mut constraints = vec![Constraint::Length(1)]; // Header row
+    for goal in goals {
+        let height = 1 + goal.hyps.len() + 1 + 1;
+        #[allow(clippy::cast_possible_truncation)]
+        constraints.push(Constraint::Length(height as u16));
+    }
+    constraints
+}
+
+/// Column spacing for the grid layout.
+const COLUMN_SPACING: u16 = 2;
+
 /// Render the UI.
-pub fn render(frame: &mut Frame, app: &mut App) {
+pub fn render(frame: &mut Frame, app: &App) {
     let [main_area, help_area] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
@@ -50,8 +118,140 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 }
 
+/// Compute click regions for the current layout.
+/// Must use the same layout logic as render to ensure consistency.
+pub fn compute_click_regions(app: &App, size: Rect) -> Vec<ClickRegion> {
+    let mut regions = Vec::new();
+
+    let [main_area, _help_area] =
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(size);
+
+    // Main content layout
+    let block_inner = {
+        let block = ratatui::widgets::Block::bordered();
+        block.inner(main_area)
+    };
+
+    if !app.connected || app.goals().is_empty() {
+        return regions;
+    }
+
+    let [_header_area, content_area] =
+        Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(block_inner);
+
+    let layout = determine_column_layout(app, content_area.width);
+
+    if layout == ColumnLayout::Single {
+        compute_single_column_regions(app, content_area, &mut regions);
+    } else {
+        compute_grid_regions(app, content_area, layout, &mut regions);
+    }
+
+    regions
+}
+
+/// Compute click regions for single column layout.
+fn compute_single_column_regions(app: &App, area: Rect, regions: &mut Vec<ClickRegion>) {
+    let mut line_offset = 0u16;
+
+    // Account for error lines if present
+    if app.error.is_some() {
+        line_offset += 2; // Error line + blank line
+    }
+
+    for (goal_idx, goal) in app.goals().iter().enumerate() {
+        // Goal header (not clickable)
+        line_offset += 1;
+
+        // Build hypothesis indices, respecting reverse order
+        let hyp_indices: Vec<usize> = if app.filters.reverse_order {
+            (0..goal.hyps.len()).rev().collect()
+        } else {
+            (0..goal.hyps.len()).collect()
+        };
+
+        // Hypotheses (clickable, filtered)
+        for hyp_idx in hyp_indices {
+            let hyp = &goal.hyps[hyp_idx];
+            if app.filters.should_show(hyp) {
+                register_click_region(
+                    regions,
+                    area,
+                    line_offset,
+                    SelectableItem::Hypothesis { goal_idx, hyp_idx },
+                );
+                line_offset += 1;
+            }
+        }
+
+        // Goal target (clickable)
+        register_click_region(
+            regions,
+            area,
+            line_offset,
+            SelectableItem::GoalTarget { goal_idx },
+        );
+        line_offset += 1;
+
+        // Empty line between goals
+        line_offset += 1;
+    }
+}
+
+/// Compute click regions for grid layout (multi-column).
+fn compute_grid_regions(
+    app: &App,
+    area: Rect,
+    layout: ColumnLayout,
+    regions: &mut Vec<ClickRegion>,
+) {
+    let rows = Layout::vertical(compute_row_constraints(app.goals())).split(area);
+
+    // Skip header row (rows[0]), process each goal row
+    for (goal_idx, goal) in app.goals().iter().enumerate() {
+        let cols = split_row_columns(rows[goal_idx + 1], layout);
+        register_goal_click_regions(regions, cols.current, goal_idx, goal, app.filters);
+    }
+}
+
+/// Register click regions for a single goal cell.
+fn register_goal_click_regions(
+    regions: &mut Vec<ClickRegion>,
+    area: Rect,
+    goal_idx: usize,
+    goal: &Goal,
+    filters: HypothesisFilters,
+) {
+    let mut line_offset = 1u16; // Skip header line
+
+    let hyp_indices: Vec<usize> = if filters.reverse_order {
+        (0..goal.hyps.len()).rev().collect()
+    } else {
+        (0..goal.hyps.len()).collect()
+    };
+
+    for hyp_idx in hyp_indices {
+        let hyp = &goal.hyps[hyp_idx];
+        if filters.should_show(hyp) {
+            register_click_region(
+                regions,
+                area,
+                line_offset,
+                SelectableItem::Hypothesis { goal_idx, hyp_idx },
+            );
+            line_offset += 1;
+        }
+    }
+    register_click_region(
+        regions,
+        area,
+        line_offset,
+        SelectableItem::GoalTarget { goal_idx },
+    );
+}
+
 /// Render the main content area.
-fn render_main(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_main(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::bordered()
         .title(" lean-tui ")
         .border_style(Style::new().fg(Color::Cyan));
@@ -93,9 +293,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Render goals with adaptive grid layout.
 /// Rows = goals (subproofs), Columns = temporal states (Previous/Current/Next).
-fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
-    app.click_regions.clear();
-
+fn render_goals(frame: &mut Frame, app: &App, area: Rect) {
     if app.goals().is_empty() {
         frame.render_widget(
             Paragraph::new("No goals").style(Style::new().fg(Color::DarkGray)),
@@ -104,7 +302,6 @@ fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Determine column layout based on user toggles, diffs, and terminal width
     let layout = determine_column_layout(app, area.width);
 
     if layout == ColumnLayout::Single {
@@ -112,24 +309,12 @@ fn render_goals(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Create header row + one row per goal
-    let mut row_constraints = vec![Constraint::Length(1)]; // Header row
-    for goal in app.goals() {
-        // Each goal needs: header + hypotheses + target + blank line
-        let height = 1 + goal.hyps.len() + 1 + 1;
-        #[allow(clippy::cast_possible_truncation)]
-        row_constraints.push(Constraint::Length(height as u16));
-    }
+    let rows = Layout::vertical(compute_row_constraints(app.goals())).split(area);
 
-    let rows = Layout::vertical(row_constraints).split(area);
-
-    // Render header row
     render_grid_header(frame, rows[0], layout);
 
-    // Render each goal as a row (use index to avoid borrow conflict)
     let selection = app.current_selection();
-    let num_goals = app.goals().len();
-    for goal_idx in 0..num_goals {
+    for (goal_idx, _) in app.goals().iter().enumerate() {
         render_goal_row(
             frame,
             app,
@@ -159,47 +344,18 @@ const fn determine_column_layout(app: &App, width: u16) -> ColumnLayout {
     }
 }
 
-/// Column spacing for the grid layout.
-const COLUMN_SPACING: u16 = 2;
-
 /// Render the grid header row with column titles.
 fn render_grid_header(frame: &mut Frame, area: Rect, layout: ColumnLayout) {
-    match layout {
-        ColumnLayout::Single => {}
-        ColumnLayout::All => {
-            let [prev, curr, next] = Layout::horizontal([
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-            ])
-            .spacing(COLUMN_SPACING)
-            .areas(area);
-
-            frame.render_widget(header_label("Previous", false), prev);
-            frame.render_widget(header_label("Current", true), curr);
-            frame.render_widget(header_label("Next", false), next);
-        }
-        ColumnLayout::PreviousAndCurrent | ColumnLayout::CurrentAndNext => {
-            let [left, right] =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .spacing(COLUMN_SPACING)
-                    .areas(area);
-
-            let (left_label, right_label) = match layout {
-                ColumnLayout::PreviousAndCurrent => ("Previous", "Current"),
-                ColumnLayout::CurrentAndNext => ("Current", "Next"),
-                _ => unreachable!(),
-            };
-
-            frame.render_widget(
-                header_label(left_label, layout == ColumnLayout::CurrentAndNext),
-                left,
-            );
-            frame.render_widget(
-                header_label(right_label, layout == ColumnLayout::PreviousAndCurrent),
-                right,
-            );
-        }
+    let cols = split_row_columns(area, layout);
+    if let Some(prev) = cols.previous {
+        frame.render_widget(header_label("Previous", false), prev);
+    }
+    frame.render_widget(
+        header_label("Current", layout != ColumnLayout::Single),
+        cols.current,
+    );
+    if let Some(next) = cols.next {
+        frame.render_widget(header_label("Next", false), next);
     }
 }
 
@@ -216,50 +372,40 @@ fn header_label(text: &str, is_current: bool) -> Paragraph<'_> {
 /// Render a single goal as a row with columns for each temporal state.
 fn render_goal_row(
     frame: &mut Frame,
-    app: &mut App,
+    app: &App,
     area: Rect,
     goal_idx: usize,
     selection: Option<&SelectableItem>,
     layout: ColumnLayout,
 ) {
-    match layout {
-        ColumnLayout::Single => {}
-        ColumnLayout::All => {
-            let [prev, curr, next] = Layout::horizontal([
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-            ])
-            .spacing(COLUMN_SPACING)
-            .areas(area);
-
-            render_goal_cell(frame, app, prev, goal_idx, CellKind::Previous);
-            render_goal_cell_interactive(frame, app, curr, goal_idx, selection);
-            render_goal_cell(frame, app, next, goal_idx, CellKind::Next);
-        }
-        ColumnLayout::PreviousAndCurrent | ColumnLayout::CurrentAndNext => {
-            let [left, right] =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .spacing(COLUMN_SPACING)
-                    .areas(area);
-
-            match layout {
-                ColumnLayout::PreviousAndCurrent => {
-                    render_goal_cell(frame, app, left, goal_idx, CellKind::Previous);
-                    render_goal_cell_interactive(frame, app, right, goal_idx, selection);
-                }
-                ColumnLayout::CurrentAndNext => {
-                    render_goal_cell_interactive(frame, app, left, goal_idx, selection);
-                    render_goal_cell(frame, app, right, goal_idx, CellKind::Next);
-                }
-                _ => unreachable!(),
-            }
-        }
+    let cols = split_row_columns(area, layout);
+    if let Some(prev) = cols.previous {
+        render_goal_cell(frame, app, prev, goal_idx, CellKind::Previous, None);
+    }
+    render_goal_cell(
+        frame,
+        app,
+        cols.current,
+        goal_idx,
+        CellKind::Current,
+        selection,
+    );
+    if let Some(next) = cols.next {
+        render_goal_cell(frame, app, next, goal_idx, CellKind::Next, None);
     }
 }
 
-/// Render a non-interactive goal cell (Previous or Next column).
-fn render_goal_cell(frame: &mut Frame, app: &App, area: Rect, goal_idx: usize, kind: CellKind) {
+/// Render a goal cell with optional selection highlighting.
+/// For Current cells, pass selection to enable highlighting; for Previous/Next,
+/// pass None.
+fn render_goal_cell(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    goal_idx: usize,
+    kind: CellKind,
+    selection: Option<&SelectableItem>,
+) {
     // Get the goal state for this temporal slot
     let goal_state = match kind {
         CellKind::Previous => app.temporal_goals.previous.as_ref(),
@@ -308,10 +454,9 @@ fn render_goal_cell(frame: &mut Frame, app: &App, area: Rect, goal_idx: usize, k
         return;
     };
 
-    // For temporal columns, use CellKind::Current to show their own diff markers
+    // All columns use CellKind::Current to show their own diff markers
     // (the goals from Lean already have diff info relative to their position)
-    let render_kind = CellKind::Current;
-    let lines = build_goal_lines(goal, goal_idx, None, render_kind, app.filters);
+    let lines = build_goal_lines(goal, goal_idx, selection, CellKind::Current, app.filters);
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
@@ -329,51 +474,6 @@ fn register_click_region(
             item,
         });
     }
-}
-
-/// Render an interactive goal cell (Current column) with click regions.
-fn render_goal_cell_interactive(
-    frame: &mut Frame,
-    app: &mut App,
-    area: Rect,
-    goal_idx: usize,
-    selection: Option<&SelectableItem>,
-) {
-    let Some(goal) = app.goals().get(goal_idx).cloned() else {
-        return;
-    };
-    let lines = build_goal_lines(&goal, goal_idx, selection, CellKind::Current, app.filters);
-
-    // Register click regions (header at line 0, then hypotheses, then target)
-    // Must match the order used in build_goal_lines
-    let mut line_offset = 1u16;
-
-    let hyp_indices: Vec<usize> = if app.filters.reverse_order {
-        (0..goal.hyps.len()).rev().collect()
-    } else {
-        (0..goal.hyps.len()).collect()
-    };
-
-    for hyp_idx in hyp_indices {
-        let hyp = &goal.hyps[hyp_idx];
-        if app.filters.should_show(hyp) {
-            register_click_region(
-                &mut app.click_regions,
-                area,
-                line_offset,
-                SelectableItem::Hypothesis { goal_idx, hyp_idx },
-            );
-            line_offset += 1;
-        }
-    }
-    register_click_region(
-        &mut app.click_regions,
-        area,
-        line_offset,
-        SelectableItem::GoalTarget { goal_idx },
-    );
-
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
 /// Build the lines for a goal cell.
@@ -417,25 +517,21 @@ fn build_goal_lines(
 }
 
 /// Render single column with inline diff markers (narrow terminal).
-fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_goals_single_column(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
-    let mut click_items: Vec<Option<SelectableItem>> = Vec::new();
 
     if let Some(error) = &app.error {
         lines.push(Line::from(format!("Error: {error}")).fg(Color::Red));
-        click_items.push(None);
         lines.push(Line::default());
-        click_items.push(None);
     }
 
     let selection = app.current_selection();
     for (goal_idx, goal) in app.goals().iter().enumerate() {
-        // Goal header (not clickable)
+        // Goal header
         lines.push(
             Line::from(goal_header(goal, goal_idx))
                 .style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         );
-        click_items.push(None);
 
         // Build hypothesis indices, respecting reverse order
         let hyp_indices: Vec<usize> = if app.filters.reverse_order {
@@ -444,7 +540,7 @@ fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
             (0..goal.hyps.len()).collect()
         };
 
-        // Hypotheses (clickable, filtered)
+        // Hypotheses (filtered)
         for hyp_idx in hyp_indices {
             let hyp = &goal.hyps[hyp_idx];
             if !app.filters.should_show(hyp) {
@@ -457,29 +553,18 @@ fn render_goals_single_column(frame: &mut Frame, app: &mut App, area: Rect) {
                 CellKind::Current,
                 app.filters,
             ));
-            click_items.push(Some(SelectableItem::Hypothesis { goal_idx, hyp_idx }));
         }
 
-        // Goal target (clickable)
+        // Goal target
         let is_target_selected = selection == Some(SelectableItem::GoalTarget { goal_idx });
         lines.push(render_target_line(
             goal,
             is_target_selected,
             CellKind::Current,
         ));
-        click_items.push(Some(SelectableItem::GoalTarget { goal_idx }));
 
         // Empty line between goals
         lines.push(Line::default());
-        click_items.push(None);
-    }
-
-    // Record click regions
-    for (line_idx, item) in click_items.into_iter().enumerate() {
-        if let Some(selectable) = item {
-            #[allow(clippy::cast_possible_truncation)]
-            register_click_region(&mut app.click_regions, area, line_idx as u16, selectable);
-        }
     }
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
@@ -621,106 +706,59 @@ fn render_status_bar(frame: &mut Frame, area: Rect, filters: HypothesisFilters) 
     frame.render_widget(Paragraph::new(status), area);
 }
 
-/// Center a rect within another rect.
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(r);
-
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(popup_layout[1])[1]
-}
-
-/// Render the help popup overlay.
+/// Render the help popup overlay in bottom-right corner.
 fn render_help_popup(frame: &mut Frame) {
-    let area = centered_rect(60, 70, frame.area());
+    let frame_area = frame.area();
+    let width = 32u16;
+    let height = 15u16;
+    let x = frame_area.width.saturating_sub(width + 1);
+    let y = frame_area.height.saturating_sub(height + 2); // +2 for status bar
+    let area = Rect::new(x, y, width, height);
 
-    // Clear background
     frame.render_widget(Clear, area);
 
     let block = Block::bordered()
-        .title(" Keyboard Shortcuts ")
-        .title_bottom(" Press ? or Esc to close ")
+        .title(" Help ")
         .border_style(Style::new().fg(Color::Cyan));
 
+    let key_style = Style::new().fg(Color::Cyan);
+
     let help_text = vec![
-        Line::from(vec![Span::styled(
-            "Navigation",
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
         Line::from(vec![
-            Span::styled("  j / ↓    ", Style::new().fg(Color::Cyan)),
-            "Move selection down".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  k / ↑    ", Style::new().fg(Color::Cyan)),
-            "Move selection up".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  Enter    ", Style::new().fg(Color::Cyan)),
-            "Go to definition".into(),
+            Span::styled("j/k", key_style),
+            " nav  ".into(),
+            Span::styled("Enter", key_style),
+            " go".into(),
         ]),
         Line::from(""),
-        Line::from(vec![Span::styled(
-            "Hypothesis Filters",
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )]),
+        Line::from("Filters:"),
+        Line::from(vec![
+            Span::styled("i", key_style),
+            " instances  ".into(),
+            Span::styled("t", key_style),
+            " types".into(),
+        ]),
+        Line::from(vec![
+            Span::styled("a", key_style),
+            " inaccessible  ".into(),
+            Span::styled("r", key_style),
+            " reverse".into(),
+        ]),
+        Line::from(vec![Span::styled("l", key_style), " let values".into()]),
+        Line::from(""),
+        Line::from("Columns:"),
+        Line::from(vec![
+            Span::styled("p", key_style),
+            " previous  ".into(),
+            Span::styled("n", key_style),
+            " next".into(),
+        ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  i        ", Style::new().fg(Color::Cyan)),
-            "Toggle hide instances".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  t        ", Style::new().fg(Color::Cyan)),
-            "Toggle hide types".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  a        ", Style::new().fg(Color::Cyan)),
-            "Toggle hide inaccessible".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  l        ", Style::new().fg(Color::Cyan)),
-            "Toggle show let := values".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  r        ", Style::new().fg(Color::Cyan)),
-            "Reverse hypothesis order".into(),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "Diff View",
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  p        ", Style::new().fg(Color::Cyan)),
-            "Toggle Previous column".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  n        ", Style::new().fg(Color::Cyan)),
-            "Toggle Next column".into(),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "General",
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  ?        ", Style::new().fg(Color::Cyan)),
-            "Toggle this help".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("  q        ", Style::new().fg(Color::Cyan)),
-            "Quit".into(),
+            Span::styled("?", key_style),
+            " close  ".into(),
+            Span::styled("q", key_style),
+            " quit".into(),
         ]),
     ];
 

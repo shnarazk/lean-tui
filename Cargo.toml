@@ -5,7 +5,7 @@ license = "MIT"
 name = "lean-tui"
 keywords = ["lean4", "proof-assistant", "tui", "mathematics"]
 repository = "https://codeberg.org/wvhulle/lean-tui"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["Willem Vanhulle <willemvanhulle@protonmail.com>"]
 
 [lints.clippy]

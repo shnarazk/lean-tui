@@ -107,11 +107,9 @@ pub struct App {
     pub list_state: ListState,
     /// Whether app should exit.
     pub should_exit: bool,
-    /// Pending navigation command to send.
-    pub pending_navigation: Option<Command>,
-    /// Pending commands to send (for temporal goal fetching).
-    pub pending_commands: Vec<Command>,
-    /// Click regions for mouse interaction (updated each render).
+    /// Outgoing commands queue (navigation + temporal fetching).
+    outgoing_commands: Vec<Command>,
+    /// Click regions for mouse interaction (computed before each render).
     pub click_regions: Vec<ClickRegion>,
     /// Visibility settings for diff columns.
     pub columns: ColumnVisibility,
@@ -159,6 +157,16 @@ impl App {
 }
 
 impl App {
+    /// Queue a command to be sent to the proxy.
+    pub fn queue_command(&mut self, cmd: Command) {
+        self.outgoing_commands.push(cmd);
+    }
+
+    /// Take all queued commands.
+    pub fn take_commands(&mut self) -> Vec<Command> {
+        std::mem::take(&mut self.outgoing_commands)
+    }
+
     /// Get all selectable items as a flat list, respecting current filters.
     pub fn selectable_items(&self) -> Vec<SelectableItem> {
         let mut items = Vec::new();
@@ -184,9 +192,10 @@ impl App {
 
     /// Get currently selected item.
     pub fn current_selection(&self) -> Option<SelectableItem> {
+        let items = self.selectable_items();
         self.list_state
             .selected()
-            .and_then(|i| self.selectable_items().get(i).cloned())
+            .and_then(|i| items.get(i).cloned())
     }
 
     /// Move selection to previous item.
@@ -352,12 +361,14 @@ impl App {
 
     /// Handle mouse click at given coordinates.
     fn handle_click(&mut self, x: u16, y: u16) -> bool {
-        let Some(region) = self.find_click_region(x, y) else {
+        // Clone the clicked item to avoid borrow conflict
+        let clicked_item = self.find_click_region(x, y).map(|r| r.item.clone());
+        let Some(item) = clicked_item else {
             return false;
         };
 
         let items = self.selectable_items();
-        let Some(idx) = items.iter().position(|item| *item == region.item) else {
+        let Some(idx) = items.iter().position(|i| *i == item) else {
             return false;
         };
 
@@ -433,7 +444,7 @@ impl App {
             TemporalSlot::Current => {}
         }
 
-        self.pending_commands.push(Command::FetchTemporalGoals {
+        self.queue_command(Command::FetchTemporalGoals {
             uri,
             cursor_position: self.cursor.position,
             slot,
@@ -481,7 +492,8 @@ impl App {
         // Get the position where goals were fetched (for RPC session context)
         let goals_pos = self.goals_position().unwrap_or(self.cursor.position);
 
-        self.pending_navigation = Some(self.build_navigation_command(&selection, uri, goals_pos));
+        let cmd = self.build_navigation_command(&selection, uri, goals_pos);
+        self.queue_command(cmd);
     }
 
     /// Build the appropriate navigation command for the selected item.
@@ -517,16 +529,5 @@ impl App {
                 character: goals_pos.character,
             }
         }
-    }
-
-    /// Take the pending navigation command, if any.
-    #[allow(clippy::missing_const_for_fn)] // Option::take is not const-stable
-    pub fn take_pending_navigation(&mut self) -> Option<Command> {
-        self.pending_navigation.take()
-    }
-
-    /// Take all pending commands (for temporal goal fetching).
-    pub fn take_pending_commands(&mut self) -> Vec<Command> {
-        std::mem::take(&mut self.pending_commands)
     }
 }

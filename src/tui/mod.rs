@@ -12,8 +12,8 @@ use crossterm::{
     ExecutableCommand,
 };
 use futures::StreamExt;
-use ratatui::prelude::*;
-use ui::render;
+use ratatui::{layout::Rect, prelude::*};
+use ui::{compute_click_regions, render};
 
 use crate::{error::Result, tui_ipc::spawn_socket_handler};
 
@@ -35,8 +35,13 @@ pub async fn run() -> Result<()> {
 
     // Main event loop
     while !app.should_exit {
-        // Render UI (updates click regions)
-        terminal.draw(|frame| render(frame, &mut app))?;
+        // Compute click regions before rendering (uses same layout logic)
+        let size = terminal.size()?;
+        let rect = Rect::new(0, 0, size.width, size.height);
+        app.click_regions = compute_click_regions(&app, rect);
+
+        // Render UI (pure function, no mutation)
+        terminal.draw(|frame| render(frame, &app))?;
 
         // Wait for events with timeout
         tokio::select! {
@@ -50,10 +55,7 @@ pub async fn run() -> Result<()> {
             }
             // Send pending commands (with small delay to batch)
             () = tokio::time::sleep(Duration::from_millis(50)) => {
-                if let Some(cmd) = app.take_pending_navigation() {
-                    let _ = socket.tx.send(cmd).await;
-                }
-                for cmd in app.take_pending_commands() {
+                for cmd in app.take_commands() {
                     let _ = socket.tx.send(cmd).await;
                 }
             }
