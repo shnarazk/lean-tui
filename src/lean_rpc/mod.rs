@@ -2,10 +2,20 @@
 
 mod client;
 
-use async_lsp::lsp_types::Range;
+use async_lsp::lsp_types::{Position, Range, Url};
 pub use client::{GoToKind, RpcClient};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// Pre-resolved goto location for navigation without RPC calls.
+///
+/// Stored alongside hypotheses and goals when they're fetched, so navigation
+/// doesn't depend on RPC session validity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GotoLocation {
+    pub uri: Url,
+    pub position: Position,
+}
 
 /// Diff status for goal state comparisons.
 ///
@@ -155,6 +165,9 @@ pub struct Goal {
     /// Goal was removed (gone in current state vs pinned)
     #[serde(default)]
     pub is_removed: bool,
+    /// Pre-resolved goto location for the target (set when goals are fetched).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goto_location: Option<GotoLocation>,
 }
 
 /// A hypothesis in the local context.
@@ -185,6 +198,9 @@ pub struct Hypothesis {
     /// Hypothesis was removed (gone in current state vs pinned)
     #[serde(default)]
     pub is_removed: bool,
+    /// Pre-resolved goto location (set when goals are fetched).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goto_location: Option<GotoLocation>,
 }
 
 impl Hypothesis {
@@ -290,6 +306,7 @@ impl InteractiveHypothesis {
             fvar_ids: self.fvar_ids.clone(),
             is_inserted: self.is_inserted,
             is_removed: self.is_removed,
+            goto_location: None,
         }
     }
 }
@@ -315,6 +332,7 @@ impl InteractiveGoal {
             user_name: self.user_name.clone(),
             is_inserted: self.is_inserted,
             is_removed: self.is_removed,
+            goto_location: None,
         }
     }
 }
@@ -351,6 +369,7 @@ impl InteractiveTermGoalResponse {
             user_name: Some("Expected".to_string()), // Marker for term goal
             is_inserted: false,
             is_removed: false,
+            goto_location: None,
         }
     }
 }

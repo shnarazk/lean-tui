@@ -6,7 +6,7 @@ use async_lsp::lsp_types::Url;
 
 use super::components::SelectableItem;
 use crate::{
-    lean_rpc::{Goal, Hypothesis},
+    lean_rpc::{Goal, GotoLocation},
     tui_ipc::{
         CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
         TemporalSlot,
@@ -217,28 +217,25 @@ impl App {
         uri: Url,
         position: Position,
     ) -> Command {
-        let hyp_info = match selection {
+        let goto_location: Option<&GotoLocation> = match selection {
             Some(SelectableItem::Hypothesis { goal_idx, hyp_idx }) => self
                 .goals()
                 .get(goal_idx)
                 .and_then(|g| g.hyps.get(hyp_idx))
-                .and_then(Hypothesis::first_info),
+                .and_then(|h| h.goto_location.as_ref()),
             Some(SelectableItem::GoalTarget { goal_idx }) => self
                 .goals()
                 .get(goal_idx)
-                .and_then(|g| g.target.first_info()),
+                .and_then(|g| g.goto_location.as_ref()),
             None => None,
         };
 
-        if let Some(info) = hyp_info {
-            Command::GetHypothesisLocation {
-                uri,
-                position,
-                info,
+        goto_location.map_or(Command::Navigate { uri, position }, |loc| {
+            Command::Navigate {
+                uri: loc.uri.clone(),
+                position: loc.position,
             }
-        } else {
-            Command::Navigate { uri, position }
-        }
+        })
     }
 
     fn refresh_temporal_columns(&mut self) {
