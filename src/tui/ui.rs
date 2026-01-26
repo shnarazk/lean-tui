@@ -6,7 +6,9 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Wrap},
 };
 
-use super::app::{App, ClickRegion, HypothesisFilters, LoadStatus, SelectableItem};
+use super::app::{
+    hypothesis_indices, App, ClickRegion, HypothesisFilters, LoadStatus, SelectableItem,
+};
 use crate::{
     lean_rpc::{DiffTag, Goal, Hypothesis},
     tui_ipc::socket_path,
@@ -90,15 +92,14 @@ fn split_row_columns(row: Rect, layout: ColumnLayout) -> ColumnAreas {
     }
 }
 
-/// Compute row constraints for grid layout.
 fn compute_row_constraints(goals: &[Goal]) -> Vec<Constraint> {
-    let mut constraints = vec![Constraint::Length(1)]; // Header row
-    for goal in goals {
-        let height = 1 + goal.hyps.len() + 1 + 1;
-        #[allow(clippy::cast_possible_truncation)]
-        constraints.push(Constraint::Length(height as u16));
-    }
-    constraints
+    std::iter::once(Constraint::Length(1)) // Header row
+        .chain(goals.iter().map(|goal| {
+            let height = 1 + goal.hyps.len() + 1 + 1;
+            #[allow(clippy::cast_possible_truncation)]
+            Constraint::Length(height as u16)
+        }))
+        .collect()
 }
 
 /// Column spacing for the grid layout.
@@ -152,49 +153,38 @@ pub fn compute_click_regions(app: &App, size: Rect) -> Vec<ClickRegion> {
 
 /// Compute click regions for single column layout.
 fn compute_single_column_regions(app: &App, area: Rect, regions: &mut Vec<ClickRegion>) {
-    let mut line_offset = 0u16;
+    let error_offset: u16 = if app.error.is_some() { 2 } else { 0 };
 
-    // Account for error lines if present
-    if app.error.is_some() {
-        line_offset += 2; // Error line + blank line
-    }
+    for (line_offset, item) in app
+        .goals()
+        .iter()
+        .enumerate()
+        .scan(error_offset, |offset, (goal_idx, goal)| {
+            *offset += 1; // Goal header
 
-    for (goal_idx, goal) in app.goals().iter().enumerate() {
-        // Goal header (not clickable)
-        line_offset += 1;
+            let hyp_items: Vec<_> = hypothesis_indices(goal.hyps.len(), app.filters.reverse_order)
+                .filter(|&hyp_idx| app.filters.should_show(&goal.hyps[hyp_idx]))
+                .map(|hyp_idx| {
+                    let item_offset = *offset;
+                    *offset += 1;
+                    (
+                        item_offset,
+                        SelectableItem::Hypothesis { goal_idx, hyp_idx },
+                    )
+                })
+                .collect();
 
-        // Build hypothesis indices, respecting reverse order
-        let hyp_indices: Vec<usize> = if app.filters.reverse_order {
-            (0..goal.hyps.len()).rev().collect()
-        } else {
-            (0..goal.hyps.len()).collect()
-        };
+            let target_offset = *offset;
+            *offset += 2; // Target line + empty line
 
-        // Hypotheses (clickable, filtered)
-        for hyp_idx in hyp_indices {
-            let hyp = &goal.hyps[hyp_idx];
-            if app.filters.should_show(hyp) {
-                register_click_region(
-                    regions,
-                    area,
-                    line_offset,
-                    SelectableItem::Hypothesis { goal_idx, hyp_idx },
-                );
-                line_offset += 1;
-            }
-        }
-
-        // Goal target (clickable)
-        register_click_region(
-            regions,
-            area,
-            line_offset,
-            SelectableItem::GoalTarget { goal_idx },
-        );
-        line_offset += 1;
-
-        // Empty line between goals
-        line_offset += 1;
+            Some(hyp_items.into_iter().chain(std::iter::once((
+                target_offset,
+                SelectableItem::GoalTarget { goal_idx },
+            ))))
+        })
+        .flatten()
+    {
+        register_click_region(regions, area, line_offset, item);
     }
 }
 
@@ -207,11 +197,10 @@ fn compute_grid_regions(
 ) {
     let rows = Layout::vertical(compute_row_constraints(app.goals())).split(area);
 
-    // Skip header row (rows[0]), process each goal row
-    for (goal_idx, goal) in app.goals().iter().enumerate() {
+    app.goals().iter().enumerate().for_each(|(goal_idx, goal)| {
         let cols = split_row_columns(rows[goal_idx + 1], layout);
         register_goal_click_regions(regions, cols.current, goal_idx, goal, app.filters);
-    }
+    });
 }
 
 /// Register click regions for a single goal cell.
@@ -222,32 +211,30 @@ fn register_goal_click_regions(
     goal: &Goal,
     filters: HypothesisFilters,
 ) {
-    let mut line_offset = 1u16; // Skip header line
-
-    let hyp_indices: Vec<usize> = if filters.reverse_order {
-        (0..goal.hyps.len()).rev().collect()
-    } else {
-        (0..goal.hyps.len()).collect()
-    };
-
-    for hyp_idx in hyp_indices {
-        let hyp = &goal.hyps[hyp_idx];
-        if filters.should_show(hyp) {
-            register_click_region(
-                regions,
-                area,
+    let hyp_regions = hypothesis_indices(goal.hyps.len(), filters.reverse_order)
+        .filter(|&hyp_idx| filters.should_show(&goal.hyps[hyp_idx]))
+        .enumerate()
+        .map(|(offset, hyp_idx)| {
+            #[allow(clippy::cast_possible_truncation)]
+            let line_offset = (1 + offset) as u16;
+            (
                 line_offset,
                 SelectableItem::Hypothesis { goal_idx, hyp_idx },
-            );
-            line_offset += 1;
-        }
-    }
-    register_click_region(
-        regions,
-        area,
-        line_offset,
-        SelectableItem::GoalTarget { goal_idx },
-    );
+            )
+        });
+
+    let hyp_count = hypothesis_indices(goal.hyps.len(), filters.reverse_order)
+        .filter(|&hyp_idx| filters.should_show(&goal.hyps[hyp_idx]))
+        .count();
+    #[allow(clippy::cast_possible_truncation)]
+    let target_offset = (1 + hyp_count) as u16;
+    let target_region = std::iter::once((target_offset, SelectableItem::GoalTarget { goal_idx }));
+
+    hyp_regions
+        .chain(target_region)
+        .for_each(|(line_offset, item)| {
+            register_click_region(regions, area, line_offset, item);
+        });
 }
 
 /// Render the main content area.
@@ -274,25 +261,53 @@ fn render_main(frame: &mut Frame, app: &App, area: Rect) {
     render_goals(frame, app, content_area);
 }
 
-/// Render the header with cursor info.
 fn render_header(frame: &mut Frame, app: &App, area: Rect) {
-    let header = Line::from(vec![
-        "File: ".into(),
-        Span::styled(app.cursor.filename(), Style::new().fg(Color::Green)),
-        "  Pos: ".into(),
-        Span::styled(
-            format!(
-                "{}:{}",
-                app.cursor.position.line + 1,
-                app.cursor.position.character + 1
-            ),
-            Style::new().fg(Color::Yellow),
-        ),
-        "  (".into(),
-        Span::styled(&app.cursor.method, Style::new().fg(Color::DarkGray)),
-        ")".into(),
-    ]);
-    frame.render_widget(Paragraph::new(header), area);
+    let Some(cursor) = &app.cursor else {
+        let waiting =
+            Paragraph::new("Waiting for cursor...").style(Style::new().fg(Color::DarkGray));
+        frame.render_widget(waiting, area);
+        return;
+    };
+
+    let filename = cursor.filename().unwrap_or("?");
+    let position = format!(
+        "{}:{}",
+        cursor.position.line + 1,
+        cursor.position.character + 1
+    );
+
+    let file_width = u16::try_from(6 + filename.len()).unwrap_or(u16::MAX);
+    let pos_width = u16::try_from(6 + position.len()).unwrap_or(u16::MAX);
+
+    let [file_area, pos_area, method_area] = Layout::horizontal([
+        Constraint::Length(file_width),
+        Constraint::Length(pos_width),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            "File: ".into(),
+            Span::styled(filename, Style::new().fg(Color::Green)),
+        ])),
+        file_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            "Pos: ".into(),
+            Span::styled(position, Style::new().fg(Color::Yellow)),
+        ])),
+        pos_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            "(".into(),
+            Span::styled(&cursor.method, Style::new().fg(Color::DarkGray)),
+            ")".into(),
+        ])),
+        method_area,
+    );
 }
 
 /// Render goals with adaptive grid layout.
@@ -318,7 +333,7 @@ fn render_goals(frame: &mut Frame, app: &App, area: Rect) {
     render_grid_header(frame, rows[0], layout);
 
     let selection = app.current_selection();
-    for (goal_idx, _) in app.goals().iter().enumerate() {
+    app.goals().iter().enumerate().for_each(|(goal_idx, _)| {
         render_goal_row(
             frame,
             app,
@@ -327,7 +342,7 @@ fn render_goals(frame: &mut Frame, app: &App, area: Rect) {
             selection.as_ref(),
             layout,
         );
-    }
+    });
 }
 
 /// Determine the column layout based on app state and terminal width.
@@ -480,7 +495,6 @@ fn register_click_region(
     }
 }
 
-/// Build the lines for a goal cell.
 fn build_goal_lines(
     goal: &Goal,
     goal_idx: usize,
@@ -488,89 +502,63 @@ fn build_goal_lines(
     kind: CellKind,
     filters: HypothesisFilters,
 ) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
+    let header = Line::from(goal_header(goal, goal_idx))
+        .style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD));
 
-    lines.push(
-        Line::from(goal_header(goal, goal_idx))
-            .style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-    );
-
-    // Build hypothesis indices, respecting reverse order
-    let hyp_indices: Vec<usize> = if filters.reverse_order {
-        (0..goal.hyps.len()).rev().collect()
-    } else {
-        (0..goal.hyps.len()).collect()
-    };
-
-    for hyp_idx in hyp_indices {
-        let hyp = &goal.hyps[hyp_idx];
-        if should_skip_hyp(hyp, kind) {
-            continue;
-        }
-        if !filters.should_show(hyp) {
-            continue;
-        }
-        let is_selected = selection == Some(&SelectableItem::Hypothesis { goal_idx, hyp_idx });
-        lines.push(render_hypothesis_line(hyp, is_selected, kind, filters));
-    }
+    let hyp_lines =
+        hypothesis_indices(goal.hyps.len(), filters.reverse_order).filter_map(|hyp_idx| {
+            let hyp = &goal.hyps[hyp_idx];
+            (!should_skip_hyp(hyp, kind) && filters.should_show(hyp)).then(|| {
+                let is_selected =
+                    selection == Some(&SelectableItem::Hypothesis { goal_idx, hyp_idx });
+                render_hypothesis_line(hyp, is_selected, kind, filters)
+            })
+        });
 
     let is_target_selected = selection == Some(&SelectableItem::GoalTarget { goal_idx });
-    lines.push(render_target_line(goal, is_target_selected, kind));
+    let target = render_target_line(goal, is_target_selected, kind);
 
-    lines
+    std::iter::once(header)
+        .chain(hyp_lines)
+        .chain(std::iter::once(target))
+        .collect()
 }
 
 /// Render single column with inline diff markers (narrow terminal).
 fn render_goals_single_column(frame: &mut Frame, app: &App, area: Rect) {
-    let mut lines: Vec<Line> = Vec::new();
-
-    if let Some(error) = &app.error {
-        lines.push(Line::from(format!("Error: {error}")).fg(Color::Red));
-        lines.push(Line::default());
-    }
-
     let selection = app.current_selection();
-    for (goal_idx, goal) in app.goals().iter().enumerate() {
-        // Goal header
-        lines.push(
-            Line::from(goal_header(goal, goal_idx))
-                .style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+
+    let error_lines = app.error.iter().flat_map(|error| {
+        [
+            Line::from(format!("Error: {error}")).fg(Color::Red),
+            Line::default(),
+        ]
+    });
+
+    let goal_lines = app.goals().iter().enumerate().flat_map(|(goal_idx, goal)| {
+        let header = Line::from(goal_header(goal, goal_idx))
+            .style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+
+        let hyp_lines = hypothesis_indices(goal.hyps.len(), app.filters.reverse_order).filter_map(
+            move |hyp_idx| {
+                let hyp = &goal.hyps[hyp_idx];
+                app.filters.should_show(hyp).then(|| {
+                    let is_selected =
+                        selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
+                    render_hypothesis_line(hyp, is_selected, CellKind::Current, app.filters)
+                })
+            },
         );
 
-        // Build hypothesis indices, respecting reverse order
-        let hyp_indices: Vec<usize> = if app.filters.reverse_order {
-            (0..goal.hyps.len()).rev().collect()
-        } else {
-            (0..goal.hyps.len()).collect()
-        };
-
-        // Hypotheses (filtered)
-        for hyp_idx in hyp_indices {
-            let hyp = &goal.hyps[hyp_idx];
-            if !app.filters.should_show(hyp) {
-                continue;
-            }
-            let is_selected = selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
-            lines.push(render_hypothesis_line(
-                hyp,
-                is_selected,
-                CellKind::Current,
-                app.filters,
-            ));
-        }
-
-        // Goal target
         let is_target_selected = selection == Some(SelectableItem::GoalTarget { goal_idx });
-        lines.push(render_target_line(
-            goal,
-            is_target_selected,
-            CellKind::Current,
-        ));
+        let target = render_target_line(goal, is_target_selected, CellKind::Current);
 
-        // Empty line between goals
-        lines.push(Line::default());
-    }
+        std::iter::once(header)
+            .chain(hyp_lines)
+            .chain([target, Line::default()])
+    });
 
+    let lines: Vec<Line> = error_lines.chain(goal_lines).collect();
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
@@ -669,54 +657,66 @@ const fn selection_prefix(is_selected: bool) -> &'static str {
     }
 }
 
-/// Render the status bar at the bottom.
 fn render_status_bar(frame: &mut Frame, area: Rect, filters: HypothesisFilters) {
-    // Build filter indicator string
-    let mut filter_chars = Vec::new();
-    if filters.hide_instances {
-        filter_chars.push('i');
-    }
-    if filters.hide_types {
-        filter_chars.push('t');
-    }
-    if filters.hide_inaccessible {
-        filter_chars.push('a');
-    }
-    if filters.hide_let_values {
-        filter_chars.push('l');
-    }
-    if filters.reverse_order {
-        filter_chars.push('r');
-    }
+    const KEYBINDINGS: &[(&str, &str)] = &[
+        ("?", "help"),
+        ("j/k", "nav"),
+        ("Enter", "go"),
+        ("q", "quit"),
+    ];
 
-    let filter_status: String = if filter_chars.is_empty() {
-        String::new()
-    } else {
-        format!(" [{}]", filter_chars.into_iter().collect::<String>())
-    };
+    let separator = Span::raw(" │ ");
+    let keybind_spans = KEYBINDINGS.iter().enumerate().flat_map(|(i, (key, desc))| {
+        let prefix = (i > 0).then(|| separator.clone());
+        prefix.into_iter().chain([
+            Span::styled(*key, Style::new().fg(Color::Cyan)),
+            Span::raw(format!(": {desc}")),
+        ])
+    });
 
-    let status = Line::from(vec![
-        Span::styled("?", Style::new().fg(Color::Cyan)),
-        ": help  ".into(),
-        Span::styled("j/k", Style::new().fg(Color::Cyan)),
-        ": nav  ".into(),
-        Span::styled("Enter", Style::new().fg(Color::Cyan)),
-        ": go".into(),
-        Span::styled(filter_status, Style::new().fg(Color::Green)),
-        "  ".into(),
-        Span::styled("q", Style::new().fg(Color::Cyan)),
-        ": quit".into(),
-    ]);
-    frame.render_widget(Paragraph::new(status), area);
+    let filter_status = build_filter_status(filters);
+    let filter_span = (!filter_status.is_empty())
+        .then(|| Span::styled(format!(" [{filter_status}]"), Style::new().fg(Color::Green)));
+
+    let spans: Vec<Span> = keybind_spans.chain(filter_span).collect();
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn build_filter_status(filters: HypothesisFilters) -> String {
+    [
+        (filters.hide_instances, 'i'),
+        (filters.hide_types, 't'),
+        (filters.hide_inaccessible, 'a'),
+        (filters.hide_let_values, 'l'),
+        (filters.reverse_order, 'r'),
+    ]
+    .into_iter()
+    .filter_map(|(enabled, c)| enabled.then_some(c))
+    .collect()
 }
 
 /// Render the help popup overlay in bottom-right corner.
 fn render_help_popup(frame: &mut Frame) {
+    const KEYBINDINGS: &[(&str, &str)] = &[
+        ("j/k", "navigate"),
+        ("Enter", "go to definition"),
+        ("i", "toggle instances"),
+        ("t", "toggle types"),
+        ("a", "toggle inaccessible"),
+        ("l", "toggle let values"),
+        ("r", "toggle reverse order"),
+        ("p", "previous column"),
+        ("n", "next column"),
+        ("?", "close help"),
+        ("q", "quit"),
+    ];
+
     let frame_area = frame.area();
-    let width = 32u16;
-    let height = 15u16;
+    let width = 28u16;
+    #[allow(clippy::cast_possible_truncation)]
+    let height = (KEYBINDINGS.len() as u16) + 2;
     let x = frame_area.width.saturating_sub(width + 1);
-    let y = frame_area.height.saturating_sub(height + 2); // +2 for status bar
+    let y = frame_area.height.saturating_sub(height + 2);
     let area = Rect::new(x, y, width, height);
 
     frame.render_widget(Clear, area);
@@ -726,46 +726,15 @@ fn render_help_popup(frame: &mut Frame) {
         .border_style(Style::new().fg(Color::Cyan));
 
     let key_style = Style::new().fg(Color::Cyan);
+    let help_lines: Vec<Line> = KEYBINDINGS
+        .iter()
+        .map(|(key, desc)| {
+            Line::from(vec![
+                Span::styled(format!("{key:>6}"), key_style),
+                Span::raw(format!("  {desc}")),
+            ])
+        })
+        .collect();
 
-    let help_text = vec![
-        Line::from(vec![
-            Span::styled("j/k", key_style),
-            " nav  ".into(),
-            Span::styled("Enter", key_style),
-            " go".into(),
-        ]),
-        Line::from(""),
-        Line::from("Filters:"),
-        Line::from(vec![
-            Span::styled("i", key_style),
-            " instances  ".into(),
-            Span::styled("t", key_style),
-            " types".into(),
-        ]),
-        Line::from(vec![
-            Span::styled("a", key_style),
-            " inaccessible  ".into(),
-            Span::styled("r", key_style),
-            " reverse".into(),
-        ]),
-        Line::from(vec![Span::styled("l", key_style), " let values".into()]),
-        Line::from(""),
-        Line::from("Columns:"),
-        Line::from(vec![
-            Span::styled("p", key_style),
-            " previous  ".into(),
-            Span::styled("n", key_style),
-            " next".into(),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("?", key_style),
-            " close  ".into(),
-            Span::styled("q", key_style),
-            " quit".into(),
-        ]),
-    ];
-
-    let paragraph = Paragraph::new(help_text).block(block);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Paragraph::new(help_lines).block(block), area);
 }

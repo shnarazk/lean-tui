@@ -35,9 +35,8 @@ pub fn extract_cursor_from_request(req: &AnyRequest) -> Option<CursorInfo> {
     let params: lsp_types::TextDocumentPositionParams =
         serde_json::from_value(req.params.clone()).ok()?;
     Some(CursorInfo::new(
-        params.text_document.uri.to_string(),
-        params.position.line,
-        params.position.character,
+        params.text_document.uri,
+        params.position,
         &req.method,
     ))
 }
@@ -50,13 +49,11 @@ pub fn extract_cursor_from_notification(notif: &AnyNotification) -> Option<Curso
     }
     let params: lsp_types::DidChangeTextDocumentParams =
         serde_json::from_value(notif.params.clone()).ok()?;
-    let uri = params.text_document.uri.to_string();
     let first_change = params.content_changes.first()?;
     let range = first_change.range?;
     Some(CursorInfo::new(
-        uri,
-        range.start.line,
-        range.start.character,
+        params.text_document.uri,
+        range.start,
         "didChange",
     ))
 }

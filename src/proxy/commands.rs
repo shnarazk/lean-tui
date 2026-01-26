@@ -33,22 +33,14 @@ pub async fn process_command(
                 socket_server,
             )
             .await;
-            None // Handled internally, don't forward
+            None
         }
         Command::GetHypothesisLocation {
             ref uri,
-            line,
-            character,
+            position,
             ref info,
         } => {
-            // Use Lean's getGoToLocation RPC with the InfoWithCtx reference.
-            let Ok(url) = Url::parse(uri) else {
-                tracing::error!("Invalid URI: {uri}");
-                return Some(cmd);
-            };
-
-            let text_document = TextDocumentIdentifier { uri: url };
-            let position = Position::new(line, character);
+            let text_document = TextDocumentIdentifier::new(uri.clone());
 
             match rpc_client
                 .get_goto_location(&text_document, position, GoToKind::Definition, info.clone())
@@ -62,9 +54,8 @@ pub async fn process_command(
                         location.target_selection_range.start.character
                     );
                     Some(Command::Navigate {
-                        uri: location.target_uri.to_string(),
-                        line: location.target_selection_range.start.line,
-                        character: location.target_selection_range.start.character,
+                        uri: location.target_uri,
+                        position: location.target_selection_range.start,
                     })
                 }
                 Ok(None) => {
@@ -83,18 +74,18 @@ pub async fn process_command(
 
 /// Handle `FetchTemporalGoals` command: find target position and fetch goals.
 async fn handle_fetch_temporal_goals(
-    uri: &str,
+    uri: &Url,
     cursor_position: Position,
     slot: TemporalSlot,
     rpc_client: &Arc<RpcClient>,
     document_cache: &Arc<DocumentCache>,
     socket_server: &Arc<SocketServer>,
 ) {
-    // Get parsed syntax tree for AST-based tactic finding (sync, uses cached tree)
-    let Some(tree) = document_cache.get_tree(uri) else {
+    let uri_str = uri.as_str();
+    let Some(tree) = document_cache.get_tree(uri_str) else {
         tracing::warn!("Document not in cache: {uri}");
         socket_server.broadcast_temporal_goals(
-            uri.to_string(),
+            uri.clone(),
             cursor_position,
             slot,
             GoalResult::NotAvailable,
@@ -102,7 +93,6 @@ async fn handle_fetch_temporal_goals(
         return;
     };
 
-    // Find target position based on slot using tree-sitter
     let target_position = match slot {
         TemporalSlot::Previous => tactic_finder::find_previous_tactic(&tree, cursor_position),
         TemporalSlot::Current => Some(cursor_position),
@@ -110,9 +100,8 @@ async fn handle_fetch_temporal_goals(
     };
 
     let Some(target) = target_position else {
-        // No previous/next line found (at boundary)
         socket_server.broadcast_temporal_goals(
-            uri.to_string(),
+            uri.clone(),
             cursor_position,
             slot,
             GoalResult::NotAvailable,
@@ -120,27 +109,12 @@ async fn handle_fetch_temporal_goals(
         return;
     };
 
-    // Fetch goals at target position
-    let Ok(url) = Url::parse(uri) else {
-        tracing::error!("Invalid URI: {uri}");
-        socket_server.broadcast_temporal_goals(
-            uri.to_string(),
-            cursor_position,
-            slot,
-            GoalResult::Error {
-                error: "Invalid URI".to_string(),
-            },
-        );
-        return;
-    };
+    let text_document = TextDocumentIdentifier::new(uri.clone());
 
-    let text_document = TextDocumentIdentifier::new(url);
-    let position = Position::new(target.line, target.character);
-
-    match fetch_combined_goals(rpc_client, &text_document, position).await {
+    match fetch_combined_goals(rpc_client, &text_document, target).await {
         Ok(goals) => {
             socket_server.broadcast_temporal_goals(
-                uri.to_string(),
+                uri.clone(),
                 cursor_position,
                 slot,
                 GoalResult::Ready {
@@ -156,7 +130,7 @@ async fn handle_fetch_temporal_goals(
                 target.character
             );
             socket_server.broadcast_temporal_goals(
-                uri.to_string(),
+                uri.clone(),
                 cursor_position,
                 slot,
                 GoalResult::Error {

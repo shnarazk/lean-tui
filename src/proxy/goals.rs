@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
+use async_lsp::lsp_types::{Position, TextDocumentIdentifier};
 
 use crate::{
     error::LspError,
@@ -22,19 +22,14 @@ pub async fn fetch_combined_goals(
         rpc_client.get_term_goal(text_document, position)
     );
 
-    let mut all_goals = Vec::new();
+    let term_goal = term_result.ok().flatten();
+    let tactic_goals = match tactic_result {
+        Ok(goals) => goals,
+        Err(e) if term_goal.is_none() => return Err(e),
+        Err(_) => vec![],
+    };
 
-    if let Ok(Some(term_goal)) = term_result {
-        all_goals.push(term_goal);
-    }
-
-    match tactic_result {
-        Ok(tactic_goals) => all_goals.extend(tactic_goals),
-        Err(e) if all_goals.is_empty() => return Err(e),
-        Err(_) => {} // Term goal present, ignore tactic error
-    }
-
-    Ok(all_goals)
+    Ok(term_goal.into_iter().chain(tactic_goals).collect())
 }
 
 /// Spawn a task to fetch goals and broadcast results or errors.
@@ -45,24 +40,22 @@ pub fn spawn_goal_fetch(
 ) {
     let rpc = rpc_client.clone();
     let socket_server = socket_server.clone();
-    let uri_string = cursor.uri.clone();
-    let line = cursor.position.line;
-    let character = cursor.position.character;
+    let uri = cursor.uri.clone();
+    let position = cursor.position;
 
     tokio::spawn(async move {
-        let Ok(url) = Url::parse(&uri_string) else {
-            tracing::error!("Invalid URI: {uri_string}");
-            return;
-        };
-        let text_document = TextDocumentIdentifier::new(url);
-        let position = Position::new(line, character);
+        let text_document = TextDocumentIdentifier::new(uri.clone());
 
         match fetch_combined_goals(&rpc, &text_document, position).await {
             Ok(goals) => {
-                socket_server.broadcast_goals(uri_string, Position::new(line, character), goals);
+                socket_server.broadcast_goals(uri, position, goals);
             }
             Err(e) => {
-                tracing::warn!("Could not fetch goals at {uri_string}:{line}:{character}: {e}");
+                tracing::warn!(
+                    "Could not fetch goals at {uri}:{}:{}: {e}",
+                    position.line,
+                    position.character
+                );
                 socket_server.broadcast_error(e.to_string());
             }
         }

@@ -13,6 +13,7 @@ excessive_nesting = { level = "deny", priority = 2 }
 missing_errors_doc = { level = "allow", priority = -1 }
 nursery = "warn"
 pedantic = "deny"
+absolute_paths = {level = "warn", priority = 2}
 
 [dependencies]
 # Async runtime

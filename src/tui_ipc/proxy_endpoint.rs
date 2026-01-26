@@ -61,7 +61,7 @@ impl SocketServer {
     }
 
     /// Broadcast goals to all connected clients.
-    pub fn broadcast_goals(&self, uri: String, position: super::Position, goals: Vec<Goal>) {
+    pub fn broadcast_goals(&self, uri: Url, position: super::Position, goals: Vec<Goal>) {
         self.send(Message::Goals {
             uri,
             position,
@@ -77,7 +77,7 @@ impl SocketServer {
     /// Broadcast temporal goals to all connected clients.
     pub fn broadcast_temporal_goals(
         &self,
-        uri: String,
+        uri: Url,
         cursor_position: super::Position,
         slot: TemporalSlot,
         result: GoalResult,
@@ -206,52 +206,36 @@ impl CommandHandler {
 
     async fn handle_command(&mut self, cmd: Command) {
         match cmd {
-            Command::Navigate {
-                uri,
-                line,
-                character,
-            } => {
-                tracing::info!("Navigate request: {uri}:{line}:{character}");
-                self.send_show_document(&uri, line, character).await;
-            }
-            Command::GetHypothesisLocation {
-                uri,
-                line,
-                character,
-                ..
-            } => {
-                // Note: The actual RPC lookup using getGoToLocation happens in
-                // the proxy module before the command reaches here. If we receive
-                // this command, it means the lookup failed or returned the fallback.
+            Command::Navigate { uri, position } => {
                 tracing::info!(
-                    "GetHypothesisLocation fallback: navigating to {uri}:{line}:{character}"
+                    "Navigate request: {uri}:{}:{}",
+                    position.line,
+                    position.character
                 );
-                self.send_show_document(&uri, line, character).await;
+                self.send_show_document(uri, position).await;
+            }
+            Command::GetHypothesisLocation { uri, position, .. } => {
+                tracing::info!(
+                    "GetHypothesisLocation fallback: navigating to {uri}:{}:{}",
+                    position.line,
+                    position.character
+                );
+                self.send_show_document(uri, position).await;
             }
             Command::FetchTemporalGoals { .. } => {
-                // This is handled by process_command before reaching here.
-                // Should never reach this point.
                 tracing::warn!("FetchTemporalGoals reached CommandHandler unexpectedly");
             }
         }
     }
 
-    async fn send_show_document(&mut self, uri: &str, line: u32, character: u32) {
-        let Ok(url) = Url::parse(uri) else {
-            tracing::error!("Invalid URI: {uri}");
-            return;
-        };
-
-        // LSP positions are 0-indexed
-        let position = Position::new(line, character);
+    async fn send_show_document(&mut self, uri: Url, position: Position) {
         let selection = Range::new(position, position);
-
-        self.send_show_document_with_url(url, selection).await;
+        self.send_show_document_with_selection(uri, selection).await;
     }
 
-    async fn send_show_document_with_url(&mut self, url: Url, selection: Range) {
+    async fn send_show_document_with_selection(&mut self, uri: Url, selection: Range) {
         let params = ShowDocumentParams {
-            uri: url,
+            uri,
             external: None,
             take_focus: Some(true),
             selection: Some(selection),

@@ -61,7 +61,7 @@ impl<S: LspService> InterceptService<S> {
         if let Some(cursor) = extract_cursor_from_request(req) {
             let _span = tracing::info_span!(
                 "cursor",
-                file = cursor.filename(),
+                file = cursor.filename().unwrap_or("?"),
                 line = cursor.position.line,
                 char = cursor.position.character
             )
@@ -77,14 +77,12 @@ impl<S: LspService> InterceptService<S> {
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
-        // Track document content for tactic position detection (sync, uses
-        // std::sync::Mutex)
         self.document_cache.handle_notification(notif);
 
         if let Some(cursor) = extract_cursor_from_notification(notif) {
             let _span = tracing::info_span!(
                 "cursor",
-                file = cursor.filename(),
+                file = cursor.filename().unwrap_or("?"),
                 line = cursor.position.line,
                 char = cursor.position.character
             )

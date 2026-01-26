@@ -5,11 +5,22 @@ use ratatui::{layout::Rect, widgets::ListState};
 
 use crate::{
     lean_rpc::{Goal, Hypothesis},
-    tui_ipc::{Command, CursorInfo, GoalResult, Message, Position, TemporalSlot},
+    tui_ipc::{Command, CursorInfo, GoalResult, Message, Position, TemporalSlot, Url},
 };
 
+/// Generate hypothesis indices, optionally reversed.
+pub fn hypothesis_indices(len: usize, reverse: bool) -> impl Iterator<Item = usize> {
+    let range = 0..len;
+    let forward: Box<dyn Iterator<Item = usize>> = if reverse {
+        Box::new(range.rev())
+    } else {
+        Box::new(range)
+    };
+    forward
+}
+
 /// A selectable item in the TUI (hypothesis or goal target).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectableItem {
     Hypothesis { goal_idx: usize, hyp_idx: usize },
     GoalTarget { goal_idx: usize },
@@ -95,8 +106,8 @@ impl HypothesisFilters {
 /// Application state.
 #[derive(Default)]
 pub struct App {
-    /// Current cursor position from editor.
-    pub cursor: CursorInfo,
+    /// Current cursor position from editor (None until first cursor event).
+    pub cursor: Option<CursorInfo>,
     /// Goals at three temporal positions.
     pub temporal_goals: TemporalGoals,
     /// Current error message.
@@ -167,27 +178,18 @@ impl App {
         std::mem::take(&mut self.outgoing_commands)
     }
 
-    /// Get all selectable items as a flat list, respecting current filters.
     pub fn selectable_items(&self) -> Vec<SelectableItem> {
-        let mut items = Vec::new();
-        for (goal_idx, goal) in self.goals().iter().enumerate() {
-            // Build hypothesis indices, respecting reverse order
-            let hyp_indices: Vec<usize> = if self.filters.reverse_order {
-                (0..goal.hyps.len()).rev().collect()
-            } else {
-                (0..goal.hyps.len()).collect()
-            };
-
-            // Only include hypotheses that pass the filter
-            items.extend(
-                hyp_indices
-                    .into_iter()
+        self.goals()
+            .iter()
+            .enumerate()
+            .flat_map(|(goal_idx, goal)| {
+                let hyp_items = hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
                     .filter(|&hyp_idx| self.filters.should_show(&goal.hyps[hyp_idx]))
-                    .map(|hyp_idx| SelectableItem::Hypothesis { goal_idx, hyp_idx }),
-            );
-            items.push(SelectableItem::GoalTarget { goal_idx });
-        }
-        items
+                    .map(move |hyp_idx| SelectableItem::Hypothesis { goal_idx, hyp_idx });
+
+                hyp_items.chain(std::iter::once(SelectableItem::GoalTarget { goal_idx }))
+            })
+            .collect()
     }
 
     /// Get currently selected item.
@@ -195,7 +197,7 @@ impl App {
         let items = self.selectable_items();
         self.list_state
             .selected()
-            .and_then(|i| items.get(i).cloned())
+            .and_then(|i| items.get(i).copied())
     }
 
     /// Move selection to previous item.
@@ -232,7 +234,7 @@ impl App {
                 self.connected = true;
             }
             Message::Cursor(cursor) => {
-                self.cursor = cursor;
+                self.cursor = Some(cursor);
                 self.connected = true;
                 self.error = None;
             }
@@ -244,8 +246,6 @@ impl App {
                 let goals_changed = self.temporal_goals.current.goals != goals;
                 let line_changed = self.temporal_goals.current.position.line != position.line;
 
-                // Skip temporal refresh if goals and line are unchanged
-                // (character position changes on same line don't affect temporal context)
                 if !goals_changed && !line_changed {
                     self.temporal_goals.current.position = position;
                     self.connected = true;
@@ -260,7 +260,6 @@ impl App {
                 self.connected = true;
                 self.error = None;
                 self.reset_selection();
-                // Re-request temporal goals if columns are visible
                 self.refresh_temporal_columns();
             }
             Message::TemporalGoals {
@@ -270,8 +269,8 @@ impl App {
                 result,
             } => {
                 self.connected = true;
-                // Only apply if still at same cursor position
-                if cursor_position != self.cursor.position {
+                let dominated_position = self.cursor.as_ref().map(|c| c.position);
+                if Some(cursor_position) != dominated_position {
                     return;
                 }
                 let goal_state = goal_state_from_result(result, cursor_position);
@@ -361,8 +360,7 @@ impl App {
 
     /// Handle mouse click at given coordinates.
     fn handle_click(&mut self, x: u16, y: u16) -> bool {
-        // Clone the clicked item to avoid borrow conflict
-        let clicked_item = self.find_click_region(x, y).map(|r| r.item.clone());
+        let clicked_item = self.find_click_region(x, y).map(|r| r.item);
         let Some(item) = clicked_item else {
             return false;
         };
@@ -415,19 +413,16 @@ impl App {
 
     /// Request temporal goals for a slot.
     fn request_temporal_goals(&mut self, slot: TemporalSlot) {
-        let uri = self.cursor.uri.clone();
-        if uri.is_empty() {
+        let Some(cursor) = &self.cursor else {
             return;
-        }
+        };
 
-        // Only set loading state if we don't have existing data
-        // This prevents the "flash" when refreshing
         match slot {
             TemporalSlot::Previous => {
                 if self.temporal_goals.previous.is_none() {
                     self.temporal_goals.previous = Some(GoalState {
                         goals: vec![],
-                        position: self.cursor.position,
+                        position: cursor.position,
                         status: LoadStatus::Loading,
                     });
                 }
@@ -436,7 +431,7 @@ impl App {
                 if self.temporal_goals.next.is_none() {
                     self.temporal_goals.next = Some(GoalState {
                         goals: vec![],
-                        position: self.cursor.position,
+                        position: cursor.position,
                         status: LoadStatus::Loading,
                     });
                 }
@@ -445,8 +440,8 @@ impl App {
         }
 
         self.queue_command(Command::FetchTemporalGoals {
-            uri,
-            cursor_position: self.cursor.position,
+            uri: cursor.uri.clone(),
+            cursor_position: cursor.position,
             slot,
         });
     }
@@ -473,37 +468,25 @@ impl App {
     }
 
     /// Navigate to the currently selected item.
-    ///
-    /// For hypotheses with `info` (from `SubexprInfo`), sends a
-    /// `GetHypothesisLocation` command to look up the actual definition
-    /// location via `getGoToLocation` RPC. Falls back to `goals_position`
-    /// if no info is available.
     fn navigate_to_selection(&mut self) {
         let Some(selection) = self.current_selection() else {
             return;
         };
-
-        // Get the URI from cursor info
-        let uri = self.cursor.uri.clone();
-        if uri.is_empty() {
+        let Some(cursor) = &self.cursor else {
             return;
-        }
+        };
 
-        // Get the position where goals were fetched (for RPC session context)
-        let goals_pos = self.goals_position().unwrap_or(self.cursor.position);
-
-        let cmd = self.build_navigation_command(&selection, uri, goals_pos);
+        let goals_pos = self.goals_position().unwrap_or(cursor.position);
+        let cmd = self.build_navigation_command(&selection, cursor.uri.clone(), goals_pos);
         self.queue_command(cmd);
     }
 
-    /// Build the appropriate navigation command for the selected item.
     fn build_navigation_command(
         &self,
         selection: &SelectableItem,
-        uri: String,
-        goals_pos: Position,
+        uri: Url,
+        position: Position,
     ) -> Command {
-        // Try to get hypothesis info for go-to-definition
         let hyp_info = match selection {
             SelectableItem::Hypothesis { goal_idx, hyp_idx } => self
                 .goals()
@@ -514,20 +497,13 @@ impl App {
         };
 
         if let Some(info) = hyp_info {
-            // We have info - request location lookup from proxy
             Command::GetHypothesisLocation {
                 uri,
-                line: goals_pos.line,
-                character: goals_pos.character,
+                position,
                 info,
             }
         } else {
-            // Fallback: navigate to goals position
-            Command::Navigate {
-                uri,
-                line: goals_pos.line,
-                character: goals_pos.character,
-            }
+            Command::Navigate { uri, position }
         }
     }
 }

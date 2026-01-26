@@ -35,7 +35,11 @@
         commonArgs = {
           inherit src;
           strictDeps = true;
-          nativeBuildInputs = [ pkgs.pkg-config pkgs.tree-sitter pkgs.nodejs ];
+          nativeBuildInputs = [
+            pkgs.pkg-config
+            pkgs.tree-sitter
+            pkgs.nodejs
+          ];
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -47,16 +51,23 @@
 
         checks = {
           inherit lean-tui;
-          clippy = craneLib.cargoClippy (commonArgs // {
-            inherit cargoArtifacts;
-            cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-          });
+          clippy = craneLib.cargoClippy (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+            }
+          );
           fmt = craneLib.cargoFmt { src = ./.; };
         };
 
         devShells.default = craneLib.devShell {
           checks = self.checks.${system};
-          packages = with pkgs; [ tree-sitter nodejs elan ];
+          packages = with pkgs; [
+            tree-sitter
+            nodejs
+            elan
+          ];
         };
       }
     );
