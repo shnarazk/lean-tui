@@ -1,28 +1,22 @@
 //! Document content cache with tree-sitter parsing.
-//!
-//! Caches document content and syntax trees for efficient tactic position
-//! detection. Tree-sitter's incremental parsing reuses unchanged subtrees
-//! automatically.
 
 use std::{collections::HashMap, sync::Mutex};
 
 use async_lsp::{
     lsp_types::{
         notification::{DidChangeTextDocument, DidOpenTextDocument, Notification},
-        DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+        DidChangeTextDocumentParams, DidOpenTextDocumentParams, Position,
+        TextDocumentContentChangeEvent,
     },
     AnyNotification,
 };
 use tree_sitter::{Parser, Tree};
 
-/// Cached document with content and syntax tree.
 struct Document {
     content: String,
     tree: Option<Tree>,
 }
 
-/// Document cache with tree-sitter parsing.
-/// Uses `std::sync::Mutex` because tree-sitter's `Tree` is not `Send`.
 pub struct DocumentCache {
     documents: Mutex<HashMap<String, Document>>,
     parser: Mutex<Parser>,
@@ -41,7 +35,6 @@ impl DocumentCache {
         }
     }
 
-    /// Process LSP notification, updating cache for document events.
     pub fn handle_notification(&self, notif: &AnyNotification) {
         if notif.method == DidOpenTextDocument::METHOD {
             let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone())
@@ -64,8 +57,6 @@ impl DocumentCache {
         }
     }
 
-    /// Update document content and re-parse with old tree for incremental
-    /// benefit.
     fn update(&self, uri: &str, content: String) {
         let mut docs = self.documents.lock().expect("lock poisoned");
         let old_tree = docs.get(uri).and_then(|d| d.tree.as_ref());
@@ -73,11 +64,10 @@ impl DocumentCache {
         docs.insert(uri.to_string(), Document { content, tree });
     }
 
-    /// Apply LSP content changes and return the new content.
     fn apply_changes(
         &self,
         uri: &str,
-        changes: &[async_lsp::lsp_types::TextDocumentContentChangeEvent],
+        changes: &[TextDocumentContentChangeEvent],
     ) -> Option<String> {
         let docs = self.documents.lock().expect("lock poisoned");
         let mut content = docs.get(uri)?.content.clone();
@@ -104,7 +94,6 @@ impl DocumentCache {
             .parse(content, old_tree)
     }
 
-    /// Get cached syntax tree for a document.
     pub fn get_tree(&self, uri: &str) -> Option<Tree> {
         self.documents
             .lock()
@@ -113,7 +102,6 @@ impl DocumentCache {
             .and_then(|d| d.tree.clone())
     }
 
-    /// Get both the syntax tree and content for a document.
     pub fn get_tree_and_content(&self, uri: &str) -> Option<(Tree, String)> {
         self.documents
             .lock()
@@ -129,8 +117,7 @@ impl Default for DocumentCache {
     }
 }
 
-/// Convert LSP position to byte offset.
-fn position_to_offset(content: &str, pos: async_lsp::lsp_types::Position) -> usize {
+fn position_to_offset(content: &str, pos: Position) -> usize {
     content
         .lines()
         .take(pos.line as usize)

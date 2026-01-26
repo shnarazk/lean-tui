@@ -1,13 +1,8 @@
-//! Lean RPC protocol types and client for communication with lake serve.
-//!
-//! Lean uses custom RPC methods tunneled through LSP:
-//! - `$/lean/rpc/connect` - establish session
-//! - `$/lean/rpc/keepAlive` - maintain session
-//! - `$/lean/rpc/call` - invoke Lean methods like `getInteractiveGoals`
+//! Lean RPC protocol types and client.
 
 mod client;
 
-use async_lsp::lsp_types;
+use async_lsp::lsp_types::Range;
 pub use client::{GoToKind, RpcClient};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -331,7 +326,6 @@ impl InteractiveGoalsResponse {
     }
 }
 
-/// Response from `Lean.Widget.getInteractiveTermGoal`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InteractiveTermGoalResponse {
@@ -339,9 +333,8 @@ pub struct InteractiveTermGoalResponse {
     pub hyps: Vec<InteractiveHypothesis>,
     #[serde(rename = "type")]
     pub type_: CodeWithInfos,
-    /// Syntactic range of the term
     #[serde(default)]
-    pub range: Option<lsp_types::Range>,
+    pub range: Option<Range>,
 }
 
 impl InteractiveTermGoalResponse {

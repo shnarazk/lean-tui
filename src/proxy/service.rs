@@ -3,6 +3,7 @@
 use std::{
     ops::ControlFlow,
     pin::Pin,
+    result::Result as StdResult,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -104,9 +105,9 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = std::result::Result<S::Response, S::Error>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = StdResult<S::Response, S::Error>> + Send>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<StdResult<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
@@ -140,7 +141,7 @@ impl<S: LspService> tower_service::Service<AnyRequest> for DeferredService<S> {
     type Error = S::Error;
     type Future = S::Future;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<StdResult<(), Self::Error>> {
         self.0
             .as_mut()
             .expect("DeferredService must be initialized before use")

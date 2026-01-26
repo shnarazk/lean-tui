@@ -20,6 +20,10 @@ use async_lsp::MainLoop;
 use commands::process_command;
 use documents::DocumentCache;
 use service::{DeferredService, InterceptService};
+use tokio::{
+    io::{stdin, stdout},
+    process::{ChildStdin, ChildStdout, Command},
+};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
@@ -107,10 +111,8 @@ pub async fn run() -> Result<()> {
     });
 
     let server_task = tokio::spawn(async move {
-        let stdin = tokio::io::stdin();
-        let stdout = tokio::io::stdout();
         server_mainloop
-            .run_buffered(stdin.compat(), stdout.compat_write())
+            .run_buffered(stdin().compat(), stdout().compat_write())
             .await
     });
 
@@ -137,8 +139,8 @@ const LEAN_PP_OPTIONS: &[&str] = &[
 ];
 
 /// Spawn lake serve child process with configured Lean options.
-fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
-    let mut cmd = tokio::process::Command::new("lake");
+fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
+    let mut cmd = Command::new("lake");
     cmd.arg("serve").arg("--");
     for opt in LEAN_PP_OPTIONS {
         cmd.args(["-D", opt]);

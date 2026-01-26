@@ -1,4 +1,4 @@
-//! TUI module for displaying Lean proof goals.
+//! TUI for displaying Lean proof goals.
 
 pub mod app;
 mod components;
@@ -6,7 +6,9 @@ mod components;
 use std::{io::stdout, time::Duration};
 
 use app::App;
-use components::{Component, GoalView, Header, HelpMenu, StatusBar};
+use components::{
+    Component, GoalView, GoalViewInput, Header, HelpMenu, KeyMouseEvent, KeyPress, StatusBar,
+};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -18,13 +20,13 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Paragraph},
 };
+use tokio::time::sleep;
 
 use crate::{
     error::Result,
     tui_ipc::{socket_path, spawn_socket_handler},
 };
 
-/// Run the TUI application.
 pub async fn run() -> Result<()> {
     enable_raw_mode()?;
     stdout()
@@ -36,24 +38,23 @@ pub async fn run() -> Result<()> {
     let mut app = App::default();
 
     // Create components
-    let mut header = Header::new();
-    let mut goal_view = GoalView::new();
-    let mut status_bar = StatusBar::new();
-    let mut help_menu = HelpMenu::new();
+    let mut header = Header::default();
+    let mut goal_view = GoalView::default();
+    let mut status_bar = StatusBar::default();
+    let mut help_menu = HelpMenu::default();
 
     let mut event_stream = EventStream::new();
 
     while !app.should_exit {
-        // Sync component state from app
-        header.set_cursor(app.cursor.clone());
-        goal_view.set_goals(app.goals().to_vec());
-        goal_view.set_definition(app.definition.clone());
-        goal_view.set_case_splits(app.case_splits.clone());
-        goal_view.set_error(app.error.clone());
-        goal_view.set_filters(app.filters);
-        status_bar.set_filters(app.filters);
+        header.update(app.cursor.clone());
+        goal_view.update(GoalViewInput {
+            goals: app.goals().to_vec(),
+            definition: app.definition.clone(),
+            case_splits: app.case_splits.clone(),
+            error: app.error.clone(),
+        });
+        status_bar.update(goal_view.filters());
 
-        // Render UI
         terminal.draw(|frame| {
             render_frame(
                 frame,
@@ -65,26 +66,27 @@ pub async fn run() -> Result<()> {
             );
         })?;
 
-        // Update click regions from goal_view
-        app.click_regions = goal_view.click_regions().to_vec();
-
         tokio::select! {
             Some(msg) = socket.rx.recv() => {
                 app.handle_message(msg);
             }
             Some(Ok(event)) = event_stream.next() => {
-                // Help menu handles its own events when visible
-                if help_menu.handle_event(&event) {
-                    continue;
-                }
-                // Handle global events
-                if !handle_global_event(&mut app, &mut help_menu, &goal_view, &event) {
-                    // Delegate to components
-                    goal_view.handle_event(&event);
-                    app.filters = goal_view.filters();
+                match &event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        if help_menu.handle_event(KeyPress(*key)) {
+                            continue;
+                        }
+                        if !handle_global_event(&mut app, &mut help_menu, &goal_view, &event) {
+                            goal_view.handle_event(KeyMouseEvent::Key(*key));
+                        }
+                    }
+                    Event::Mouse(mouse) => {
+                        goal_view.handle_event(KeyMouseEvent::Mouse(*mouse));
+                    }
+                    _ => {}
                 }
             }
-            () = tokio::time::sleep(Duration::from_millis(50)) => {
+            () = sleep(Duration::from_millis(50)) => {
                 for cmd in app.take_commands() {
                     let _ = socket.tx.send(cmd).await;
                 }
@@ -152,7 +154,6 @@ fn render_frame(
     render_main(frame, app, main_area, header, goal_view);
     status_bar.render(frame, help_area);
 
-    // Render help popup on top if visible
     help_menu.render(frame, frame.area());
 }
 

@@ -1,7 +1,10 @@
 //! Application state for the TUI.
 
-use ratatui::layout::Rect;
+use std::mem;
 
+use async_lsp::lsp_types::Url;
+
+use super::components::SelectableItem;
 use crate::{
     lean_rpc::{Goal, Hypothesis},
     tui_ipc::{
@@ -9,31 +12,6 @@ use crate::{
         TemporalSlot,
     },
 };
-
-/// Generate hypothesis indices, optionally reversed.
-pub fn hypothesis_indices(len: usize, reverse: bool) -> impl Iterator<Item = usize> {
-    let range = 0..len;
-    let forward: Box<dyn Iterator<Item = usize>> = if reverse {
-        Box::new(range.rev())
-    } else {
-        Box::new(range)
-    };
-    forward
-}
-
-/// A selectable item in the TUI (hypothesis or goal target).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectableItem {
-    Hypothesis { goal_idx: usize, hyp_idx: usize },
-    GoalTarget { goal_idx: usize },
-}
-
-/// A clickable region mapped to a selectable item.
-#[derive(Debug, Clone)]
-pub struct ClickRegion {
-    pub area: Rect,
-    pub item: SelectableItem,
-}
 
 /// Visibility settings for diff columns (both hidden by default).
 #[derive(Debug, Clone, Copy, Default)]
@@ -70,48 +48,6 @@ pub struct TemporalGoals {
     pub next: Option<GoalState>,
 }
 
-/// Filter settings for hypothesis display (VSCode-lean4 compatible).
-#[derive(Debug, Clone, Copy)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct HypothesisFilters {
-    pub hide_instances: bool,
-    pub hide_types: bool,
-    pub hide_inaccessible: bool,
-    pub hide_let_values: bool,
-    pub reverse_order: bool,
-    /// Hide definition header and tree structure (default: true).
-    pub hide_definition: bool,
-}
-
-impl Default for HypothesisFilters {
-    fn default() -> Self {
-        Self {
-            hide_instances: false,
-            hide_types: false,
-            hide_inaccessible: false,
-            hide_let_values: false,
-            reverse_order: false,
-            hide_definition: true, // Off by default
-        }
-    }
-}
-
-impl HypothesisFilters {
-    /// Check if a hypothesis should be shown based on current filters.
-    pub fn should_show(self, hyp: &Hypothesis) -> bool {
-        if self.hide_instances && hyp.is_instance {
-            return false;
-        }
-        if self.hide_types && hyp.is_type {
-            return false;
-        }
-        if self.hide_inaccessible && hyp.names.iter().any(|n| n.contains('\u{2020}')) {
-            return false;
-        }
-        true
-    }
-}
-
 /// Application state.
 #[derive(Default)]
 pub struct App {
@@ -131,12 +67,8 @@ pub struct App {
     pub should_exit: bool,
     /// Outgoing commands queue.
     outgoing_commands: Vec<Command>,
-    /// Click regions for mouse interaction (from GoalView component).
-    pub click_regions: Vec<ClickRegion>,
     /// Visibility settings for diff columns.
     pub columns: ColumnVisibility,
-    /// Filter settings for hypothesis display.
-    pub filters: HypothesisFilters,
 }
 
 fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> GoalState {
@@ -181,7 +113,7 @@ impl App {
 
     /// Take all queued commands.
     pub fn take_commands(&mut self) -> Vec<Command> {
-        std::mem::take(&mut self.outgoing_commands)
+        mem::take(&mut self.outgoing_commands)
     }
 
     /// Handle incoming message from proxy.
@@ -282,7 +214,7 @@ impl App {
     fn build_navigation_command(
         &self,
         selection: Option<SelectableItem>,
-        uri: async_lsp::lsp_types::Url,
+        uri: Url,
         position: Position,
     ) -> Command {
         let hyp_info = match selection {
@@ -290,7 +222,7 @@ impl App {
                 .goals()
                 .get(goal_idx)
                 .and_then(|g| g.hyps.get(hyp_idx))
-                .and_then(|h| h.first_info()),
+                .and_then(Hypothesis::first_info),
             Some(SelectableItem::GoalTarget { goal_idx }) => self
                 .goals()
                 .get(goal_idx)

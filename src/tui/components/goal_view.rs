@@ -1,6 +1,8 @@
-//! GoalView component - top-level goal display with event handling.
+//! Top-level goal display with event handling.
 
-use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
+use std::iter;
+
+use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     prelude::Stylize,
@@ -9,15 +11,23 @@ use ratatui::{
     Frame,
 };
 
-use super::{goal_tree::GoalTree, Component};
+use super::{
+    goal_tree::GoalTree, hypothesis_indices, ClickRegion, Component, HypothesisFilters,
+    KeyMouseEvent, SelectableItem,
+};
 use crate::{
     lean_rpc::Goal,
-    tui::app::{hypothesis_indices, ClickRegion, HypothesisFilters, SelectableItem},
     tui_ipc::{CaseSplitInfo, DefinitionInfo},
 };
 
-/// GoalView is the top-level component for displaying and interacting with
-/// goals.
+pub struct GoalViewInput {
+    pub goals: Vec<Goal>,
+    pub definition: Option<DefinitionInfo>,
+    pub case_splits: Vec<CaseSplitInfo>,
+    pub error: Option<String>,
+}
+
+#[derive(Default)]
 pub struct GoalView {
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
@@ -29,47 +39,11 @@ pub struct GoalView {
 }
 
 impl GoalView {
-    pub fn new() -> Self {
-        Self {
-            goals: Vec::new(),
-            definition: None,
-            case_splits: Vec::new(),
-            error: None,
-            filters: HypothesisFilters::default(),
-            selected_index: None,
-            click_regions: Vec::new(),
-        }
-    }
-
-    pub fn set_goals(&mut self, goals: Vec<Goal>) {
-        let changed = self.goals != goals;
-        self.goals = goals;
-        if changed {
-            self.reset_selection();
-        }
-    }
-
-    pub fn set_definition(&mut self, definition: Option<DefinitionInfo>) {
-        self.definition = definition;
-    }
-
-    pub fn set_case_splits(&mut self, case_splits: Vec<CaseSplitInfo>) {
-        self.case_splits = case_splits;
-    }
-
-    pub fn set_error(&mut self, error: Option<String>) {
-        self.error = error;
-    }
-
-    pub fn set_filters(&mut self, filters: HypothesisFilters) {
-        self.filters = filters;
-    }
-
-    pub fn filters(&self) -> HypothesisFilters {
+    pub const fn filters(&self) -> HypothesisFilters {
         self.filters
     }
 
-    pub fn toggle_filter(&mut self, filter: FilterToggle) {
+    pub const fn toggle_filter(&mut self, filter: &FilterToggle) {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
             FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
@@ -98,17 +72,13 @@ impl GoalView {
                     .filter(|&hyp_idx| self.filters.should_show(&goal.hyps[hyp_idx]))
                     .map(move |hyp_idx| SelectableItem::Hypothesis { goal_idx, hyp_idx });
 
-                hyp_items.chain(std::iter::once(SelectableItem::GoalTarget { goal_idx }))
+                hyp_items.chain(iter::once(SelectableItem::GoalTarget { goal_idx }))
             })
             .collect()
     }
 
     fn reset_selection(&mut self) {
-        self.selected_index = if self.selectable_items().is_empty() {
-            None
-        } else {
-            Some(0)
-        };
+        self.selected_index = (!self.selectable_items().is_empty()).then_some(0);
     }
 
     fn select_previous(&mut self) {
@@ -155,7 +125,6 @@ impl GoalView {
     }
 }
 
-/// Filter toggles for external control.
 pub enum FilterToggle {
     Instances,
     Types,
@@ -166,56 +135,64 @@ pub enum FilterToggle {
 }
 
 impl Component for GoalView {
-    fn handle_event(&mut self, event: &Event) -> bool {
+    type Input = GoalViewInput;
+    type Event = KeyMouseEvent;
+
+    fn update(&mut self, input: Self::Input) {
+        let goals_changed = self.goals != input.goals;
+        self.goals = input.goals;
+        self.definition = input.definition;
+        self.case_splits = input.case_splits;
+        self.error = input.error;
+        if goals_changed {
+            self.reset_selection();
+        }
+    }
+
+    fn handle_event(&mut self, event: Self::Event) -> bool {
         match event {
-            Event::Key(key) => {
-                if key.kind != KeyEventKind::Press {
-                    return false;
+            KeyMouseEvent::Key(key) => match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.select_next();
+                    true
                 }
-                match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        self.select_next();
-                        true
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        self.select_previous();
-                        true
-                    }
-                    KeyCode::Char('i') => {
-                        self.toggle_filter(FilterToggle::Instances);
-                        true
-                    }
-                    KeyCode::Char('t') => {
-                        self.toggle_filter(FilterToggle::Types);
-                        true
-                    }
-                    KeyCode::Char('a') => {
-                        self.toggle_filter(FilterToggle::Inaccessible);
-                        true
-                    }
-                    KeyCode::Char('l') => {
-                        self.toggle_filter(FilterToggle::LetValues);
-                        true
-                    }
-                    KeyCode::Char('r') => {
-                        self.toggle_filter(FilterToggle::ReverseOrder);
-                        true
-                    }
-                    KeyCode::Char('d') => {
-                        self.toggle_filter(FilterToggle::Definition);
-                        true
-                    }
-                    _ => false,
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.select_previous();
+                    true
                 }
-            }
-            Event::Mouse(mouse) => {
+                KeyCode::Char('i') => {
+                    self.toggle_filter(&FilterToggle::Instances);
+                    true
+                }
+                KeyCode::Char('t') => {
+                    self.toggle_filter(&FilterToggle::Types);
+                    true
+                }
+                KeyCode::Char('a') => {
+                    self.toggle_filter(&FilterToggle::Inaccessible);
+                    true
+                }
+                KeyCode::Char('l') => {
+                    self.toggle_filter(&FilterToggle::LetValues);
+                    true
+                }
+                KeyCode::Char('r') => {
+                    self.toggle_filter(&FilterToggle::ReverseOrder);
+                    true
+                }
+                KeyCode::Char('d') => {
+                    self.toggle_filter(&FilterToggle::Definition);
+                    true
+                }
+                _ => false,
+            },
+            KeyMouseEvent::Mouse(mouse) => {
                 if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
                     self.handle_click(mouse.column, mouse.row)
                 } else {
                     false
                 }
             }
-            _ => false,
         }
     }
 
@@ -223,6 +200,7 @@ impl Component for GoalView {
         self.click_regions.clear();
 
         // Handle error display
+        #[allow(clippy::option_if_let_else)]
         let content_area = if let Some(ref error) = self.error {
             let [error_area, rest] =
                 Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(area);
@@ -258,15 +236,5 @@ impl Component for GoalView {
                 item: region.item,
             });
         }
-    }
-
-    fn click_regions(&self) -> &[ClickRegion] {
-        &self.click_regions
-    }
-}
-
-impl Default for GoalView {
-    fn default() -> Self {
-        Self::new()
     }
 }

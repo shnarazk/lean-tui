@@ -1,6 +1,5 @@
-//! Header component displaying file and cursor position.
+//! Header displaying file and cursor position.
 
-use crossterm::event::Event;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
@@ -10,26 +9,19 @@ use ratatui::{
 };
 
 use super::Component;
-use crate::{tui::app::ClickRegion, tui_ipc::CursorInfo};
+use crate::tui_ipc::CursorInfo;
 
-/// Header component showing file name and cursor position.
+#[derive(Default)]
 pub struct Header {
     cursor: Option<CursorInfo>,
 }
 
-impl Header {
-    pub fn new() -> Self {
-        Self { cursor: None }
-    }
-
-    pub fn set_cursor(&mut self, cursor: Option<CursorInfo>) {
-        self.cursor = cursor;
-    }
-}
-
 impl Component for Header {
-    fn handle_event(&mut self, _event: &Event) -> bool {
-        false // Header doesn't handle events
+    type Input = Option<CursorInfo>;
+    type Event = ();
+
+    fn update(&mut self, input: Self::Input) {
+        self.cursor = input;
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -79,9 +71,5 @@ impl Component for Header {
             ])),
             method_area,
         );
-    }
-
-    fn click_regions(&self) -> &[ClickRegion] {
-        &[] // Header has no clickable regions
     }
 }

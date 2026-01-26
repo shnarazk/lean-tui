@@ -4,6 +4,8 @@ mod proxy;
 mod tui;
 mod tui_ipc;
 
+use std::{fs, path::PathBuf, process};
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -28,14 +30,14 @@ async fn main() {
 
     // Init tracing to log file (both commands write to same file)
     let log_path = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .unwrap_or_else(|| PathBuf::from("."))
         .join("lean-tui/proxy.log");
 
     if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        let _ = fs::create_dir_all(parent);
     }
 
-    if let Ok(log_file) = std::fs::File::create(&log_path) {
+    if let Ok(log_file) = fs::File::create(&log_path) {
         let filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(
             "lean_tui=debug"
                 .parse()
@@ -57,6 +59,6 @@ async fn main() {
 
     if let Err(e) = result {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        process::exit(1);
     }
 }

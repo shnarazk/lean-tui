@@ -16,8 +16,6 @@ use crate::{
     tui_ipc::{CursorInfo, SocketServer},
 };
 
-/// Fetch tactic goals and term goal in parallel, combining them.
-/// Term goal is prepended to the list if present.
 pub async fn fetch_combined_goals(
     rpc_client: &RpcClient,
     text_document: &TextDocumentIdentifier,
@@ -38,7 +36,6 @@ pub async fn fetch_combined_goals(
     Ok(term_goal.into_iter().chain(tactic_goals).collect())
 }
 
-/// Spawn a task to fetch goals and broadcast results or errors.
 pub fn spawn_goal_fetch(
     cursor: &CursorInfo,
     socket_server: &Arc<SocketServer>,
@@ -74,7 +71,6 @@ pub fn spawn_goal_fetch(
     });
 }
 
-/// Extract definition info and case splits from the AST.
 fn extract_ast_info(
     doc_cache: &DocumentCache,
     uri: &str,
@@ -86,13 +82,8 @@ fn extract_ast_info(
         return (None, vec![]);
     };
 
-    let pos = crate::tui_ipc::Position {
-        line: position.line,
-        character: position.character,
-    };
-
-    let definition = find_enclosing_definition(&tree, &source, pos);
-    let case_splits = find_case_splits(&tree, &source, pos);
+    let definition = find_enclosing_definition(&tree, &source, position);
+    let case_splits = find_case_splits(&tree, &source, position);
 
     tracing::debug!(
         "AST info at line {}: definition={:?}",

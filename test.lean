@@ -12,11 +12,8 @@ theorem exists_prime_factor :
   · grind [Nat.dvd_refl]
   -- ... or it has a non-trivial divisor with a prime factor
   · obtain ⟨k, _⟩ : ∃ k, 1 < k ∧ k < n ∧ k ∣ n := by
-
       simp_all [IsPrime]
-
     obtain ⟨p, _, _⟩ := exists_prime_factor k (by grind);
-
     grind [Nat.dvd_trans]
 
 /-- The factorial, defined recursively, with custom notation -/
@@ -29,7 +26,7 @@ notation:10000 n "!" => factorial n
 
 /-- The factorial is always positive -/
 theorem factorial_pos : ∀ n, 0 < n ! := by
-  intro n; induction n <;>  grind [factorial]
+  intro n; induction n <;>   grind [factorial]
 
 /-- ... and divided by its constituent factors -/
 theorem dvd_factorial : ∀ n, ∀ k ≤ n, 0 < k → k ∣ n ! := by

@@ -4,13 +4,15 @@
 //! - Broadcasting messages (cursor position, goals) to connected TUI clients
 //! - Processing commands from TUI clients (navigation requests)
 
+use std::fs;
+
 use async_lsp::{
     lsp_types::{Position, Range, ShowDocumentParams, Url},
     ClientSocket, LanguageClient,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::UnixListener,
+    net::{UnixListener, UnixStream},
     sync::{broadcast, mpsc},
 };
 
@@ -106,12 +108,12 @@ async fn run_listener(msg_sender: broadcast::Sender<Message>, cmd_tx: mpsc::Send
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        let _ = fs::create_dir_all(parent);
     }
 
     // Remove existing socket file
     if path.exists() {
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     let listener = match UnixListener::bind(&path) {
@@ -140,7 +142,7 @@ async fn run_listener(msg_sender: broadcast::Sender<Message>, cmd_tx: mpsc::Send
 
 /// Handle a single TUI client connection.
 async fn handle_client(
-    stream: tokio::net::UnixStream,
+    stream: UnixStream,
     mut msg_rx: broadcast::Receiver<Message>,
     cmd_tx: mpsc::Sender<Command>,
 ) {

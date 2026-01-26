@@ -1,15 +1,10 @@
-use std::{fmt, io};
+use std::{error::Error as StdError, fmt, io, result::Result as StdResult};
 
-/// Structured LSP/RPC error type for better error handling semantics.
 #[derive(Debug)]
 pub enum LspError {
-    /// RPC session expired and needs reconnection.
     SessionExpired,
-    /// Invalid request format or parameters.
     InvalidRequest(String),
-    /// Failed to parse response.
     ParseError(String),
-    /// RPC error with optional error code.
     RpcError { code: Option<i32>, message: String },
 }
 
@@ -31,7 +26,7 @@ impl fmt::Display for LspError {
     }
 }
 
-impl std::error::Error for LspError {}
+impl StdError for LspError {}
 
 #[derive(Debug)]
 pub enum Error {
@@ -50,8 +45,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::Io(e) => Some(e),
             Self::Json(e) => Some(e),
@@ -78,4 +73,4 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = StdResult<T, Error>;

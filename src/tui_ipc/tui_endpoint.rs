@@ -5,12 +5,13 @@
 //! - Receiving messages (cursor position, goals) from the proxy
 //! - Sending commands (navigation requests) to the proxy
 
-use std::time::Duration;
+use std::{io, time::Duration};
 
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::UnixStream,
+    net::{unix::OwnedWriteHalf, UnixStream},
     sync::mpsc,
+    time::sleep,
 };
 
 use super::protocol::{socket_path, Command, Message};
@@ -46,7 +47,7 @@ async fn connection_loop(msg_tx: mpsc::Sender<Message>, mut cmd_rx: mpsc::Receiv
             }
             Err(_) => {
                 // Retry connection after delay
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(1)).await;
             }
         }
     }
@@ -79,7 +80,7 @@ async fn handle_connection(
 }
 
 async fn handle_incoming_line(
-    line_result: Result<Option<String>, std::io::Error>,
+    line_result: Result<Option<String>, io::Error>,
     msg_tx: &mpsc::Sender<Message>,
 ) -> Result<bool, ()> {
     match line_result {
@@ -95,10 +96,7 @@ async fn handle_incoming_line(
     }
 }
 
-async fn send_command(
-    writer: &mut tokio::net::unix::OwnedWriteHalf,
-    cmd: &Command,
-) -> Result<(), ()> {
+async fn send_command(writer: &mut OwnedWriteHalf, cmd: &Command) -> Result<(), ()> {
     let Ok(json) = serde_json::to_string(cmd) else {
         return Ok(()); // Skip invalid command, don't break connection
     };

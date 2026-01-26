@@ -1,6 +1,6 @@
-//! HelpMenu component - overlay showing keyboard shortcuts.
+//! Help menu overlay.
 
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::event::KeyCode;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -9,13 +9,12 @@ use ratatui::{
     Frame,
 };
 
-use super::Component;
-use crate::tui::app::ClickRegion;
+use super::{Component, KeyPress};
 
 const KEYBINDINGS: &[(&str, &str)] = &[
     ("j/k", "navigate"),
     ("Enter", "go to definition"),
-    ("d", "toggle definition"),
+    ("d", "toggle header"),
     ("i", "toggle instances"),
     ("t", "toggle types"),
     ("a", "toggle inaccessible"),
@@ -27,35 +26,29 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("q", "quit"),
 ];
 
-/// Help menu popup showing keyboard shortcuts.
+#[derive(Default)]
 pub struct HelpMenu {
     visible: bool,
 }
 
 impl HelpMenu {
-    pub fn new() -> Self {
-        Self { visible: false }
-    }
-
-    pub fn toggle(&mut self) {
+    pub const fn toggle(&mut self) {
         self.visible = !self.visible;
     }
 }
 
 impl Component for HelpMenu {
-    fn handle_event(&mut self, event: &Event) -> bool {
+    type Input = ();
+    type Event = KeyPress;
+
+    fn update(&mut self, _input: Self::Input) {}
+
+    fn handle_event(&mut self, event: Self::Event) -> bool {
         if !self.visible {
             return false;
         }
 
-        let Event::Key(key) = event else {
-            return false;
-        };
-        if key.kind != KeyEventKind::Press {
-            return false;
-        }
-
-        match key.code {
+        match event.0.code {
             KeyCode::Esc | KeyCode::Char('?') => {
                 self.visible = false;
                 true
@@ -94,15 +87,5 @@ impl Component for HelpMenu {
             .collect();
 
         frame.render_widget(Paragraph::new(help_lines).block(block), popup_area);
-    }
-
-    fn click_regions(&self) -> &[ClickRegion] {
-        &[]
-    }
-}
-
-impl Default for HelpMenu {
-    fn default() -> Self {
-        Self::new()
     }
 }

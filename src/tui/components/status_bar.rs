@@ -1,6 +1,5 @@
-//! Status bar component displaying keybindings and filter status.
+//! Status bar with keybindings and filter status.
 
-use crossterm::event::Event;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -9,29 +8,19 @@ use ratatui::{
     Frame,
 };
 
-use super::Component;
-use crate::tui::app::{ClickRegion, HypothesisFilters};
+use super::{Component, HypothesisFilters};
 
-/// Status bar showing keybindings and active filters.
+#[derive(Default)]
 pub struct StatusBar {
     filters: HypothesisFilters,
 }
 
-impl StatusBar {
-    pub fn new() -> Self {
-        Self {
-            filters: HypothesisFilters::default(),
-        }
-    }
-
-    pub fn set_filters(&mut self, filters: HypothesisFilters) {
-        self.filters = filters;
-    }
-}
-
 impl Component for StatusBar {
-    fn handle_event(&mut self, _event: &Event) -> bool {
-        false // StatusBar doesn't handle events directly
+    type Input = HypothesisFilters;
+    type Event = ();
+
+    fn update(&mut self, input: Self::Input) {
+        self.filters = input;
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -58,14 +47,11 @@ impl Component for StatusBar {
         let spans: Vec<Span> = keybind_spans.chain(filter_span).collect();
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
-
-    fn click_regions(&self) -> &[ClickRegion] {
-        &[] // StatusBar has no clickable regions
-    }
 }
 
 fn build_filter_status(filters: HypothesisFilters) -> String {
     [
+        (!filters.hide_definition, 'd'),
         (filters.hide_instances, 'i'),
         (filters.hide_types, 't'),
         (filters.hide_inaccessible, 'a'),
