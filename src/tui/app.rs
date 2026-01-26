@@ -492,7 +492,7 @@ impl App {
                 .goals()
                 .get(*goal_idx)
                 .and_then(|g| g.hyps.get(*hyp_idx))
-                .and_then(|h| h.info.clone()),
+                .and_then(Hypothesis::first_info),
             SelectableItem::GoalTarget { .. } => None,
         };
 

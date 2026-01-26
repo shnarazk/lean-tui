@@ -10,7 +10,7 @@ use super::app::{
     hypothesis_indices, App, ClickRegion, HypothesisFilters, LoadStatus, SelectableItem,
 };
 use crate::{
-    lean_rpc::{DiffTag, Goal, Hypothesis},
+    lean_rpc::{DiffTag, Goal, Hypothesis, TaggedText},
     tui_ipc::socket_path,
 };
 
@@ -580,7 +580,7 @@ fn goal_header(goal: &Goal, goal_idx: usize) -> String {
     }
 }
 
-/// Render hypothesis line with cell-aware styling.
+/// Render hypothesis line with cell-aware styling and per-subexpression diff highlighting.
 fn render_hypothesis_line(
     hyp: &Hypothesis,
     is_selected: bool,
@@ -590,55 +590,86 @@ fn render_hypothesis_line(
     let names = hyp.names.join(", ");
     let prefix = selection_prefix(is_selected);
 
-    // Build type string, optionally including let-value
-    let type_str = if filters.hide_let_values {
-        hyp.type_.clone()
-    } else {
-        hyp.val.as_ref().map_or_else(
-            || hyp.type_.clone(),
-            |val| format!("{} := {val}", hyp.type_),
-        )
-    };
-
-    // In non-Current columns, don't show diff markers (items are already filtered)
-    let (style, diff_marker) = match kind {
+    // Determine base style and diff marker based on cell kind and hypothesis state
+    let (base_style, diff_marker) = match kind {
         CellKind::Previous | CellKind::Next => (item_style(is_selected, Color::White), ""),
         CellKind::Current if hyp.is_inserted => (item_style(is_selected, Color::Green), " [+]"),
         CellKind::Current if hyp.is_removed => (
             item_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
             " [-]",
         ),
-        CellKind::Current => match hyp.diff_status {
-            Some(DiffTag::WasChanged) => (item_style(is_selected, Color::Yellow), " [~]"),
-            Some(DiffTag::WasInserted) => (item_style(is_selected, Color::Green), " [+]"),
-            Some(DiffTag::WasDeleted) => (item_style(is_selected, Color::Red), " [-]"),
-            Some(DiffTag::WillChange | DiffTag::WillInsert | DiffTag::WillDelete) | None => {
+        CellKind::Current => {
+            // Check if the type has any diff at subexpression level
+            let has_diff = hyp.type_.has_any_diff();
+            if has_diff {
+                // Will use per-subexpression highlighting, add marker
+                (item_style(is_selected, Color::White), " [~]")
+            } else {
                 (item_style(is_selected, Color::White), "")
             }
-        },
+        }
     };
 
-    Line::from(format!("{prefix}{names} : {type_str}{diff_marker}")).style(style)
+    // Build spans with per-subexpression highlighting
+    let mut spans = Vec::new();
+    spans.push(Span::styled(prefix.to_string(), base_style));
+    spans.push(Span::styled(format!("{names} : "), base_style));
+
+    // Add type with per-subexpression diff highlighting
+    spans.extend(hyp.type_.to_spans(base_style));
+
+    // Add let-value if present and not hidden
+    if !filters.hide_let_values {
+        if let Some(ref val) = hyp.val {
+            spans.push(Span::styled(" := ".to_string(), base_style));
+            spans.extend(val.to_spans(base_style));
+        }
+    }
+
+    // Add diff marker at the end
+    if !diff_marker.is_empty() {
+        spans.push(Span::styled(diff_marker.to_string(), base_style));
+    }
+
+    Line::from(spans)
 }
 
-/// Render goal target line with cell-aware styling.
+/// Render goal target line with cell-aware styling and per-subexpression diff highlighting.
 fn render_target_line(goal: &Goal, is_selected: bool, kind: CellKind) -> Line<'static> {
     let prefix = selection_prefix(is_selected);
 
-    let (style, diff_marker) = match kind {
+    let (base_style, diff_marker) = match kind {
         CellKind::Current if goal.is_inserted => (item_style(is_selected, Color::Green), " [+]"),
         CellKind::Current if goal.is_removed => (
             item_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
             " [-]",
         ),
+        CellKind::Current => {
+            // Check if the target has any diff at subexpression level
+            let has_diff = goal.target.has_any_diff();
+            if has_diff {
+                (item_style(is_selected, Color::Cyan), " [~]")
+            } else {
+                (item_style(is_selected, Color::Cyan), "")
+            }
+        }
         _ => (item_style(is_selected, Color::Cyan), ""),
     };
 
-    Line::from(format!(
-        "{prefix}{}{}{diff_marker}",
-        goal.prefix, goal.target
-    ))
-    .style(style)
+    // Build spans with per-subexpression highlighting
+    let mut spans = Vec::new();
+    spans.push(Span::styled(prefix.to_string(), base_style));
+    spans.push(Span::styled(goal.prefix.clone(), base_style));
+
+    // Add target with per-subexpression diff highlighting
+    spans.extend(goal.target.to_spans(base_style));
+
+    // Add diff marker at the end
+    if !diff_marker.is_empty() {
+        spans.push(Span::styled(diff_marker.to_string(), base_style));
+    }
+
+    Line::from(spans)
 }
 /// Style for items with optional selection highlighting.
 const fn item_style(is_selected: bool, fg_color: Color) -> Style {
@@ -654,6 +685,39 @@ const fn selection_prefix(is_selected: bool) -> &'static str {
         "▶ "
     } else {
         "  "
+    }
+}
+
+/// Convert a `DiffTag` to a style modifier.
+const fn diff_tag_style(tag: DiffTag, base_style: Style) -> Style {
+    match tag {
+        DiffTag::WasChanged | DiffTag::WillChange => base_style.fg(Color::Yellow),
+        DiffTag::WasInserted | DiffTag::WillInsert => base_style.fg(Color::Green),
+        DiffTag::WasDeleted | DiffTag::WillDelete => {
+            base_style.fg(Color::Red).add_modifier(Modifier::DIM)
+        }
+    }
+}
+
+impl TaggedText {
+    /// Convert to ratatui spans, preserving per-subexpression diff highlighting.
+    ///
+    /// The `base_style` is applied to text without diff markers.
+    /// Subexpressions with `diff_status` get appropriate highlighting.
+    pub fn to_spans(&self, base_style: Style) -> Vec<Span<'static>> {
+        match self {
+            Self::Text { text } => vec![Span::styled(text.clone(), base_style)],
+            Self::Tag { info, content } => {
+                let style = info
+                    .diff_status
+                    .map_or(base_style, |tag| diff_tag_style(tag, base_style));
+                content.to_spans(style)
+            }
+            Self::Append { items } => items
+                .iter()
+                .flat_map(|item| item.to_spans(base_style))
+                .collect(),
+        }
     }
 }
 
