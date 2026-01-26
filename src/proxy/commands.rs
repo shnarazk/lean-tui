@@ -7,7 +7,7 @@ use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 use super::{documents::DocumentCache, goals::fetch_combined_goals, tactic_finder};
 use crate::{
     lean_rpc::{GoToKind, RpcClient},
-    tui_ipc::{Command, GoalResult, Position as TuiPosition, SocketServer, TemporalSlot},
+    tui_ipc::{Command, GoalResult, SocketServer, TemporalSlot},
 };
 
 /// Process a command from TUI, potentially doing RPC lookups.
@@ -84,7 +84,7 @@ pub async fn process_command(
 /// Handle `FetchTemporalGoals` command: find target position and fetch goals.
 async fn handle_fetch_temporal_goals(
     uri: &str,
-    cursor_position: TuiPosition,
+    cursor_position: Position,
     slot: TemporalSlot,
     rpc_client: &Arc<RpcClient>,
     document_cache: &Arc<DocumentCache>,

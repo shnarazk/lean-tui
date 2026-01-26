@@ -7,7 +7,7 @@ use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 use crate::{
     error::LspError,
     lean_rpc::{Goal, RpcClient},
-    tui_ipc::{CursorInfo, Position as TuiPosition, SocketServer},
+    tui_ipc::{CursorInfo, SocketServer},
 };
 
 /// Fetch tactic goals and term goal in parallel, combining them.
@@ -46,8 +46,8 @@ pub fn spawn_goal_fetch(
     let rpc = rpc_client.clone();
     let socket_server = socket_server.clone();
     let uri_string = cursor.uri.clone();
-    let line = cursor.line();
-    let character = cursor.character();
+    let line = cursor.position.line;
+    let character = cursor.position.character;
 
     tokio::spawn(async move {
         let Ok(url) = Url::parse(&uri_string) else {
@@ -59,7 +59,7 @@ pub fn spawn_goal_fetch(
 
         match fetch_combined_goals(&rpc, &text_document, position).await {
             Ok(goals) => {
-                socket_server.broadcast_goals(uri_string, TuiPosition { line, character }, goals);
+                socket_server.broadcast_goals(uri_string, Position::new(line, character), goals);
             }
             Err(e) => {
                 tracing::warn!("Could not fetch goals at {uri_string}:{line}:{character}: {e}");

@@ -62,8 +62,8 @@ impl<S: LspService> InterceptService<S> {
             let _span = tracing::info_span!(
                 "cursor",
                 file = cursor.filename(),
-                line = cursor.line(),
-                char = cursor.character()
+                line = cursor.position.line,
+                char = cursor.position.character
             )
             .entered();
             tracing::info!("cursor position");
@@ -85,8 +85,8 @@ impl<S: LspService> InterceptService<S> {
             let _span = tracing::info_span!(
                 "cursor",
                 file = cursor.filename(),
-                line = cursor.line(),
-                char = cursor.character()
+                line = cursor.position.line,
+                char = cursor.position.character
             )
             .entered();
             tracing::info!("cursor position");

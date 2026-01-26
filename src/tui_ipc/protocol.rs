@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+pub use async_lsp::lsp_types::Position;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -39,13 +40,6 @@ pub enum GoalResult {
     Error { error: String },
 }
 
-/// Position in a document (0-indexed line and character)
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Position {
-    pub line: u32,
-    pub character: u32,
-}
-
 /// Cursor location with document URI and trigger method
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CursorInfo {
@@ -58,24 +52,13 @@ impl CursorInfo {
     pub fn new(uri: String, line: u32, character: u32, method: &str) -> Self {
         Self {
             uri,
-            position: Position { line, character },
+            position: Position::new(line, character),
             method: method.to_string(),
         }
     }
 
-    /// Extract filename from URI for display
     pub fn filename(&self) -> &str {
         self.uri.rsplit('/').next().unwrap_or(&self.uri)
-    }
-
-    /// Convenience accessor for line
-    pub const fn line(&self) -> u32 {
-        self.position.line
-    }
-
-    /// Convenience accessor for character
-    pub const fn character(&self) -> u32 {
-        self.position.character
     }
 }
 

@@ -281,7 +281,11 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(app.cursor.filename(), Style::new().fg(Color::Green)),
         "  Pos: ".into(),
         Span::styled(
-            format!("{}:{}", app.cursor.line() + 1, app.cursor.character() + 1),
+            format!(
+                "{}:{}",
+                app.cursor.position.line + 1,
+                app.cursor.position.character + 1
+            ),
             Style::new().fg(Color::Yellow),
         ),
         "  (".into(),
