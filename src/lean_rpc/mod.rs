@@ -95,7 +95,6 @@ pub struct Hypothesis {
 }
 
 /// Response from `Lean.Widget.getInteractiveGoals`
-/// This is a simplified version - the actual response has more fields
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractiveGoalsResponse {
     #[serde(default)]
@@ -111,13 +110,10 @@ pub struct InteractiveGoal {
     pub type_: CodeWithInfos,
     #[serde(default)]
     pub goal_prefix: String,
-    /// Case label (e.g., `case foo` for pattern matching)
     #[serde(default)]
     pub user_name: Option<String>,
-    /// Goal was inserted (new in diff comparison)
     #[serde(default)]
     pub is_inserted: bool,
-    /// Goal was removed (gone in diff comparison)
     #[serde(default)]
     pub is_removed: bool,
 }
@@ -127,31 +123,24 @@ pub struct InteractiveGoal {
 pub struct InteractiveHypothesis {
     #[serde(default)]
     pub names: Vec<String>,
-    /// `FVarIds` for each hypothesis in the bundle (same length as names)
     #[serde(default)]
     pub fvar_ids: Option<Vec<String>>,
     #[serde(rename = "type")]
     pub type_: CodeWithInfos,
-    /// Value for let-bindings (e.g., `let x := 5`)
     #[serde(default)]
     pub val: Option<CodeWithInfos>,
-    /// Is this a typeclass instance hypothesis?
     #[serde(default)]
     pub is_instance: Option<bool>,
-    /// Is this hypothesis a type?
     #[serde(default)]
     pub is_type: Option<bool>,
-    /// Hypothesis was inserted (new in diff comparison)
     #[serde(default)]
     pub is_inserted: bool,
-    /// Hypothesis was removed (gone in diff comparison)
     #[serde(default)]
     pub is_removed: bool,
 }
 
-/// Tagged text with semantic info - Lean's `CodeWithInfos` type
+/// Tagged text with semantic info - Lean's `CodeWithInfos` type.
 /// Structure: {"tag": [info, content]} or {"text": "..."} or {"append": [...]}
-/// See: Lean/Widget/TaggedText.lean
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum CodeWithInfos {
@@ -259,8 +248,7 @@ impl InteractiveGoalsResponse {
     }
 }
 
-/// Response from `Lean.Widget.getInteractiveTermGoal`
-/// Shows expected type when cursor is on a term (not in tactic mode).
+/// Response from `Lean.Widget.getInteractiveTermGoal`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InteractiveTermGoalResponse {
@@ -291,7 +279,6 @@ impl InteractiveTermGoalResponse {
     }
 }
 
-/// RPC method names
 pub const RPC_CONNECT: &str = "$/lean/rpc/connect";
 pub const RPC_CALL: &str = "$/lean/rpc/call";
 pub const GET_INTERACTIVE_GOALS: &str = "Lean.Widget.getInteractiveGoals";
