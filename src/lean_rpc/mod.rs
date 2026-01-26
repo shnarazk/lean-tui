@@ -41,7 +41,7 @@ pub struct RpcConnectResponse {
 }
 
 /// Simplified goal representation for TUI display
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Goal {
     /// Hypotheses (local context)
     pub hyps: Vec<Hypothesis>,
@@ -62,8 +62,8 @@ pub struct Goal {
 }
 
 /// A hypothesis in the local context
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools, clippy::derive_partial_eq_without_eq)]
 pub struct Hypothesis {
     pub names: Vec<String>,
     pub type_: String,

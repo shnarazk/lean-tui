@@ -232,6 +232,17 @@ impl App {
                 position,
                 goals,
             } => {
+                let goals_changed = self.temporal_goals.current.goals != goals;
+                let line_changed = self.temporal_goals.current.position.line != position.line;
+
+                // Skip temporal refresh if goals and line are unchanged
+                // (character position changes on same line don't affect temporal context)
+                if !goals_changed && !line_changed {
+                    self.temporal_goals.current.position = position;
+                    self.connected = true;
+                    return;
+                }
+
                 self.temporal_goals.current = GoalState {
                     goals,
                     position,
@@ -398,21 +409,26 @@ impl App {
             return;
         }
 
-        // Mark as loading
+        // Only set loading state if we don't have existing data
+        // This prevents the "flash" when refreshing
         match slot {
             TemporalSlot::Previous => {
-                self.temporal_goals.previous = Some(GoalState {
-                    goals: vec![],
-                    position: self.cursor.position,
-                    status: LoadStatus::Loading,
-                });
+                if self.temporal_goals.previous.is_none() {
+                    self.temporal_goals.previous = Some(GoalState {
+                        goals: vec![],
+                        position: self.cursor.position,
+                        status: LoadStatus::Loading,
+                    });
+                }
             }
             TemporalSlot::Next => {
-                self.temporal_goals.next = Some(GoalState {
-                    goals: vec![],
-                    position: self.cursor.position,
-                    status: LoadStatus::Loading,
-                });
+                if self.temporal_goals.next.is_none() {
+                    self.temporal_goals.next = Some(GoalState {
+                        goals: vec![],
+                        position: self.cursor.position,
+                        status: LoadStatus::Loading,
+                    });
+                }
             }
             TemporalSlot::Current => {}
         }
