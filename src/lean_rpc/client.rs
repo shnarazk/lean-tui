@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tower_service::Service;
 
 use super::{
-    Goal, InteractiveGoalsResponse, InteractiveTermGoalResponse, RpcConnectResponse,
+    Goal, GotoLocation, InteractiveGoalsResponse, InteractiveTermGoalResponse, RpcConnectResponse,
     GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, RPC_CALL, RPC_CONNECT,
 };
 use crate::error::LspError;
@@ -241,6 +241,47 @@ impl RpcClient {
             .await?;
 
         Ok(Self::parse_definition_response(&response))
+    }
+
+    /// Resolve goto locations for all hypotheses and target in a goal.
+    /// This pre-fetches locations so navigation doesn't depend on RPC session.
+    pub async fn resolve_goto_locations(
+        &self,
+        text_document: &TextDocumentIdentifier,
+        position: Position,
+        goal: &mut Goal,
+    ) {
+        // Resolve target location
+        if let Some(info) = goal.target.first_info() {
+            goal.goto_location = self
+                .resolve_single_location(text_document, position, info)
+                .await;
+        }
+
+        // Resolve hypothesis locations
+        for hyp in &mut goal.hyps {
+            if let Some(info) = hyp.first_info() {
+                hyp.goto_location = self
+                    .resolve_single_location(text_document, position, info)
+                    .await;
+            }
+        }
+    }
+
+    async fn resolve_single_location(
+        &self,
+        text_document: &TextDocumentIdentifier,
+        position: Position,
+        info: serde_json::Value,
+    ) -> Option<GotoLocation> {
+        let loc = self
+            .get_goto_location(text_document, position, GoToKind::Definition, info)
+            .await
+            .ok()??;
+        Some(GotoLocation {
+            uri: loc.target_uri,
+            position: loc.target_selection_range.start,
+        })
     }
 
     fn parse_goals_response(response: &serde_json::Value) -> Result<Vec<Goal>, LspError> {

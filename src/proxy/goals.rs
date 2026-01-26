@@ -33,7 +33,16 @@ pub async fn fetch_combined_goals(
         Err(_) => vec![],
     };
 
-    Ok(term_goal.into_iter().chain(tactic_goals).collect())
+    let mut goals: Vec<Goal> = term_goal.into_iter().chain(tactic_goals).collect();
+
+    // Pre-resolve goto locations while RPC session is active
+    for goal in &mut goals {
+        rpc_client
+            .resolve_goto_locations(text_document, position, goal)
+            .await;
+    }
+
+    Ok(goals)
 }
 
 pub fn spawn_goal_fetch(
