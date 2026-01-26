@@ -4,55 +4,70 @@
 
 This is a **terminal-only info view**, comparable to the VS Code info view for [Lean 4](https://lean-lang.org/).
 
-_I developed this because not everyone wants to be stuck in the Microsoft ecosystem. Many people have an efficient workflow in their own (often modal) text editor. There existed a [Lean plugin for Neovim](https://github.com/Julian/lean.nvim) already, but not yet for the other ones. This is my attempt at a more generic one, not bound to any editor in particular, and usable from any terminal window._
-
 It shows:
 
 - The active variable bindings for a developer writing code (term mode).
 - The hypotheses and goals for a mathematician proving and formalizing proofs (tactic mode).
 
-**Every editor with an LSP client can be used** in combination with this (Helix, Kate, Zed, Neovim, ...).
+## How does it work?
 
-![(Screenshot of the prime number theorem proof)](./screenshot.png)
+This program will spawn a proxy LSP that intercepts communication with the Lake LSP every time you open a Lean file.
 
-Integration with editor for cursor navigation:
+```mermaid
+flowchart LR
+    subgraph Terminal 1
+        subgraph Editor
+            LSPClient[LSP Client]
+        end
+    end
+
+    subgraph Terminal 2
+        TUI[lean-tui view]
+    end
+
+    subgraph Proxy Process
+        Proxy[lean-tui proxy]
+    end
+
+    LSPClient <--> |stdio| Proxy
+    Proxy <--> |LSP + Lean RPC| Lake[Lake LSP]
+    Proxy --> |Unix socket| TUI
+```
+
+Start typing a proof in your editor and you will see the proof state appear in the terminal.
+
+Key bindings:
 
 - Use `j`, `k` to go up or down in hypotheses
 - Click or press enter on hypotheses to jump to type definition in the editor
 - Click on goals to go the goal in the editor
-- Filter displayed assumptions (see help menu `?`)
+- (Being tested) Filter displayed assumptions
+- Help menu `?`
+- Close with `q`
 
-Optional previous -> current -> next proof state layout (shows changes in proof state):
+When multiple goals are visible, they are displayed below each-other as rows in a grid
 
-- Display multiple goals below each-other as rows in a grid
-- Toggle display previous and next proof state as columns in grid with `p` and `n` (also works in term-mode)
+Another cool feature is that you can see a diff of proof state in the columns. You can also explicitly show previous and next tool state with `p` and `n` (also works in term-mode). See this screenshot:
 
-Close with `q`
+![(Screenshot of the prime number theorem proof)](./screenshot.png)
 
 ## Installation
 
-You can choose between:
-
-- Using multiple terminals (emulator windows) side-by-side (a terminal app is typically provided on every OS)
-- Using a single terminal window with a terminal multiplexer (you'll need to install `zellij` or `tmux` with your system package manager)
-
 If you have never used Lean before, install `elan`, the Lean compiler toolchain manager. Run at least a `lake build` or `lake run`in your Lean test project to make sure your Lean code has its dependencies fetched (otherwise the LSP will not work)
 
-Install Rust (sorry, but currently my main language):
+Install Rust (through [`rustup`](https://rustup.rs/)) if you haven't compiled Rust programs before.
+
+Then install this crate as a binary in your user with:
 
 ```bash
 cargo install lean-tui
 ```
 
-Make sure `~/.cargo/bin` is in your path.
+If `~/.cargo/bin` is in your path, you can now run this program with `lean-tui`.
 
 ## Configuration
 
-Use your favorite (modal) editor that has a built-in LSP client (I recommend Helix, but Neovim, Zed, Kate also seem to have one).
-
 Go into the settings of your editor and configure the LSP command for lean to be `lean-tui proxy`.
-
-This will spawn a proxy LSP that intercepts communication with the Lake LSP every time you open a Lean file. Make sure to disable any other Lean LSP as this one will replace it and extend it.
 
 For example, for Helix, it would look like this:
 
@@ -67,11 +82,18 @@ language-servers = ["lean-tui"]
 name = "lean"
 ```
 
+Make sure to disable any other Lean LSP as this one will replace it and extend it.
+
 ## Usage
 
-Open your Lean file in your chosen editor.
+You can choose between:
 
-Split terminal. Or tile another terminal window next to your editor window. Launch the TUI in same directory in the second terminal with `lean-tui view`.
+- Using multiple terminals (emulator windows) side-by-side (a terminal app is typically provided on every OS)
+- Using a single terminal window with a terminal multiplexer (you'll need to install `zellij` or `tmux` with your system package manager)
+
+Open your Lean file in your favorite (modal) editor that has a built-in LSP client (I recommend Helix, but Neovim, Zed, Kate also seem to have one).
+
+Split terminal. Launch the TUI in same directory in the second terminal with `lean-tui view`.
 
 Switch back to your editor:
 
@@ -94,3 +116,9 @@ Some editors also have debug logs for the LSP client. For Helix:
 ```bash
 tail -f ~/.cache/helix/helix.log
 ```
+
+## Why?
+
+I developed this because not everyone wants to be stuck in the Microsoft ecosystem. Many people have an efficient workflow in their own (often modal) text editor. There existed a [Lean plugin for Neovim](https://github.com/Julian/lean.nvim) already, but not yet for the other ones. This is my attempt at a more generic one, not bound to any editor in particular, and usable from any terminal window.
+
+Let me know if you tried it out and encountered any issues! PRs are also welcome.
