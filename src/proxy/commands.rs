@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 
-use super::{documents::DocumentCache, tactic_finder};
+use super::{documents::DocumentCache, goals::fetch_combined_goals, tactic_finder};
 use crate::{
     lean_rpc::{GoToKind, RpcClient},
     tui_ipc::{Command, GoalResult, Position as TuiPosition, SocketServer, TemporalSlot},
@@ -137,52 +137,32 @@ async fn handle_fetch_temporal_goals(
     let text_document = TextDocumentIdentifier::new(url);
     let position = Position::new(target.line, target.character);
 
-    // Fetch tactic goals and term goal in parallel (same as spawn_goal_fetch)
-    let (tactic_result, term_result) = tokio::join!(
-        rpc_client.get_goals(&text_document, position),
-        rpc_client.get_term_goal(&text_document, position)
-    );
-
-    // Combine results: term goal first, then tactic goals
-    let mut all_goals = Vec::new();
-
-    // Add term goal if present
-    if let Ok(Some(term_goal)) = term_result {
-        all_goals.push(term_goal);
-    }
-
-    // Add tactic goals
-    match tactic_result {
-        Ok(tactic_goals) => {
-            all_goals.extend(tactic_goals);
+    match fetch_combined_goals(rpc_client, &text_document, position).await {
+        Ok(goals) => {
+            socket_server.broadcast_temporal_goals(
+                uri.to_string(),
+                cursor_position,
+                slot,
+                GoalResult::Ready {
+                    position: target,
+                    goals,
+                },
+            );
         }
         Err(e) => {
-            if all_goals.is_empty() {
-                tracing::warn!(
-                    "Could not fetch temporal goals at {uri}:{}:{}: {e}",
-                    target.line,
-                    target.character
-                );
-                socket_server.broadcast_temporal_goals(
-                    uri.to_string(),
-                    cursor_position,
-                    slot,
-                    GoalResult::Error {
-                        error: e.to_string(),
-                    },
-                );
-                return;
-            }
+            tracing::warn!(
+                "Could not fetch temporal goals at {uri}:{}:{}: {e}",
+                target.line,
+                target.character
+            );
+            socket_server.broadcast_temporal_goals(
+                uri.to_string(),
+                cursor_position,
+                slot,
+                GoalResult::Error {
+                    error: e.to_string(),
+                },
+            );
         }
     }
-
-    socket_server.broadcast_temporal_goals(
-        uri.to_string(),
-        cursor_position,
-        slot,
-        GoalResult::Ready {
-            position: target,
-            goals: all_goals,
-        },
-    );
 }

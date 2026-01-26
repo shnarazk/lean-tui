@@ -23,7 +23,6 @@ def factorial : Nat → Nat
   | 0 => 1
   | n+1 =>
     let r := factorial n
-
     (n + 1) * r
 notation:10000 n "!" => factorial n
 
@@ -46,6 +45,7 @@ theorem InfinitudeOfPrimes : ∀ n, ∃ p > n, IsPrime p := by
   have : 1 < n ! + 1 := by grind [factorial_pos]
   obtain ⟨p, hp, _⟩ := exists_prime_factor (n ! + 1) this
   suffices ¬p ≤ n by grind
+
   intro (_ : p ≤ n)
   have : 1 < p := hp.1
   have : p ∣ n ! := dvd_factorial n p ‹p ≤ n› (by grind)

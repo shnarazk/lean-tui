@@ -29,40 +29,34 @@ const POSITION_METHODS: &[&str] = &[
 /// Extract cursor position from LSP requests that contain
 /// `TextDocumentPositionParams`.
 pub fn extract_cursor_from_request(req: &AnyRequest) -> Option<CursorInfo> {
-    POSITION_METHODS
-        .contains(&req.method.as_str())
-        .then(|| {
-            let params: lsp_types::TextDocumentPositionParams =
-                serde_json::from_value(req.params.clone()).ok()?;
-
-            Some(CursorInfo::new(
-                params.text_document.uri.to_string(),
-                params.position.line,
-                params.position.character,
-                &req.method,
-            ))
-        })
-        .flatten()
+    if !POSITION_METHODS.contains(&req.method.as_str()) {
+        return None;
+    }
+    let params: lsp_types::TextDocumentPositionParams =
+        serde_json::from_value(req.params.clone()).ok()?;
+    Some(CursorInfo::new(
+        params.text_document.uri.to_string(),
+        params.position.line,
+        params.position.character,
+        &req.method,
+    ))
 }
 
 /// Extract cursor position from `textDocument/didChange` notifications.
 /// The edit position in insert mode represents the cursor location.
 pub fn extract_cursor_from_notification(notif: &AnyNotification) -> Option<CursorInfo> {
-    (notif.method == <DidChangeTextDocument as lsp_types::notification::Notification>::METHOD)
-        .then(|| {
-            let params: lsp_types::DidChangeTextDocumentParams =
-                serde_json::from_value(notif.params.clone()).ok()?;
-
-            let uri = params.text_document.uri.to_string();
-            let first_change = params.content_changes.first()?;
-            let range = first_change.range?;
-
-            Some(CursorInfo::new(
-                uri,
-                range.start.line,
-                range.start.character,
-                "didChange",
-            ))
-        })
-        .flatten()
+    if notif.method != <DidChangeTextDocument as lsp_types::notification::Notification>::METHOD {
+        return None;
+    }
+    let params: lsp_types::DidChangeTextDocumentParams =
+        serde_json::from_value(notif.params.clone()).ok()?;
+    let uri = params.text_document.uri.to_string();
+    let first_change = params.content_changes.first()?;
+    let range = first_change.range?;
+    Some(CursorInfo::new(
+        uri,
+        range.start.line,
+        range.start.character,
+        "didChange",
+    ))
 }
