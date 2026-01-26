@@ -39,7 +39,7 @@ impl Component for Header {
             cursor.position.character + 1
         );
 
-        let file_width = u16::try_from(6 + filename.len()).unwrap_or(u16::MAX);
+        let file_width = u16::try_from(7 + filename.len()).unwrap_or(u16::MAX);
         let pos_width = u16::try_from(6 + position.len()).unwrap_or(u16::MAX);
 
         let [file_area, pos_area, method_area] = Layout::horizontal([

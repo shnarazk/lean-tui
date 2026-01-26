@@ -42,22 +42,34 @@ pub struct DiffState {
     pub has_diff: bool,
 }
 
-pub const fn diff_style(
-    state: &DiffState,
-    is_selected: bool,
-    base_color: Color,
-) -> (Style, &'static str) {
+pub struct DiffStyle {
+    pub style: Style,
+    pub marker: &'static str,
+}
+
+const DIM_GRAY: Style = Style::new().fg(Color::DarkGray);
+
+pub const fn diff_style(state: &DiffState, is_selected: bool, base_color: Color) -> DiffStyle {
     if state.is_inserted {
-        (item_style(is_selected, Color::Green), " [+]")
+        DiffStyle {
+            style: item_style(is_selected, Color::Green),
+            marker: "+",
+        }
     } else if state.is_removed {
-        (
-            item_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
-            " [-]",
-        )
+        DiffStyle {
+            style: item_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
+            marker: "-",
+        }
     } else if state.has_diff {
-        (item_style(is_selected, base_color), " [~]")
+        DiffStyle {
+            style: item_style(is_selected, base_color),
+            marker: "~",
+        }
     } else {
-        (item_style(is_selected, base_color), "")
+        DiffStyle {
+            style: item_style(is_selected, base_color),
+            marker: " ",
+        }
     }
 }
 
@@ -93,33 +105,31 @@ pub fn render_hypothesis_line(
         is_removed: hyp.is_removed,
         has_diff: hyp.type_.has_any_diff(),
     };
-    let (style, marker) = diff_style(&state, is_selected, Color::White);
+    let diff = diff_style(&state, is_selected, Color::White);
 
     let names = hyp.names.join(", ");
-    let prefix = selection_prefix(is_selected);
+    let selection = selection_prefix(is_selected);
 
     let base_spans = [
-        Span::styled(prefix.to_string(), style),
-        Span::styled(format!("{names} : "), style),
+        Span::styled(diff.marker, DIM_GRAY),
+        Span::styled(selection.to_string(), diff.style),
+        Span::styled(format!("{names} : "), diff.style),
     ];
 
-    let type_spans = hyp.type_.to_spans(style);
+    let type_spans = hyp.type_.to_spans(diff.style);
 
     let value_spans: Vec<Span<'static>> = match (&hyp.val, filters.hide_let_values) {
-        (Some(val), false) => iter::once(Span::styled(" := ".to_string(), style))
-            .chain(val.to_spans(style))
+        (Some(val), false) => iter::once(Span::styled(" := ".to_string(), diff.style))
+            .chain(val.to_spans(diff.style))
             .collect(),
         _ => Vec::new(),
     };
-
-    let marker_span = (!marker.is_empty()).then(|| Span::styled(marker.to_string(), style));
 
     Line::from(
         base_spans
             .into_iter()
             .chain(type_spans)
             .chain(value_spans)
-            .chain(marker_span)
             .collect::<Vec<_>>(),
     )
 }
@@ -130,23 +140,22 @@ pub fn render_target_line(goal: &Goal, is_selected: bool) -> Line<'static> {
         is_removed: goal.is_removed,
         has_diff: goal.target.has_any_diff(),
     };
-    let (style, marker) = diff_style(&state, is_selected, Color::Cyan);
+    let diff = diff_style(&state, is_selected, Color::Cyan);
 
-    let prefix = selection_prefix(is_selected);
+    let selection = selection_prefix(is_selected);
 
     let base_spans = [
-        Span::styled(prefix.to_string(), style),
-        Span::styled(goal.prefix.clone(), style),
+        Span::styled(diff.marker, DIM_GRAY),
+        Span::styled(selection.to_string(), diff.style),
+        Span::styled(goal.prefix.clone(), diff.style),
     ];
 
-    let target_spans = goal.target.to_spans(style);
-    let marker_span = (!marker.is_empty()).then(|| Span::styled(marker.to_string(), style));
+    let target_spans = goal.target.to_spans(diff.style);
 
     Line::from(
         base_spans
             .into_iter()
             .chain(target_spans)
-            .chain(marker_span)
             .collect::<Vec<_>>(),
     )
 }

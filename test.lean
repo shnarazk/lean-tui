@@ -26,12 +26,12 @@ notation:10000 n "!" => factorial n
 
 /-- The factorial is always positive -/
 theorem factorial_pos : ∀ n, 0 < n ! := by
-  intro n; induction n <;>   grind [factorial]
+  intro n; induction n <;>  grind [factorial]
 
 /-- ... and divided by its constituent factors -/
 theorem dvd_factorial : ∀ n, ∀ k ≤ n, 0 < k → k ∣ n ! := by
-  intro n; induction n <;>
-    grind [Nat.dvd_mul_right, Nat.dvd_mul_left_of_dvd, factorial]
+  intro n;   induction n <;>
+     grind [Nat.dvd_mul_right, Nat.dvd_mul_left_of_dvd, factorial]
 
 /--
 We show that we find arbitrary large (and thus infinitely
