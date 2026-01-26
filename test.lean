@@ -6,6 +6,7 @@ theorem exists_prime_factor :
     ∀ n, 1 < n → ∃ k, IsPrime k ∧ k ∣ n := by
   intro n h1
   -- Either `n` is prime...
+
   by_cases hprime : IsPrime n
 
   · grind [Nat.dvd_refl]
@@ -41,18 +42,11 @@ and showing that `n! + 1` has a prime factor larger than `n`.
 -/
 theorem InfinitudeOfPrimes : ∀ n, ∃ p > n, IsPrime p := by
   intro n
-
   have : 1 < n ! + 1 := by grind [factorial_pos]
-
   obtain ⟨p, hp, _⟩ := exists_prime_factor (n ! + 1) this
   suffices ¬p ≤ n by grind
-
   intro (_ : p ≤ n)
-
   have : 1 < p := hp.1
-
   have : p ∣ n ! := dvd_factorial n p ‹p ≤ n› (by grind)
-
   have := Nat.dvd_sub ‹p ∣ n ! + 1› ‹p ∣ n !›
-
   grind [Nat.add_sub_cancel_left, Nat.dvd_one]

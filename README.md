@@ -13,7 +13,7 @@ It shows:
 
 **Every editor with an LSP client can be used** in combination with this (Helix, Kate, Zed, Neovim, ...).
 
-![(Screenshot of the prime number theorem proof)](./screenshot.jpg)
+![(Screenshot of the prime number theorem proof)](./screenshot.png)
 
 Integration with editor for cursor navigation:
 
