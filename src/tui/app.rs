@@ -17,9 +17,9 @@ use crate::{
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ViewMode {
     /// Standard goal view with hypotheses and targets.
-    #[default]
     Standard,
     /// Paperproof-style view with proof history.
+    #[default]
     Paperproof,
 }
 

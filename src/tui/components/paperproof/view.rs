@@ -1,29 +1,33 @@
 //! Main Paperproof view component.
 
+use std::collections::HashSet;
 use std::iter;
 
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     prelude::Stylize,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
+    style::{Color, Style},
     widgets::Paragraph,
     Frame,
 };
 
 use super::{
-    goal_section::GoalSection,
+    definition_header::render_definition_header,
+    goal_before::render_goal_before,
+    goal_section::{GoalSection, GoalSectionInput},
     hyp_section::{HypSection, HypSectionInput},
+    proof_steps_sidebar::{render_proof_steps_sidebar, ProofStepsSidebarInput},
     tactic_row::render_divider,
+    tree_view::render_tree_view,
 };
 use crate::{
-    lean_rpc::Goal,
+    lean_rpc::{Goal, PaperproofStep},
     tui::components::{
         hypothesis_indices, ClickRegion, Component, HypothesisFilters, KeyMouseEvent,
         SelectableItem,
     },
-    tui_ipc::{DefinitionInfo, ProofStep, ProofStepSource},
+    tui_ipc::{DefinitionInfo, ProofStep},
 };
 
 /// Input for updating the Paperproof view.
@@ -33,6 +37,7 @@ pub struct PaperproofViewInput {
     pub error: Option<String>,
     pub proof_steps: Vec<ProofStep>,
     pub current_step_index: usize,
+    pub paperproof_steps: Option<Vec<PaperproofStep>>,
 }
 
 /// The main Paperproof view component.
@@ -43,11 +48,14 @@ pub struct PaperproofView {
     error: Option<String>,
     proof_steps: Vec<ProofStep>,
     current_step_index: usize,
+    paperproof_steps: Option<Vec<PaperproofStep>>,
     hyp_section: HypSection,
     goal_section: GoalSection,
     filters: HypothesisFilters,
     selected_index: Option<usize>,
     click_regions: Vec<ClickRegion>,
+    show_goal_before: bool,
+    tree_mode: bool,
 }
 
 impl PaperproofView {
@@ -130,11 +138,7 @@ impl Component for PaperproofView {
         self.error = input.error;
         self.proof_steps = input.proof_steps;
         self.current_step_index = input.current_step_index;
-
-        self.hyp_section.update(&HypSectionInput {
-            goals: &self.goals,
-            filters: self.filters,
-        });
+        self.paperproof_steps = input.paperproof_steps;
 
         if goals_changed {
             self.selected_index = (!self.selectable_items().is_empty()).then_some(0);
@@ -152,6 +156,8 @@ impl Component for PaperproofView {
                 KeyCode::Char('l') => { self.toggle_filter(FilterToggle::LetValues); true }
                 KeyCode::Char('r') => { self.toggle_filter(FilterToggle::ReverseOrder); true }
                 KeyCode::Char('d') => { self.toggle_filter(FilterToggle::Definition); true }
+                KeyCode::Char('b') => { self.show_goal_before = !self.show_goal_before; true }
+                KeyCode::Char('g') => { self.tree_mode = !self.tree_mode; true }
                 _ => false,
             },
             KeyMouseEvent::Mouse(mouse) => {
@@ -183,17 +189,32 @@ impl Component for PaperproofView {
         // Definition header
         let content = if let Some(def) = self.definition.as_ref().filter(|_| !self.filters.hide_definition) {
             let [hdr, rest] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(content);
-            let header = Line::from(vec![
-                Span::styled(&def.kind, Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD)),
-                Span::raw(" "),
-                Span::styled(&def.name, Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            ]);
-            frame.render_widget(Paragraph::new(header), hdr);
+            render_definition_header(frame, hdr, def);
             rest
         } else {
             content
         };
 
+        // Tree mode: use new box-based layout
+        if self.tree_mode {
+            if let Some(ref steps) = self.paperproof_steps {
+                render_tree_view(frame, content, steps, self.current_step_index);
+            } else {
+                frame.render_widget(
+                    Paragraph::new("Tree view requires Paperproof data").style(Style::new().fg(Color::DarkGray)),
+                    content,
+                );
+            }
+            return;
+        }
+
+        // Classic mode: sidebar + hypotheses + goals
+        self.render_classic_view(frame, content);
+    }
+}
+
+impl PaperproofView {
+    fn render_classic_view(&mut self, frame: &mut Frame, content: Rect) {
         // Split: proof steps sidebar | main content
         let (main, steps_area) = if self.proof_steps.is_empty() {
             (content, None)
@@ -203,62 +224,73 @@ impl Component for PaperproofView {
         };
 
         if let Some(area) = steps_area {
-            self.render_proof_steps(frame, area);
+            render_proof_steps_sidebar(frame, area, &ProofStepsSidebarInput {
+                proof_steps: &self.proof_steps,
+                paperproof_steps: self.paperproof_steps.as_deref(),
+                current_step_index: self.current_step_index,
+            });
         }
 
-        // Split main: hypotheses | divider | goals
-        let [hyps, div, goals] = Layout::vertical([
-            Constraint::Percentage(55), Constraint::Length(1), Constraint::Fill(1),
-        ]).areas(main);
+        // Get goal_before from current paperproof step if showing
+        let goal_before = if self.show_goal_before {
+            self.paperproof_steps
+                .as_ref()
+                .and_then(|steps| steps.get(self.current_step_index))
+                .map(|step| &step.goal_before)
+        } else {
+            None
+        };
 
-        self.hyp_section.render(frame, hyps, self.current_selection(), &mut self.click_regions);
-        render_divider(frame, div, None);
-        self.goal_section.render(frame, goals, &self.goals, self.current_selection(), &mut self.click_regions);
-    }
-}
+        // Split main: hypotheses | divider | goal_before (optional) | goals
+        let (hyps, div, goal_before_area, goals) = if goal_before.is_some() {
+            let [hyps, div, goal_before_area, goals] = Layout::vertical([
+                Constraint::Percentage(45), Constraint::Length(1), Constraint::Length(3), Constraint::Fill(1),
+            ]).areas(main);
+            (hyps, div, Some(goal_before_area), goals)
+        } else {
+            let [hyps, div, goals] = Layout::vertical([
+                Constraint::Percentage(55), Constraint::Length(1), Constraint::Fill(1),
+            ]).areas(main);
+            (hyps, div, None, goals)
+        };
 
-impl PaperproofView {
-    #[allow(clippy::cast_possible_truncation)]
-    fn render_proof_steps(&self, frame: &mut Frame, area: Rect) {
-        let source = self.proof_steps.first().map_or("Local", |s| match s.source {
-            ProofStepSource::Paperproof => "Paperproof",
-            ProofStepSource::Local => "Local",
+        // Collect depends_on from current proof step
+        let depends_on: HashSet<String> = self.proof_steps
+            .get(self.current_step_index)
+            .map(|step| step.depends_on.iter().cloned().collect())
+            .unwrap_or_default();
+
+        // Collect spawned goal usernames from current paperproof step
+        let spawned_goal_ids: HashSet<String> = self.paperproof_steps
+            .as_ref()
+            .and_then(|steps| steps.get(self.current_step_index))
+            .map(|step| step.spawned_goals.iter().map(|g| g.username.clone()).collect())
+            .unwrap_or_default();
+
+        // Update and render hypothesis section
+        self.hyp_section.update(HypSectionInput {
+            goals: self.goals.clone(),
+            filters: self.filters,
+            depends_on,
+            selection: self.current_selection(),
         });
+        self.hyp_section.render(frame, hyps);
+        self.click_regions.extend(self.hyp_section.click_regions().iter().cloned());
 
-        let mut lines = vec![
-            Line::from(vec![
-                Span::styled(format!("{source} "), Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("({} steps)", self.proof_steps.len()), Style::new().fg(Color::DarkGray)),
-            ]),
-            Line::from(""),
-        ];
+        render_divider(frame, div, None);
 
-        for (i, step) in self.proof_steps.iter().enumerate() {
-            let is_current = i == self.current_step_index;
-            let style = if is_current {
-                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-            } else {
-                Style::new().fg(Color::White)
-            };
-
-            lines.push(Line::from(vec![
-                Span::styled(format!("{:>3}.", i + 1), Style::new().fg(Color::DarkGray)),
-                Span::styled(if is_current { "▶ " } else { "  " }, Style::new().fg(Color::Cyan)),
-                Span::styled("  ".repeat(step.depth), Style::new().fg(Color::DarkGray)),
-                Span::styled(step.tactic.clone(), style),
-            ]));
-
-            if !step.depends_on.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::raw("     "),
-                    Span::styled(
-                        format!("uses: {}", step.depends_on.join(", ")),
-                        Style::new().fg(Color::Yellow).add_modifier(Modifier::DIM),
-                    ),
-                ]));
-            }
+        // Render goal_before if toggled
+        if let (Some(area), Some(goal_before)) = (goal_before_area, goal_before) {
+            render_goal_before(frame, area, goal_before);
         }
 
-        frame.render_widget(Paragraph::new(lines), area);
+        // Update and render goal section
+        self.goal_section.update(GoalSectionInput {
+            goals: self.goals.clone(),
+            selection: self.current_selection(),
+            spawned_goal_ids,
+        });
+        self.goal_section.render(frame, goals);
+        self.click_regions.extend(self.goal_section.click_regions().iter().cloned());
     }
 }

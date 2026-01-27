@@ -1,8 +1,10 @@
 //! Hypothesis layer - groups hypotheses for the Paperproof view.
 
+use std::collections::HashSet;
+
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
@@ -40,6 +42,7 @@ impl HypLayer {
         base_y: u16,
         area: Rect,
         click_regions: &mut Vec<ClickRegion>,
+        depends_on: &HashSet<String>,
     ) -> Vec<Line<'static>> {
         self.hypotheses
             .iter()
@@ -49,6 +52,7 @@ impl HypLayer {
                     goal_idx: *goal_idx,
                     hyp_idx: *hyp_idx,
                 });
+                let is_dependency = hyp.names.iter().any(|n| depends_on.contains(n));
 
                 let y = base_y + i as u16;
                 if y < area.y + area.height {
@@ -58,13 +62,13 @@ impl HypLayer {
                     });
                 }
 
-                render_hyp_line(hyp, is_selected)
+                render_hyp_line(hyp, is_selected, is_dependency)
             })
             .collect()
     }
 }
 
-fn render_hyp_line(hyp: &Hypothesis, is_selected: bool) -> Line<'static> {
+fn render_hyp_line(hyp: &Hypothesis, is_selected: bool, is_dependency: bool) -> Line<'static> {
     let state = DiffState {
         is_inserted: hyp.is_inserted,
         is_removed: hyp.is_removed,
@@ -72,20 +76,28 @@ fn render_hyp_line(hyp: &Hypothesis, is_selected: bool) -> Line<'static> {
     };
     let diff = diff_style(&state, is_selected, Color::White);
 
-    let marker = match (hyp.is_inserted, hyp.is_removed, hyp.type_.has_any_diff()) {
-        (true, _, _) => Span::styled("[+]", Style::new().fg(Color::Green)),
-        (_, true, _) => Span::styled("[-]", Style::new().fg(Color::Red)),
-        (_, _, true) => Span::styled("[~]", Style::new().fg(Color::Yellow)),
+    let marker = match (is_dependency, hyp.is_inserted, hyp.is_removed, hyp.type_.has_any_diff()) {
+        (true, _, _, _) => Span::styled("[*]", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        (_, true, _, _) => Span::styled("[+]", Style::new().fg(Color::Green)),
+        (_, _, true, _) => Span::styled("[-]", Style::new().fg(Color::Red)),
+        (_, _, _, true) => Span::styled("[~]", Style::new().fg(Color::Yellow)),
         _ => Span::styled("   ", Style::new().fg(Color::DarkGray)),
     };
 
     let selection = if is_selected { "▶ " } else { "  " };
     let names = hyp.names.join(", ");
 
+    // Apply bold styling to dependency hypotheses
+    let name_style = if is_dependency {
+        diff.style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else {
+        diff.style
+    };
+
     let mut spans = vec![
         marker,
         Span::styled(selection.to_string(), diff.style),
-        Span::styled(format!("{names} : "), diff.style),
+        Span::styled(format!("{names} : "), name_style),
     ];
     spans.extend(hyp.type_.to_spans(diff.style));
     Line::from(spans)

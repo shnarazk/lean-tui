@@ -61,6 +61,7 @@ pub async fn run() -> Result<()> {
             error: app.error.clone(),
             proof_steps: app.proof_steps.clone(),
             current_step_index: app.current_step_index,
+            paperproof_steps: app.paperproof_steps.clone(),
         });
         status_bar.update(goal_view.filters());
 

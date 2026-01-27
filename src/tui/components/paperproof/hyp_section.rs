@@ -12,17 +12,23 @@ use ratatui::{
 use super::hyp_layer::HypLayer;
 use crate::{
     lean_rpc::Goal,
-    tui::components::{ClickRegion, HypothesisFilters, SelectableItem},
+    tui::components::{ClickRegion, Component, HypothesisFilters, SelectableItem},
 };
 
-pub struct HypSectionInput<'a> {
-    pub goals: &'a [Goal],
+/// Input for updating the hypothesis section.
+pub struct HypSectionInput {
+    pub goals: Vec<Goal>,
     pub filters: HypothesisFilters,
+    pub depends_on: HashSet<String>,
+    pub selection: Option<SelectableItem>,
 }
 
 #[derive(Default)]
 pub struct HypSection {
     layer: HypLayer,
+    depends_on: HashSet<String>,
+    selection: Option<SelectableItem>,
+    click_regions: Vec<ClickRegion>,
 }
 
 impl Default for HypLayer {
@@ -32,8 +38,20 @@ impl Default for HypLayer {
 }
 
 impl HypSection {
-    pub fn update(&mut self, input: &HypSectionInput<'_>) {
+    /// Get the click regions computed during the last render.
+    pub fn click_regions(&self) -> &[ClickRegion] {
+        &self.click_regions
+    }
+}
+
+impl Component for HypSection {
+    type Input = HypSectionInput;
+    type Event = ();
+
+    fn update(&mut self, input: Self::Input) {
         self.layer = HypLayer::new();
+        self.depends_on = input.depends_on;
+        self.selection = input.selection;
         let mut seen: HashSet<String> = HashSet::new();
 
         let hyps = input.goals.iter().enumerate().flat_map(|(goal_idx, goal)| {
@@ -50,13 +68,9 @@ impl HypSection {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    pub fn render(
-        &self,
-        frame: &mut Frame,
-        area: Rect,
-        selection: Option<SelectableItem>,
-        click_regions: &mut Vec<ClickRegion>,
-    ) {
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
+        self.click_regions.clear();
+
         let block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .border_style(Style::new().fg(Color::DarkGray))
@@ -75,7 +89,7 @@ impl HypSection {
             return;
         }
 
-        let lines = self.layer.render(selection, inner.y, inner, click_regions);
+        let lines = self.layer.render(self.selection, inner.y, inner, &mut self.click_regions, &self.depends_on);
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }

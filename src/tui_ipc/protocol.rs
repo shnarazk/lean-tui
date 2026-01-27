@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub use async_lsp::lsp_types::{Position, Url};
@@ -40,11 +41,31 @@ pub enum ProofStepSource {
 
 impl ProofStep {
     /// Create from Paperproof step data.
+    ///
+    /// Resolves fvar IDs in `tactic_depends_on` to user-visible hypothesis names
+    /// using the hypothesis list from `goal_before`.
     pub fn from_paperproof(step: &PaperproofStep) -> Self {
+        // Build a lookup from fvar ID to username
+        let id_to_name: HashMap<&str, &str> = step
+            .goal_before
+            .hyps
+            .iter()
+            .map(|h| (h.id.as_str(), h.username.as_str()))
+            .collect();
+
+        // Resolve IDs to names, keeping original if not found
+        let depends_on: Vec<String> = step
+            .tactic_depends_on
+            .iter()
+            .filter_map(|id| {
+                id_to_name.get(id.as_str()).map(|s| (*s).to_string())
+            })
+            .collect();
+
         Self {
             tactic: step.tactic_string.clone(),
             position: step.position.start,
-            depends_on: step.tactic_depends_on.clone(),
+            depends_on,
             depth: 0, // Paperproof doesn't provide depth
             source: ProofStepSource::Paperproof,
         }
