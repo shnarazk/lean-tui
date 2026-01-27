@@ -24,11 +24,7 @@ pub struct TacticInfo {
 /// Returns tactics in source order, which can be used to fetch goals
 /// at each position and build a proof history.
 #[allow(clippy::cast_possible_truncation)]
-pub fn find_all_tactics_in_proof(
-    tree: &Tree,
-    source: &str,
-    current: Position,
-) -> Vec<TacticInfo> {
+pub fn find_all_tactics_in_proof(tree: &Tree, source: &str, current: Position) -> Vec<TacticInfo> {
     let point = Point::new(current.line as usize, current.character as usize);
 
     // First find the enclosing definition
@@ -122,10 +118,10 @@ fn collect_tactics_recursive(
     let new_depth = if node.kind() == "have"
         || node.kind() == "let"
         || node.kind() == "match_expr"
-        || CASE_SPLITTING_TACTICS
-            .iter()
-            .any(|t| node.utf8_text(source.as_bytes()).is_ok_and(|s| s.starts_with(t)))
-    {
+        || CASE_SPLITTING_TACTICS.iter().any(|t| {
+            node.utf8_text(source.as_bytes())
+                .is_ok_and(|s| s.starts_with(t))
+        }) {
         depth + 1
     } else {
         depth

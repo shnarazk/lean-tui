@@ -1,7 +1,6 @@
 //! Steps mode - sidebar with proof steps plus hypotheses and goals sections.
 
-use std::collections::HashSet;
-use std::iter;
+use std::{collections::HashSet, iter};
 
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
@@ -12,7 +11,7 @@ use ratatui::{
     Frame,
 };
 
-use super::Mode;
+use super::{Backend, Mode};
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
     tui::components::{
@@ -59,7 +58,10 @@ impl StepsMode {
             .flat_map(|(goal_idx, goal)| {
                 let hyps = hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
                     .filter(|&i| self.filters.should_show(&goal.hyps[i]))
-                    .map(move |i| SelectableItem::Hypothesis { goal_idx, hyp_idx: i });
+                    .map(move |i| SelectableItem::Hypothesis {
+                        goal_idx,
+                        hyp_idx: i,
+                    });
                 hyps.chain(iter::once(SelectableItem::GoalTarget { goal_idx }))
             })
             .collect()
@@ -107,15 +109,11 @@ impl StepsMode {
     const fn toggle_filter(&mut self, filter: FilterToggle) {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
-            FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
             FilterToggle::Inaccessible => {
                 self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
             }
             FilterToggle::LetValues => self.filters.hide_let_values = !self.filters.hide_let_values,
             FilterToggle::ReverseOrder => self.filters.reverse_order = !self.filters.reverse_order,
-            FilterToggle::Definition => {
-                self.filters.hide_definition = !self.filters.hide_definition;
-            }
         }
     }
 }
@@ -153,10 +151,6 @@ impl Component for StepsMode {
                     self.toggle_filter(FilterToggle::Instances);
                     true
                 }
-                KeyCode::Char('t') => {
-                    self.toggle_filter(FilterToggle::Types);
-                    true
-                }
                 KeyCode::Char('a') => {
                     self.toggle_filter(FilterToggle::Inaccessible);
                     true
@@ -167,10 +161,6 @@ impl Component for StepsMode {
                 }
                 KeyCode::Char('r') => {
                     self.toggle_filter(FilterToggle::ReverseOrder);
-                    true
-                }
-                KeyCode::Char('d') => {
-                    self.toggle_filter(FilterToggle::Definition);
                     true
                 }
                 KeyCode::Char('b') => {
@@ -193,7 +183,10 @@ impl Component for StepsMode {
         let content = if let Some(ref error) = self.error {
             let [err, rest] =
                 Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(area);
-            frame.render_widget(Paragraph::new(format!("Error: {error}")).fg(Color::Red), err);
+            frame.render_widget(
+                Paragraph::new(format!("Error: {error}")).fg(Color::Red),
+                err,
+            );
             rest
         } else {
             area
@@ -207,12 +200,8 @@ impl Component for StepsMode {
             return;
         }
 
-        // Definition header
-        let content = if let Some(def) = self
-            .definition
-            .as_ref()
-            .filter(|_| !self.filters.hide_definition)
-        {
+        // Definition header (always shown if available)
+        let content = if let Some(def) = self.definition.as_ref() {
             let [hdr, rest] =
                 Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(content);
             render_definition_header(frame, hdr, def);
@@ -285,7 +274,12 @@ impl Component for StepsMode {
             .paperproof_steps
             .as_ref()
             .and_then(|steps| steps.get(self.current_step_index))
-            .map(|step| step.spawned_goals.iter().map(|g| g.username.clone()).collect())
+            .map(|step| {
+                step.spawned_goals
+                    .iter()
+                    .map(|g| g.username.clone())
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Update and render hypothesis section
@@ -325,20 +319,17 @@ impl Mode for StepsMode {
     const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
         ("b", "before"),
         ("i", "inst"),
-        ("t", "type"),
         ("a", "access"),
         ("l", "let"),
         ("r", "rev"),
-        ("d", "def"),
     ];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
         FilterToggle::Instances,
-        FilterToggle::Types,
         FilterToggle::Inaccessible,
         FilterToggle::LetValues,
         FilterToggle::ReverseOrder,
-        FilterToggle::Definition,
     ];
+    const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
 
     fn current_selection(&self) -> Option<SelectableItem> {
         let items = self.selectable_items();

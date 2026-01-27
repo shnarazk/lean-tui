@@ -39,7 +39,6 @@ impl Component for StatusBar {
         const GLOBAL_KEYBINDINGS: &[(&str, &str)] = &[
             ("?", "help"),
             ("j/k", "nav"),
-            ("Enter", "go"),
             ("[/]", "mode"),
             ("q", "quit"),
         ];
@@ -60,30 +59,40 @@ impl Component for StatusBar {
 
         // Mode-specific keybindings
         let mode_keybindings = self.display_mode.keybindings();
-        let mode_spans = mode_keybindings
-            .iter()
-            .flat_map(|(key, desc)| {
-                [
-                    separator.clone(),
-                    Span::styled(*key, Style::new().fg(Color::Yellow)),
-                    Span::raw(format!(": {desc}")),
-                ]
-            });
+        let mode_spans = mode_keybindings.iter().flat_map(|(key, desc)| {
+            [
+                separator.clone(),
+                Span::styled(*key, Style::new().fg(Color::Yellow)),
+                Span::raw(format!(": {desc}")),
+            ]
+        });
+
+        // Navigation shortcuts (d/t) in magenta, before filters
+        let nav_spans = [
+            separator.clone(),
+            Span::styled("d", Style::new().fg(Color::Magenta)),
+            Span::raw(": def"),
+            Span::raw(" "),
+            Span::styled("t", Style::new().fg(Color::Magenta)),
+            Span::raw(": type"),
+        ];
 
         let filter_status = build_filter_status(self.filters, self.supported_filters);
         let filter_span = (!filter_status.is_empty())
             .then(|| Span::styled(format!(" [{filter_status}]"), Style::new().fg(Color::Green)));
 
-        let spans: Vec<Span> = global_spans.chain(mode_spans).chain(filter_span).collect();
+        let spans: Vec<Span> = global_spans
+            .chain(mode_spans)
+            .chain(nav_spans)
+            .chain(filter_span)
+            .collect();
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 }
 
 fn build_filter_status(filters: HypothesisFilters, supported: &[FilterToggle]) -> String {
     [
-        (FilterToggle::Definition, !filters.hide_definition, 'd'),
         (FilterToggle::Instances, filters.hide_instances, 'i'),
-        (FilterToggle::Types, filters.hide_types, 't'),
         (FilterToggle::Inaccessible, filters.hide_inaccessible, 'a'),
         (FilterToggle::LetValues, filters.hide_let_values, 'l'),
         (FilterToggle::ReverseOrder, filters.reverse_order, 'r'),

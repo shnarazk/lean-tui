@@ -16,7 +16,9 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use super::protocol::{socket_path, Command, CursorInfo, GoalResult, Message, ProofStep, TemporalSlot};
+use super::protocol::{
+    socket_path, Command, CursorInfo, GoalResult, Message, ProofStep, TemporalSlot,
+};
 use crate::lean_rpc::{Goal, PaperproofStep};
 
 // ============================================================================

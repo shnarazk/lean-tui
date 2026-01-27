@@ -159,7 +159,8 @@ fn build_proof_steps(
     // Prefer Paperproof data if available
     if let Some(steps) = paperproof_steps {
         if !steps.is_empty() {
-            let proof_steps: Vec<ProofStep> = steps.iter().map(ProofStep::from_paperproof).collect();
+            let proof_steps: Vec<ProofStep> =
+                steps.iter().map(ProofStep::from_paperproof).collect();
             let current_index = find_current_step_index(&proof_steps, cursor_position);
             return (proof_steps, current_index);
         }
@@ -192,8 +193,7 @@ fn extract_dependencies(tactic_text: &str) -> Vec<String> {
             continue;
         }
 
-        let clean = word
-            .trim_matches(|c| c == '[' || c == ']' || c == ',' || c == '⟨' || c == '⟩');
+        let clean = word.trim_matches(|c| c == '[' || c == ']' || c == ',' || c == '⟨' || c == '⟩');
 
         if clean.is_empty()
             || clean.starts_with('-')

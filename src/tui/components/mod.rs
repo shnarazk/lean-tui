@@ -19,18 +19,17 @@ mod tree_hyp_bar;
 mod tree_view;
 
 use crossterm::event::{KeyEvent, MouseEvent};
-pub use header::Header;
-pub use help_menu::HelpMenu;
-use ratatui::{layout::Rect, Frame};
-pub use status_bar::{StatusBar, StatusBarInput};
-
 // Re-exports for modes
 pub use definition_header::render_definition_header;
 pub use diff_text::{diff_style, DiffState, TaggedTextExt};
 pub use goal_before::render_goal_before;
 pub use goal_section::{GoalSection, GoalSectionInput};
+pub use header::Header;
+pub use help_menu::HelpMenu;
 pub use hyp_section::{HypSection, HypSectionInput};
 pub use proof_steps_sidebar::{render_proof_steps_sidebar, ProofStepsSidebarInput};
+use ratatui::{layout::Rect, Frame};
+pub use status_bar::{StatusBar, StatusBarInput};
 pub use tactic_row::render_divider;
 pub use tree_view::render_tree_view;
 
@@ -57,47 +56,27 @@ pub struct ClickRegion {
     pub item: SelectableItem,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct HypothesisFilters {
     pub hide_instances: bool,
-    pub hide_types: bool,
     pub hide_inaccessible: bool,
     pub hide_let_values: bool,
     pub reverse_order: bool,
-    pub hide_definition: bool,
-}
-
-impl Default for HypothesisFilters {
-    fn default() -> Self {
-        Self {
-            hide_instances: false,
-            hide_types: false,
-            hide_inaccessible: false,
-            hide_let_values: false,
-            reverse_order: false,
-            hide_definition: true,
-        }
-    }
 }
 
 /// Filter toggles that modes can support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterToggle {
     Instances,
-    Types,
     Inaccessible,
     LetValues,
     ReverseOrder,
-    Definition,
 }
 
 impl HypothesisFilters {
     pub fn should_show(self, hyp: &Hypothesis) -> bool {
         if self.hide_instances && hyp.is_instance {
-            return false;
-        }
-        if self.hide_types && hyp.is_type {
             return false;
         }
         if self.hide_inaccessible && hyp.names.iter().any(|n| n.contains('\u{2020}')) {

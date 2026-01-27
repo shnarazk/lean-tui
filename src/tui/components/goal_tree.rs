@@ -105,7 +105,7 @@ impl<'a> GoalTree<'a> {
     fn build_tree_elements(&self) -> Vec<TreeElement> {
         let mut elements = Vec::new();
 
-        let show_header = !self.filters.hide_definition && self.definition.is_some();
+        let show_header = self.definition.is_some();
         let has_case_splits = !self.case_splits.is_empty();
         let has_named_goals = self.goals.iter().any(|g| g.user_name.is_some());
         let use_tree = show_header || has_case_splits || (self.goals.len() > 1 && has_named_goals);

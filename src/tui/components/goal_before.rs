@@ -15,12 +15,10 @@ pub fn render_goal_before(frame: &mut Frame, area: Rect, goal_before: &Paperproo
     let style = Style::new().fg(Color::DarkGray).add_modifier(Modifier::DIM);
     let label_style = Style::new().fg(Color::Blue).add_modifier(Modifier::DIM);
 
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("Before: ", label_style),
-            Span::styled(&goal_before.type_, style),
-        ]),
-    ];
+    let lines = vec![Line::from(vec![
+        Span::styled("Before: ", label_style),
+        Span::styled(&goal_before.type_, style),
+    ])];
 
     frame.render_widget(Paragraph::new(lines), area);
 }

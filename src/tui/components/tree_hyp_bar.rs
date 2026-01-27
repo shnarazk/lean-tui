@@ -17,7 +17,11 @@ pub fn render_hyp_bar(frame: &mut Frame, area: Rect, hyps: &[PaperproofHypothesi
         .borders(Borders::BOTTOM)
         .border_style(Style::new().fg(tree_colors::TACTIC_BORDER))
         .title(" HYPOTHESES ")
-        .title_style(Style::new().fg(tree_colors::HYPOTHESIS_FG).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::new()
+                .fg(tree_colors::HYPOTHESIS_FG)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -50,6 +54,9 @@ fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}...", s.chars().take(max.saturating_sub(3)).collect::<String>())
+        format!(
+            "{}...",
+            s.chars().take(max.saturating_sub(3)).collect::<String>()
+        )
     }
 }

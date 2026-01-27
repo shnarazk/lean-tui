@@ -91,7 +91,12 @@ fn step_box_height(step: &PaperproofStep) -> u16 {
 
 /// Get hypotheses that are new in this step (introduced by the tactic).
 fn get_new_hypotheses(step: &PaperproofStep) -> Vec<&PaperproofHypothesis> {
-    let before_ids: HashSet<&str> = step.goal_before.hyps.iter().map(|h| h.id.as_str()).collect();
+    let before_ids: HashSet<&str> = step
+        .goal_before
+        .hyps
+        .iter()
+        .map(|h| h.id.as_str())
+        .collect();
 
     step.goals_after
         .first()
@@ -105,7 +110,8 @@ fn get_new_hypotheses(step: &PaperproofStep) -> Vec<&PaperproofHypothesis> {
 }
 
 /// Recursively render the proof tree with horizontal branching.
-/// Uses bottom-up ordering to match Paperproof: children appear above, parent below.
+/// Uses bottom-up ordering to match Paperproof: children appear above, parent
+/// below.
 fn render_tree_recursive(
     frame: &mut Frame,
     area: Rect,
@@ -139,7 +145,13 @@ fn render_tree_recursive(
 
     // Render children FIRST (they appear above)
     if let Some(children_area) = children_area {
-        render_children(frame, children_area, steps, &node.children, current_step_index);
+        render_children(
+            frame,
+            children_area,
+            steps,
+            &node.children,
+            current_step_index,
+        );
     }
 
     // Render this step SECOND (appears below children)
@@ -156,7 +168,10 @@ fn render_children(
 ) {
     if children.len() > 1 {
         // Multiple branches: render side-by-side with flexible widths
-        let constraints: Vec<Constraint> = children.iter().map(|_| Constraint::Min(MIN_BRANCH_WIDTH)).collect();
+        let constraints: Vec<Constraint> = children
+            .iter()
+            .map(|_| Constraint::Min(MIN_BRANCH_WIDTH))
+            .collect();
 
         let branch_areas = Layout::horizontal(constraints).split(area);
 
@@ -210,7 +225,11 @@ fn render_step_box(
         .title(Span::styled(
             title,
             Style::new()
-                .fg(if is_current { Color::White } else { Color::Gray })
+                .fg(if is_current {
+                    Color::White
+                } else {
+                    Color::Gray
+                })
                 .add_modifier(if is_current {
                     Modifier::BOLD
                 } else {
@@ -290,9 +309,7 @@ fn render_goal_line(step: &PaperproofStep, is_leaf: bool) -> Line<'static> {
         if is_leaf {
             goals_text.push(Span::styled(
                 "⋯ ",
-                Style::new()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
         }
 
@@ -302,7 +319,10 @@ fn render_goal_line(step: &PaperproofStep, is_leaf: bool) -> Line<'static> {
             }
             let goal_type = truncate(&g.type_, 35);
             if let Some(name) = clean_goal_name(&g.username) {
-                goals_text.push(Span::styled(format!("{name}: "), Style::new().fg(Color::Cyan)));
+                goals_text.push(Span::styled(
+                    format!("{name}: "),
+                    Style::new().fg(Color::Cyan),
+                ));
             }
             goals_text.push(Span::styled(
                 format!("⊢ {goal_type}"),

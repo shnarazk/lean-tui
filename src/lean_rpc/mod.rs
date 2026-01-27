@@ -22,6 +22,18 @@ pub struct GotoLocation {
     pub position: Position,
 }
 
+/// Pre-resolved goto locations for multiple navigation kinds.
+///
+/// Holds both definition and type definition locations, resolved at goal fetch
+/// time.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GotoLocations {
+    /// Location of the definition (for "go to definition").
+    pub definition: Option<GotoLocation>,
+    /// Location of the type definition (for "go to type definition").
+    pub type_def: Option<GotoLocation>,
+}
+
 /// Diff status for goal state comparisons.
 ///
 /// The Lean server marks subexpressions with these tags when comparing
@@ -170,9 +182,9 @@ pub struct Goal {
     /// Goal was removed (gone in current state vs pinned)
     #[serde(default)]
     pub is_removed: bool,
-    /// Pre-resolved goto location for the target (set when goals are fetched).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goto_location: Option<GotoLocation>,
+    /// Pre-resolved goto locations for the target (set when goals are fetched).
+    #[serde(default)]
+    pub goto_locations: GotoLocations,
 }
 
 /// A hypothesis in the local context.
@@ -203,9 +215,9 @@ pub struct Hypothesis {
     /// Hypothesis was removed (gone in current state vs pinned)
     #[serde(default)]
     pub is_removed: bool,
-    /// Pre-resolved goto location (set when goals are fetched).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goto_location: Option<GotoLocation>,
+    /// Pre-resolved goto locations (set when goals are fetched).
+    #[serde(default)]
+    pub goto_locations: GotoLocations,
 }
 
 impl Hypothesis {
@@ -311,7 +323,7 @@ impl InteractiveHypothesis {
             fvar_ids: self.fvar_ids.clone(),
             is_inserted: self.is_inserted,
             is_removed: self.is_removed,
-            goto_location: None,
+            goto_locations: GotoLocations::default(),
         }
     }
 }
@@ -337,7 +349,7 @@ impl InteractiveGoal {
             user_name: self.user_name.clone(),
             is_inserted: self.is_inserted,
             is_removed: self.is_removed,
-            goto_location: None,
+            goto_locations: GotoLocations::default(),
         }
     }
 }
@@ -374,7 +386,7 @@ impl InteractiveTermGoalResponse {
             user_name: Some("Expected".to_string()), // Marker for term goal
             is_inserted: false,
             is_removed: false,
-            goto_location: None,
+            goto_locations: GotoLocations::default(),
         }
     }
 }

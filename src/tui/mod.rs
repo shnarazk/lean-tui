@@ -6,7 +6,7 @@ mod modes;
 
 use std::{io::stdout, time::Duration};
 
-use app::App;
+use app::{App, NavigationKind};
 use components::{Component, Header, HelpMenu, KeyMouseEvent, KeyPress, StatusBar, StatusBarInput};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind},
@@ -66,7 +66,12 @@ pub async fn run() -> Result<()> {
             previous_goals: app
                 .columns
                 .previous
-                .then(|| app.temporal_goals.previous.as_ref().map(|g| g.goals.clone()))
+                .then(|| {
+                    app.temporal_goals
+                        .previous
+                        .as_ref()
+                        .map(|g| g.goals.clone())
+                })
                 .flatten(),
             current_goals: app.goals().to_vec(),
             next_goals: app
@@ -231,7 +236,7 @@ fn handle_global_event(
             app.toggle_next_column();
             true
         }
-        KeyCode::Enter => {
+        KeyCode::Char('d') | KeyCode::Enter => {
             let selection = match app.display_mode {
                 DisplayMode::GoalTree => goal_tree_mode.current_selection(),
                 DisplayMode::BeforeAfter => before_after_mode.current_selection(),
@@ -239,6 +244,16 @@ fn handle_global_event(
                 DisplayMode::DeductionTree => deduction_tree_mode.current_selection(),
             };
             app.navigate_to_selection(selection);
+            true
+        }
+        KeyCode::Char('t') => {
+            let selection = match app.display_mode {
+                DisplayMode::GoalTree => goal_tree_mode.current_selection(),
+                DisplayMode::BeforeAfter => before_after_mode.current_selection(),
+                DisplayMode::StepsView => steps_mode.current_selection(),
+                DisplayMode::DeductionTree => deduction_tree_mode.current_selection(),
+            };
+            app.navigate_to_selection_with_kind(selection, NavigationKind::TypeDefinition);
             true
         }
         _ => false,
@@ -287,8 +302,10 @@ fn render_main(
     deduction_tree_mode: &mut DeductionTreeMode,
 ) {
     let title = format!(" lean-tui [{}] ", app.display_mode.name());
+    let backends = format!(" {} ", app.display_mode.backends_display());
     let block = Block::bordered()
         .title(title)
+        .title_top(Line::from(backends).right_aligned())
         .border_style(Style::new().fg(Color::Cyan));
 
     let inner = block.inner(area);

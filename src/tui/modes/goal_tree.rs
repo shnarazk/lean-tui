@@ -11,7 +11,7 @@ use ratatui::{
     Frame,
 };
 
-use super::Mode;
+use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
     tui::components::{
@@ -49,15 +49,11 @@ impl GoalTreeMode {
     pub const fn toggle_filter(&mut self, filter: FilterToggle) {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
-            FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
             FilterToggle::Inaccessible => {
                 self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
             }
             FilterToggle::LetValues => self.filters.hide_let_values = !self.filters.hide_let_values,
             FilterToggle::ReverseOrder => self.filters.reverse_order = !self.filters.reverse_order,
-            FilterToggle::Definition => {
-                self.filters.hide_definition = !self.filters.hide_definition;
-            }
         }
     }
 
@@ -153,10 +149,6 @@ impl Component for GoalTreeMode {
                     self.toggle_filter(FilterToggle::Instances);
                     true
                 }
-                KeyCode::Char('t') => {
-                    self.toggle_filter(FilterToggle::Types);
-                    true
-                }
                 KeyCode::Char('a') => {
                     self.toggle_filter(FilterToggle::Inaccessible);
                     true
@@ -167,10 +159,6 @@ impl Component for GoalTreeMode {
                 }
                 KeyCode::Char('r') => {
                     self.toggle_filter(FilterToggle::ReverseOrder);
-                    true
-                }
-                KeyCode::Char('d') => {
-                    self.toggle_filter(FilterToggle::Definition);
                     true
                 }
                 _ => false,
@@ -232,22 +220,15 @@ impl Mode for GoalTreeMode {
     type Model = GoalTreeModeInput;
 
     const NAME: &'static str = "Goal Tree";
-    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
-        ("i", "inst"),
-        ("t", "type"),
-        ("a", "access"),
-        ("l", "let"),
-        ("r", "rev"),
-        ("d", "def"),
-    ];
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] =
+        &[("i", "inst"), ("a", "access"), ("l", "let"), ("r", "rev")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
         FilterToggle::Instances,
-        FilterToggle::Types,
         FilterToggle::Inaccessible,
         FilterToggle::LetValues,
         FilterToggle::ReverseOrder,
-        FilterToggle::Definition,
     ];
+    const BACKENDS: &'static [Backend] = &[Backend::LeanRpc];
 
     fn current_selection(&self) -> Option<SelectableItem> {
         let items = self.selectable_items();

@@ -11,7 +11,7 @@ use ratatui::{
     Frame,
 };
 
-use super::Mode;
+use super::{Backend, Mode};
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
     tui::components::{
@@ -46,12 +46,6 @@ pub struct DeductionTreeMode {
 impl DeductionTreeMode {
     pub const fn filters(&self) -> HypothesisFilters {
         self.filters
-    }
-
-    pub const fn toggle_filter(&mut self, filter: FilterToggle) {
-        if matches!(filter, FilterToggle::Definition) {
-            self.filters.hide_definition = !self.filters.hide_definition;
-        }
     }
 
     fn selectable_items(&self) -> Vec<SelectableItem> {
@@ -143,10 +137,6 @@ impl Component for DeductionTreeMode {
                     self.select_previous();
                     true
                 }
-                KeyCode::Char('d') => {
-                    self.toggle_filter(FilterToggle::Definition);
-                    true
-                }
                 _ => false,
             },
             KeyMouseEvent::Mouse(mouse) => {
@@ -184,11 +174,10 @@ impl Component for DeductionTreeMode {
             return;
         }
 
-        // Definition header
-        let content_area = if let Some(def) = self.definition.as_ref().filter(|_| !self.filters.hide_definition) {
+        // Definition header (always shown if available)
+        let content_area = if let Some(def) = self.definition.as_ref() {
             let [header_area, rest] =
-                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
-                    .areas(content_area);
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(content_area);
             render_definition_header(frame, header_area, def);
             rest
         } else {
@@ -212,8 +201,9 @@ impl Mode for DeductionTreeMode {
     type Model = DeductionTreeModeInput;
 
     const NAME: &'static str = "Deduction Tree";
-    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("d", "def")];
-    const SUPPORTED_FILTERS: &'static [FilterToggle] = &[FilterToggle::Definition];
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[];
+    const SUPPORTED_FILTERS: &'static [FilterToggle] = &[];
+    const BACKENDS: &'static [Backend] = &[Backend::Paperproof];
 
     fn current_selection(&self) -> Option<SelectableItem> {
         let items = self.selectable_items();

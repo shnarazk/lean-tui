@@ -8,10 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    lean_rpc::PaperproofStep,
-    tui_ipc::{ProofStep, ProofStepSource},
-};
+use crate::{lean_rpc::PaperproofStep, tui_ipc::ProofStep};
 
 /// Input for rendering the proof steps sidebar.
 pub struct ProofStepsSidebarInput<'a> {
@@ -22,19 +19,12 @@ pub struct ProofStepsSidebarInput<'a> {
 
 /// Render the proof steps sidebar.
 #[allow(clippy::cast_possible_truncation)]
-pub fn render_proof_steps_sidebar(frame: &mut Frame, area: Rect, input: &ProofStepsSidebarInput<'_>) {
-    let source = input.proof_steps.first().map_or("Local", |s| match s.source {
-        ProofStepSource::Paperproof => "Paperproof",
-        ProofStepSource::Local => "Local",
-    });
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(format!("{source} "), Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("({} steps)", input.proof_steps.len()), Style::new().fg(Color::DarkGray)),
-        ]),
-        Line::from(""),
-    ];
+pub fn render_proof_steps_sidebar(
+    frame: &mut Frame,
+    area: Rect,
+    input: &ProofStepsSidebarInput<'_>,
+) {
+    let mut lines = Vec::new();
 
     for (i, step) in input.proof_steps.iter().enumerate() {
         let is_current = i == input.current_step_index;
@@ -46,7 +36,12 @@ pub fn render_proof_steps_sidebar(frame: &mut Frame, area: Rect, input: &ProofSt
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn render_step_line(lines: &mut Vec<Line<'static>>, step: &ProofStep, index: usize, is_current: bool) {
+fn render_step_line(
+    lines: &mut Vec<Line<'static>>,
+    step: &ProofStep,
+    index: usize,
+    is_current: bool,
+) {
     let style = if is_current {
         Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
     } else {
@@ -54,8 +49,14 @@ fn render_step_line(lines: &mut Vec<Line<'static>>, step: &ProofStep, index: usi
     };
 
     lines.push(Line::from(vec![
-        Span::styled(format!("{:>3}.", index + 1), Style::new().fg(Color::DarkGray)),
-        Span::styled(if is_current { "▶ " } else { "  " }, Style::new().fg(Color::Cyan)),
+        Span::styled(
+            format!("{:>3}.", index + 1),
+            Style::new().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            if is_current { "▶ " } else { "  " },
+            Style::new().fg(Color::Cyan),
+        ),
         Span::styled("  ".repeat(step.depth), Style::new().fg(Color::DarkGray)),
         Span::styled(step.tactic.clone(), style),
     ]));
@@ -73,14 +74,22 @@ fn render_step_dependencies(lines: &mut Vec<Line<'static>>, step: &ProofStep) {
     }
 }
 
-fn render_step_theorems(lines: &mut Vec<Line<'static>>, paperproof_steps: Option<&[PaperproofStep]>, index: usize) {
-    let Some(pp_steps) = paperproof_steps else { return };
-    let Some(pp_step) = pp_steps.get(index) else { return };
-    if pp_step.theorems.is_empty() { return; }
+fn render_step_theorems(
+    lines: &mut Vec<Line<'static>>,
+    paperproof_steps: Option<&[PaperproofStep]>,
+    index: usize,
+) {
+    let Some(pp_steps) = paperproof_steps else {
+        return;
+    };
+    let Some(pp_step) = pp_steps.get(index) else {
+        return;
+    };
+    if pp_step.theorems.is_empty() {
+        return;
+    }
 
-    let thm_names: Vec<_> = pp_step.theorems.iter()
-        .map(|t| t.name.as_str())
-        .collect();
+    let thm_names: Vec<_> = pp_step.theorems.iter().map(|t| t.name.as_str()).collect();
 
     lines.push(Line::from(vec![
         Span::raw("     "),

@@ -4,15 +4,22 @@ use std::mem;
 
 use async_lsp::lsp_types::Url;
 
-use super::components::SelectableItem;
-use super::modes::DisplayMode;
+use super::{components::SelectableItem, modes::DisplayMode};
 use crate::{
-    lean_rpc::{Goal, GotoLocation, PaperproofStep},
+    lean_rpc::{Goal, GotoLocation, GotoLocations, PaperproofStep},
     tui_ipc::{
         CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
         ProofStep, TemporalSlot,
     },
 };
+
+/// Kind of navigation (definition or type definition).
+#[derive(Debug, Clone, Copy, Default)]
+pub enum NavigationKind {
+    #[default]
+    Definition,
+    TypeDefinition,
+}
 
 /// A step in the local proof history (includes goals, used for navigation).
 #[derive(Debug, Clone, Default)]
@@ -295,17 +302,28 @@ impl App {
     /// Get the current proof step (if any).
     #[allow(dead_code)] // Will be used in Phase 5 for proof step navigation
     pub fn current_proof_step(&self) -> Option<&LocalProofStep> {
-        self.proof_history.steps.get(self.proof_history.current_step_index)
+        self.proof_history
+            .steps
+            .get(self.proof_history.current_step_index)
     }
 
-    /// Navigate to the given selection.
+    /// Navigate to the given selection (go to definition).
     pub fn navigate_to_selection(&mut self, selection: Option<SelectableItem>) {
+        self.navigate_to_selection_with_kind(selection, NavigationKind::Definition);
+    }
+
+    /// Navigate to the given selection with a specific navigation kind.
+    pub fn navigate_to_selection_with_kind(
+        &mut self,
+        selection: Option<SelectableItem>,
+        kind: NavigationKind,
+    ) {
         let Some(cursor) = &self.cursor else {
             return;
         };
 
         let goals_pos = self.goals_position().unwrap_or(cursor.position);
-        let cmd = self.build_navigation_command(selection, cursor.uri.clone(), goals_pos);
+        let cmd = self.build_navigation_command(selection, cursor.uri.clone(), goals_pos, kind);
         self.queue_command(cmd);
     }
 
@@ -314,19 +332,24 @@ impl App {
         selection: Option<SelectableItem>,
         uri: Url,
         position: Position,
+        kind: NavigationKind,
     ) -> Command {
-        let goto_location: Option<&GotoLocation> = match selection {
+        let goto_locations: Option<&GotoLocations> = match selection {
             Some(SelectableItem::Hypothesis { goal_idx, hyp_idx }) => self
                 .goals()
                 .get(goal_idx)
                 .and_then(|g| g.hyps.get(hyp_idx))
-                .and_then(|h| h.goto_location.as_ref()),
-            Some(SelectableItem::GoalTarget { goal_idx }) => self
-                .goals()
-                .get(goal_idx)
-                .and_then(|g| g.goto_location.as_ref()),
+                .map(|h| &h.goto_locations),
+            Some(SelectableItem::GoalTarget { goal_idx }) => {
+                self.goals().get(goal_idx).map(|g| &g.goto_locations)
+            }
             None => None,
         };
+
+        let goto_location: Option<&GotoLocation> = goto_locations.and_then(|locs| match kind {
+            NavigationKind::Definition => locs.definition.as_ref(),
+            NavigationKind::TypeDefinition => locs.type_def.as_ref(),
+        });
 
         goto_location.map_or(Command::Navigate { uri, position }, |loc| {
             Command::Navigate {

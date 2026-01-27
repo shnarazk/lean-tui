@@ -43,7 +43,17 @@ Key bindings:
 - Click on goals to go the goal in the editor
 - Help menu `?`
 - Close with `q`
-- Switch proof display styles: `[`, `]` (installation PaperProof is be required for some)
+
+Display styles:
+
+- Goal tree: open goals as a tree
+- Before after: current active goal state and previous and next goal state
+- Deduction tree: proof shown as a deduction tree (with Paperproof)
+- Steps: steps shown next to all active hypotheses and goals
+
+Switch proof display styles: `[`, `]`
+
+For screenshots, see [codeberg](https://codeberg.org/wvhulle/lean-tui) or below:
 
 | Vanilla                      | PaperProof                            |
 | ---------------------------- | ------------------------------------- |

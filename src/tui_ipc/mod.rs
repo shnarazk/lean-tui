@@ -11,7 +11,7 @@ mod tui_endpoint;
 
 pub use protocol::{
     socket_path, CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
-    ProofStep, ProofStepSource, TemporalSlot,
+    ProofStep, TemporalSlot,
 };
 pub use proxy_endpoint::{CommandHandler, SocketServer};
 pub use tui_endpoint::spawn_socket_handler;

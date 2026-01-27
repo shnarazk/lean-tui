@@ -12,6 +12,28 @@ pub use steps_view::{StepsMode, StepsModeInput};
 
 use crate::tui::components::{Component, FilterToggle, KeyMouseEvent, SelectableItem};
 
+/// Backend data source for a display mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// Goals from Lean RPC (getInteractiveGoals).
+    LeanRpc,
+    /// Proof steps from Paperproof library.
+    Paperproof,
+    /// Proof steps from local tree-sitter analysis.
+    TreeSitter,
+}
+
+impl Backend {
+    /// Get the display name of this backend.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::LeanRpc => "Lean RPC",
+            Self::Paperproof => "Paperproof",
+            Self::TreeSitter => "tree-sitter",
+        }
+    }
+}
+
 /// Trait for display modes in the TUI.
 ///
 /// Each mode has an associated input type (the data model) and provides
@@ -28,6 +50,9 @@ pub trait Mode: Component<Input = Self::Model, Event = KeyMouseEvent> {
 
     /// Filter toggles supported by this mode.
     const SUPPORTED_FILTERS: &'static [FilterToggle];
+
+    /// Backend data sources used by this mode.
+    const BACKENDS: &'static [Backend];
 
     /// Get currently selected item (if any).
     fn current_selection(&self) -> Option<SelectableItem>;
@@ -98,5 +123,24 @@ impl DisplayMode {
             Self::StepsView => StepsMode::SUPPORTED_FILTERS,
             Self::DeductionTree => DeductionTreeMode::SUPPORTED_FILTERS,
         }
+    }
+
+    /// Get backend data sources used by this mode.
+    pub const fn backends(self) -> &'static [Backend] {
+        match self {
+            Self::GoalTree => GoalTreeMode::BACKENDS,
+            Self::BeforeAfter => BeforeAfterMode::BACKENDS,
+            Self::StepsView => StepsMode::BACKENDS,
+            Self::DeductionTree => DeductionTreeMode::BACKENDS,
+        }
+    }
+
+    /// Format backends as a display string (e.g., "Paperproof | tree-sitter").
+    pub fn backends_display(self) -> String {
+        self.backends()
+            .iter()
+            .map(|b| b.name())
+            .collect::<Vec<_>>()
+            .join(" | ")
     }
 }

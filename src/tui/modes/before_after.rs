@@ -12,7 +12,7 @@ use ratatui::{
     Frame,
 };
 
-use super::Mode;
+use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
     tui::components::{
@@ -52,15 +52,11 @@ impl BeforeAfterMode {
     pub const fn toggle_filter(&mut self, filter: FilterToggle) {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
-            FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
             FilterToggle::Inaccessible => {
                 self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
             }
             FilterToggle::LetValues => self.filters.hide_let_values = !self.filters.hide_let_values,
             FilterToggle::ReverseOrder => self.filters.reverse_order = !self.filters.reverse_order,
-            FilterToggle::Definition => {
-                self.filters.hide_definition = !self.filters.hide_definition;
-            }
         }
     }
 
@@ -157,10 +153,6 @@ impl Component for BeforeAfterMode {
                     self.toggle_filter(FilterToggle::Instances);
                     true
                 }
-                KeyCode::Char('t') => {
-                    self.toggle_filter(FilterToggle::Types);
-                    true
-                }
                 KeyCode::Char('a') => {
                     self.toggle_filter(FilterToggle::Inaccessible);
                     true
@@ -171,10 +163,6 @@ impl Component for BeforeAfterMode {
                 }
                 KeyCode::Char('r') => {
                     self.toggle_filter(FilterToggle::ReverseOrder);
-                    true
-                }
-                KeyCode::Char('d') => {
-                    self.toggle_filter(FilterToggle::Definition);
                     true
                 }
                 _ => false,
@@ -206,11 +194,10 @@ impl Component for BeforeAfterMode {
             area
         };
 
-        // Definition header
-        let content_area = if let Some(def) = self.definition.as_ref().filter(|_| !self.filters.hide_definition) {
+        // Definition header (always shown if available)
+        let content_area = if let Some(def) = self.definition.as_ref() {
             let [header_area, rest] =
-                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
-                    .areas(content_area);
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(content_area);
             let header = Line::from(vec![
                 Span::styled(
                     &def.kind,
@@ -279,7 +266,11 @@ fn diff_marker(is_inserted: bool, is_removed: bool) -> Span<'static> {
 }
 
 const fn selection_indicator(is_selected: bool) -> &'static str {
-    if is_selected { "▶ " } else { "  " }
+    if is_selected {
+        "▶ "
+    } else {
+        "  "
+    }
 }
 
 impl BeforeAfterMode {
@@ -292,7 +283,11 @@ impl BeforeAfterMode {
         goals: &[Goal],
         is_current: bool,
     ) {
-        let border_color = if is_current { Color::Cyan } else { Color::DarkGray };
+        let border_color = if is_current {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        };
         let title_style = if is_current {
             Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
         } else {
@@ -310,7 +305,10 @@ impl BeforeAfterMode {
 
         if goals.is_empty() {
             let msg = if is_current { "No goals" } else { "No data" };
-            frame.render_widget(Paragraph::new(msg).style(Style::new().fg(Color::DarkGray)), inner);
+            frame.render_widget(
+                Paragraph::new(msg).style(Style::new().fg(Color::DarkGray)),
+                inner,
+            );
             return;
         }
 
@@ -354,7 +352,8 @@ impl BeforeAfterMode {
                 continue;
             }
 
-            let is_selected = is_current && selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
+            let is_selected =
+                is_current && selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
             let names = hyp.names.join(", ");
 
             // Build diff state for fine-grained coloring
@@ -368,14 +367,22 @@ impl BeforeAfterMode {
             // Build line with spans
             let mut spans = vec![
                 diff_marker(hyp.is_inserted, hyp.is_removed),
-                Span::styled(selection_indicator(is_selected), Style::new().fg(Color::Cyan)),
+                Span::styled(
+                    selection_indicator(is_selected),
+                    Style::new().fg(Color::Cyan),
+                ),
                 Span::styled(format!("{names}: "), diff.style),
             ];
             spans.extend(hyp.type_.to_spans(diff.style));
 
             lines.push(Line::from(spans));
 
-            self.track_click_region(lines, inner, is_current, SelectableItem::Hypothesis { goal_idx, hyp_idx });
+            self.track_click_region(
+                lines,
+                inner,
+                is_current,
+                SelectableItem::Hypothesis { goal_idx, hyp_idx },
+            );
         }
     }
 
@@ -401,14 +408,22 @@ impl BeforeAfterMode {
         // Build line with spans
         let mut spans = vec![
             diff_marker(goal.is_inserted, goal.is_removed),
-            Span::styled(selection_indicator(is_selected), Style::new().fg(Color::Cyan)),
+            Span::styled(
+                selection_indicator(is_selected),
+                Style::new().fg(Color::Cyan),
+            ),
             Span::styled(goal.prefix.clone(), diff.style),
         ];
         spans.extend(goal.target.to_spans(diff.style));
 
         lines.push(Line::from(spans));
 
-        self.track_click_region(lines, inner, is_current, SelectableItem::GoalTarget { goal_idx });
+        self.track_click_region(
+            lines,
+            inner,
+            is_current,
+            SelectableItem::GoalTarget { goal_idx },
+        );
     }
 
     fn track_click_region(
@@ -437,20 +452,17 @@ impl Mode for BeforeAfterMode {
         ("p", "prev"),
         ("n", "next"),
         ("i", "inst"),
-        ("t", "type"),
         ("a", "access"),
         ("l", "let"),
         ("r", "rev"),
-        ("d", "def"),
     ];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
         FilterToggle::Instances,
-        FilterToggle::Types,
         FilterToggle::Inaccessible,
         FilterToggle::LetValues,
         FilterToggle::ReverseOrder,
-        FilterToggle::Definition,
     ];
+    const BACKENDS: &'static [Backend] = &[Backend::LeanRpc];
 
     fn current_selection(&self) -> Option<SelectableItem> {
         let items = self.selectable_items();

@@ -55,7 +55,9 @@ impl Component for HypSection {
         let mut seen: HashSet<String> = HashSet::new();
 
         let hyps = input.goals.iter().enumerate().flat_map(|(goal_idx, goal)| {
-            goal.hyps.iter().enumerate()
+            goal.hyps
+                .iter()
+                .enumerate()
                 .filter(|(_, hyp)| input.filters.should_show(hyp))
                 .map(move |(hyp_idx, hyp)| (goal_idx, hyp_idx, hyp.clone()))
         });
@@ -82,14 +84,23 @@ impl Component for HypSection {
 
         if self.layer.len() == 0 {
             frame.render_widget(
-                Paragraph::new("(no hypotheses)")
-                    .style(Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+                Paragraph::new("(no hypotheses)").style(
+                    Style::new()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                ),
                 inner,
             );
             return;
         }
 
-        let lines = self.layer.render(self.selection, inner.y, inner, &mut self.click_regions, &self.depends_on);
+        let lines = self.layer.render(
+            self.selection,
+            inner.y,
+            inner,
+            &mut self.click_regions,
+            &self.depends_on,
+        );
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }

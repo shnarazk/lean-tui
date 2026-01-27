@@ -16,8 +16,7 @@ use tower_service::Service;
 
 use super::{
     paperproof::{
-        PaperproofInputParams, PaperproofMode, PaperproofOutputParams,
-        PAPERPROOF_GET_SNAPSHOT_DATA,
+        PaperproofInputParams, PaperproofMode, PaperproofOutputParams, PAPERPROOF_GET_SNAPSHOT_DATA,
     },
     Goal, GotoLocation, InteractiveGoalsResponse, InteractiveTermGoalResponse, RpcConnectResponse,
     GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, RPC_CALL, RPC_CONNECT,
@@ -50,6 +49,7 @@ struct GetInteractiveGoalsParams {
 #[serde(rename_all = "camelCase")]
 pub enum GoToKind {
     Definition,
+    Type,
 }
 
 #[derive(Serialize, Clone)]
@@ -255,18 +255,34 @@ impl RpcClient {
         position: Position,
         goal: &mut Goal,
     ) {
-        // Resolve target location
+        // Resolve target locations (both definition and type)
         if let Some(info) = goal.target.first_info() {
-            goal.goto_location = self
-                .resolve_single_location(text_document, position, info)
+            goal.goto_locations.definition = self
+                .resolve_single_location(
+                    text_document,
+                    position,
+                    GoToKind::Definition,
+                    info.clone(),
+                )
+                .await;
+            goal.goto_locations.type_def = self
+                .resolve_single_location(text_document, position, GoToKind::Type, info)
                 .await;
         }
 
-        // Resolve hypothesis locations
+        // Resolve hypothesis locations (both definition and type)
         for hyp in &mut goal.hyps {
             if let Some(info) = hyp.first_info() {
-                hyp.goto_location = self
-                    .resolve_single_location(text_document, position, info)
+                hyp.goto_locations.definition = self
+                    .resolve_single_location(
+                        text_document,
+                        position,
+                        GoToKind::Definition,
+                        info.clone(),
+                    )
+                    .await;
+                hyp.goto_locations.type_def = self
+                    .resolve_single_location(text_document, position, GoToKind::Type, info)
                     .await;
             }
         }
@@ -276,10 +292,11 @@ impl RpcClient {
         &self,
         text_document: &TextDocumentIdentifier,
         position: Position,
+        kind: GoToKind,
         info: serde_json::Value,
     ) -> Option<GotoLocation> {
         let loc = self
-            .get_goto_location(text_document, position, GoToKind::Definition, info)
+            .get_goto_location(text_document, position, kind, info)
             .await
             .ok()??;
         Some(GotoLocation {
@@ -346,8 +363,8 @@ impl RpcClient {
 
     /// Get proof steps from Paperproof if available.
     ///
-    /// Returns `None` if Paperproof is not available in the user's Lean project,
-    /// or `Some(output)` with the proof step data.
+    /// Returns `None` if Paperproof is not available in the user's Lean
+    /// project, or `Some(output)` with the proof step data.
     pub async fn get_paperproof_snapshot(
         &self,
         text_document: &TextDocumentIdentifier,
@@ -355,7 +372,10 @@ impl RpcClient {
         mode: PaperproofMode,
     ) -> Result<Option<PaperproofOutputParams>, LspError> {
         let uri = &text_document.uri;
-        let params = PaperproofInputParams { pos: position, mode };
+        let params = PaperproofInputParams {
+            pos: position,
+            mode,
+        };
 
         let result = self
             .rpc_call_with_retry(
