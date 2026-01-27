@@ -22,7 +22,6 @@ mod tree_hyp_bar;
 mod tree_view;
 
 use crossterm::event::{KeyEvent, MouseEvent};
-pub use diff_text::{diff_style, DiffState, TaggedTextExt};
 pub use goal_before::render_goal_before;
 pub use goal_section::{GoalSection, GoalSectionState};
 pub use goals_column::{GoalsColumn, GoalsColumnState};
@@ -31,7 +30,6 @@ pub use hyp_section::{HypSection, HypSectionState};
 pub use layout_metrics::LayoutMetrics;
 pub use proof_steps_sidebar::{ProofStepsSidebar, ProofStepsSidebarState};
 use ratatui::{layout::Rect, Frame};
-// Re-exports for modes
 pub use render_helpers::{render_error, render_no_goals};
 pub use selection::SelectionState;
 pub use status_bar::{StatusBar, StatusBarInput};
@@ -113,7 +111,7 @@ pub fn hypothesis_indices(len: usize, reverse: bool) -> Box<dyn Iterator<Item = 
 
 pub trait Component {
     type Input;
-    /// Use `()` for non-interactive components.
+    /// Use `()` for noninteractive components.
     type Event;
 
     fn update(&mut self, input: Self::Input);

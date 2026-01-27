@@ -3,8 +3,9 @@
 #![allow(clippy::missing_errors_doc)]
 
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
+    thread::sleep,
     time::Duration,
 };
 
@@ -44,11 +45,11 @@ impl LspTestHarness {
         }
     }
 
-    pub fn send(&mut self, content: &str) -> std::io::Result<()> {
+    pub fn send(&mut self, content: &str) -> Result<()> {
         let stdin = self
             .stdin
             .as_mut()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "stdin closed"))?;
+            .ok_or_else(|| Error::new(ErrorKind::BrokenPipe, "stdin closed"))?;
         let msg = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
         stdin.write_all(msg.as_bytes())?;
         stdin.flush()
@@ -77,7 +78,7 @@ impl LspTestHarness {
 
         // Read body
         let mut body = vec![0u8; len];
-        std::io::Read::read_exact(stdout, &mut body).ok()?;
+        Read::read_exact(stdout, &mut body).ok()?;
 
         String::from_utf8(body).ok()
     }
@@ -85,31 +86,31 @@ impl LspTestHarness {
     pub fn initialize(&mut self) -> Option<String> {
         let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file:///home/wvhulle/Code/lean-tui","processId":1234}}"#;
         self.send(init).ok()?;
-        std::thread::sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(3));
         self.read_response()
     }
 
     pub fn initialized(&mut self) {
         let msg = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
         let _ = self.send(msg);
-        std::thread::sleep(Duration::from_millis(500));
+        sleep(Duration::from_millis(500));
     }
 
     pub fn shutdown(&mut self) {
         let shutdown = r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}"#;
         let _ = self.send(shutdown);
-        std::thread::sleep(Duration::from_millis(200));
+        sleep(Duration::from_millis(200));
 
         let exit = r#"{"jsonrpc":"2.0","method":"exit","params":null}"#;
         let _ = self.send(exit);
     }
 
-    /// Close stdin and collect stderr output
+    /// Close standard input and collect standard error output
     pub fn collect_stderr(&mut self) -> String {
-        // Close stdin to signal EOF
+        // Close standard input to signal EOF
         self.stdin.take();
 
-        // Read all stderr lines
+        // Read all standard error lines
         let Some(stderr) = self.stderr.take() else {
             return String::new();
         };

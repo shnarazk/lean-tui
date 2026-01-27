@@ -190,7 +190,6 @@ impl App {
                 proof_steps,
                 current_step_index,
             } => {
-                let goals_changed = self.temporal_goals.current.goals != goals;
                 let line_changed = self.temporal_goals.current.position.line != position.line;
 
                 // Keep previous definition if new one is None and we're on the same line
@@ -200,17 +199,8 @@ impl App {
                     definition
                 };
 
-                if !goals_changed && !line_changed {
-                    self.temporal_goals.current.position = position;
-                    self.definition = new_definition;
-                    self.case_splits = case_splits;
-                    self.paperproof_steps = paperproof_steps;
-                    self.proof_steps = proof_steps;
-                    self.current_step_index = current_step_index;
-                    self.connected = true;
-                    return;
-                }
-
+                // Always update goals to ensure goto_locations are updated
+                // (they may be resolved asynchronously after initial goal fetch)
                 self.temporal_goals.current = GoalState {
                     goals,
                     position,

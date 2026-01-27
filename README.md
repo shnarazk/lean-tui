@@ -39,8 +39,8 @@ Start typing a proof in your editor and you will see the proof state appear in t
 Key bindings:
 
 - Use `j`, `k` to go up or down in hypotheses
-- Click or press enter on hypotheses to jump to type definition in the editor
-- Click on goals to go the goal in the editor
+- Use `d` to jump to term definition
+- Use `t`to jump to type definition
 - Help menu `?`
 - Close with `q`
 
@@ -55,7 +55,7 @@ Switch proof display styles: `[`, `]`
 
 For screenshots, see [codeberg](https://codeberg.org/wvhulle/lean-tui) or below:
 
-| Vanilla                      | PaperProof                            |
+| Tree-Sitter                  | PaperProof                            |
 | ---------------------------- | ------------------------------------- |
 | ![](./imgs/before_after.png) | ![](./imgs/deduction_style.png)       |
 | ![](./imgs/goal_tree.png)    | ![](./imgs/step_hypotheses_goals.png) |

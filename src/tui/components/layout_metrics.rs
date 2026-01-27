@@ -1,6 +1,6 @@
 //! Shared layout constants for consistent sizing across components.
 
-/// Layout constants for TUI component sizing.
+/// Lay out constants for TUI component sizing.
 pub struct LayoutMetrics;
 
 impl LayoutMetrics {
@@ -12,9 +12,6 @@ impl LayoutMetrics {
 
     /// Border overhead for hypothesis table (top border only).
     pub const HYP_BORDER_HEIGHT: u16 = 1;
-
-    /// Minimum width for sidebar components.
-    pub const SIDEBAR_MIN_WIDTH: u16 = 20;
 
     /// Calculate total goal box height for a given number of visible
     /// hypotheses.
