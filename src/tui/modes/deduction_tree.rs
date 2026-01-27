@@ -1,4 +1,4 @@
-//! Top-level goal display with event handling.
+//! Deduction Tree mode - Paperproof tree visualization.
 
 use std::iter;
 
@@ -6,52 +6,49 @@ use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     prelude::Stylize,
-    style::Color,
+    style::{Color, Style},
     widgets::Paragraph,
     Frame,
 };
 
-use super::{
-    goal_tree::GoalTree, hypothesis_indices, ClickRegion, Component, HypothesisFilters,
-    KeyMouseEvent, SelectableItem,
-};
 use crate::{
-    lean_rpc::Goal,
-    tui_ipc::{CaseSplitInfo, DefinitionInfo},
+    lean_rpc::{Goal, PaperproofStep},
+    tui::components::{
+        hypothesis_indices, render_definition_header, render_tree_view, ClickRegion, Component,
+        HypothesisFilters, KeyMouseEvent, SelectableItem,
+    },
+    tui_ipc::DefinitionInfo,
 };
 
-pub struct GoalViewInput {
+/// Input for updating the Deduction Tree mode.
+pub struct DeductionTreeModeInput {
     pub goals: Vec<Goal>,
     pub definition: Option<DefinitionInfo>,
-    pub case_splits: Vec<CaseSplitInfo>,
     pub error: Option<String>,
+    pub current_step_index: usize,
+    pub paperproof_steps: Option<Vec<PaperproofStep>>,
 }
 
+/// Deduction Tree display mode - Paperproof tree visualization.
 #[derive(Default)]
-pub struct GoalView {
+pub struct DeductionTreeMode {
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
-    case_splits: Vec<CaseSplitInfo>,
     error: Option<String>,
+    current_step_index: usize,
+    paperproof_steps: Option<Vec<PaperproofStep>>,
     filters: HypothesisFilters,
     selected_index: Option<usize>,
     click_regions: Vec<ClickRegion>,
 }
 
-impl GoalView {
+impl DeductionTreeMode {
     pub const fn filters(&self) -> HypothesisFilters {
         self.filters
     }
 
     pub const fn toggle_filter(&mut self, filter: &FilterToggle) {
         match filter {
-            FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
-            FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
-            FilterToggle::Inaccessible => {
-                self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
-            }
-            FilterToggle::LetValues => self.filters.hide_let_values = !self.filters.hide_let_values,
-            FilterToggle::ReverseOrder => self.filters.reverse_order = !self.filters.reverse_order,
             FilterToggle::Definition => {
                 self.filters.hide_definition = !self.filters.hide_definition;
             }
@@ -126,24 +123,20 @@ impl GoalView {
 }
 
 pub enum FilterToggle {
-    Instances,
-    Types,
-    Inaccessible,
-    LetValues,
-    ReverseOrder,
     Definition,
 }
 
-impl Component for GoalView {
-    type Input = GoalViewInput;
+impl Component for DeductionTreeMode {
+    type Input = DeductionTreeModeInput;
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
         let goals_changed = self.goals != input.goals;
         self.goals = input.goals;
         self.definition = input.definition;
-        self.case_splits = input.case_splits;
         self.error = input.error;
+        self.current_step_index = input.current_step_index;
+        self.paperproof_steps = input.paperproof_steps;
         if goals_changed {
             self.reset_selection();
         }
@@ -158,26 +151,6 @@ impl Component for GoalView {
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.select_previous();
-                    true
-                }
-                KeyCode::Char('i') => {
-                    self.toggle_filter(&FilterToggle::Instances);
-                    true
-                }
-                KeyCode::Char('t') => {
-                    self.toggle_filter(&FilterToggle::Types);
-                    true
-                }
-                KeyCode::Char('a') => {
-                    self.toggle_filter(&FilterToggle::Inaccessible);
-                    true
-                }
-                KeyCode::Char('l') => {
-                    self.toggle_filter(&FilterToggle::LetValues);
-                    true
-                }
-                KeyCode::Char('r') => {
-                    self.toggle_filter(&FilterToggle::ReverseOrder);
                     true
                 }
                 KeyCode::Char('d') => {
@@ -213,28 +186,34 @@ impl Component for GoalView {
             area
         };
 
-        // Render goal tree
-        let mut tree = GoalTree::new(
-            &self.goals,
-            self.definition.as_ref(),
-            &self.case_splits,
-            self.current_selection(),
-            self.filters,
-        );
-        tree.render(frame, content_area);
+        if self.goals.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No goals").style(Style::new().fg(Color::DarkGray)),
+                content_area,
+            );
+            return;
+        }
 
-        // Collect click regions, adjusting for error offset
-        let y_offset = if self.error.is_some() { 2 } else { 0 };
-        for region in tree.click_regions() {
-            self.click_regions.push(ClickRegion {
-                area: Rect::new(
-                    region.area.x,
-                    region.area.y + y_offset,
-                    region.area.width,
-                    region.area.height,
-                ),
-                item: region.item,
-            });
+        // Definition header
+        let content_area = if let Some(def) = self.definition.as_ref().filter(|_| !self.filters.hide_definition) {
+            let [header_area, rest] =
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
+                    .areas(content_area);
+            render_definition_header(frame, header_area, def);
+            rest
+        } else {
+            content_area
+        };
+
+        // Render tree view
+        if let Some(ref steps) = self.paperproof_steps {
+            render_tree_view(frame, content_area, steps, self.current_step_index);
+        } else {
+            frame.render_widget(
+                Paragraph::new("Tree view requires Paperproof data")
+                    .style(Style::new().fg(Color::DarkGray)),
+                content_area,
+            );
         }
     }
 }

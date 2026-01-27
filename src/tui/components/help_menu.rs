@@ -12,17 +12,21 @@ use ratatui::{
 use super::{Component, KeyPress};
 
 const KEYBINDINGS: &[(&str, &str)] = &[
-    ("j/k", "navigate"),
+    // Display modes
+    ("[/]", "cycle display mode"),
+    ("b", "toggle goal before"),
+    // Navigation
+    ("j/k", "navigate up/down"),
     ("Enter", "go to definition"),
-    ("v", "toggle paperproof"),
+    ("p/n", "prev/next column"),
+    // Filters
     ("d", "toggle header"),
     ("i", "toggle instances"),
     ("t", "toggle types"),
     ("a", "toggle inaccessible"),
     ("l", "toggle let values"),
-    ("r", "toggle reverse order"),
-    ("p", "previous column"),
-    ("n", "next column"),
+    ("r", "reverse hyp order"),
+    // Other
     ("?", "close help"),
     ("q", "quit"),
 ];

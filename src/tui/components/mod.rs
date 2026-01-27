@@ -1,21 +1,37 @@
 //! Component-based UI architecture.
 
+mod definition_header;
 mod diff_text;
+mod goal_before;
+mod goal_section;
 mod goal_state;
-mod goal_tree;
-mod goal_view;
+pub mod goal_tree;
 mod header;
 mod help_menu;
-mod paperproof;
+mod hyp_layer;
+mod hyp_section;
+mod proof_steps_sidebar;
 mod status_bar;
+mod tactic_row;
+mod tree_builder;
+mod tree_colors;
+mod tree_hyp_bar;
+mod tree_view;
 
 use crossterm::event::{KeyEvent, MouseEvent};
-pub use goal_view::{GoalView, GoalViewInput};
 pub use header::Header;
 pub use help_menu::HelpMenu;
-pub use paperproof::{PaperproofView, PaperproofViewInput};
 use ratatui::{layout::Rect, Frame};
 pub use status_bar::StatusBar;
+
+// Re-exports for modes
+pub use definition_header::render_definition_header;
+pub use goal_before::render_goal_before;
+pub use goal_section::{GoalSection, GoalSectionInput};
+pub use hyp_section::{HypSection, HypSectionInput};
+pub use proof_steps_sidebar::{render_proof_steps_sidebar, ProofStepsSidebarInput};
+pub use tactic_row::render_divider;
+pub use tree_view::render_tree_view;
 
 #[derive(Clone)]
 pub struct KeyPress(pub KeyEvent);

@@ -41,15 +41,14 @@ Key bindings:
 - Use `j`, `k` to go up or down in hypotheses
 - Click or press enter on hypotheses to jump to type definition in the editor
 - Click on goals to go the goal in the editor
-- (Being tested) Filter displayed assumptions
 - Help menu `?`
 - Close with `q`
+- Switch proof display styles: `[`, `]` (installation PaperProof is be required for some)
 
-When multiple goals are visible, they are displayed below each-other as rows in a grid
-
-Another cool feature is that you can see a diff of proof state in the columns. You can also explicitly show previous and next tool state with `p` and `n` (also works in term-mode). See this screenshot:
-
-![(Screenshot of the prime number theorem proof)](./screenshot.png)
+| Vanilla                      | PaperProof                            |
+| ---------------------------- | ------------------------------------- |
+| ![](./imgs/before_after.png) | ![](./imgs/deduction_style.png)       |
+| ![](./imgs/goal_tree.png)    | ![](./imgs/step_hypotheses_goals.png) |
 
 ## Installation
 
@@ -64,6 +63,8 @@ cargo install lean-tui
 ```
 
 If `~/.cargo/bin` is in your path, you can now run this program with `lean-tui`.
+
+Install [PaperProof](https://github.com/Paper-Proof/paperproof/tree/main) if you want to use deduction-style display mode.
 
 ## Configuration
 

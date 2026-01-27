@@ -1,4 +1,4 @@
-//! Main Paperproof view component.
+//! Steps mode - sidebar with proof steps plus hypotheses and goals sections.
 
 use std::collections::HashSet;
 use std::iter;
@@ -12,26 +12,19 @@ use ratatui::{
     Frame,
 };
 
-use super::{
-    definition_header::render_definition_header,
-    goal_before::render_goal_before,
-    goal_section::{GoalSection, GoalSectionInput},
-    hyp_section::{HypSection, HypSectionInput},
-    proof_steps_sidebar::{render_proof_steps_sidebar, ProofStepsSidebarInput},
-    tactic_row::render_divider,
-    tree_view::render_tree_view,
-};
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
     tui::components::{
-        hypothesis_indices, ClickRegion, Component, HypothesisFilters, KeyMouseEvent,
+        hypothesis_indices, render_definition_header, render_divider, render_goal_before,
+        render_proof_steps_sidebar, ClickRegion, Component, GoalSection, GoalSectionInput,
+        HypSection, HypSectionInput, HypothesisFilters, KeyMouseEvent, ProofStepsSidebarInput,
         SelectableItem,
     },
     tui_ipc::{DefinitionInfo, ProofStep},
 };
 
-/// Input for updating the Paperproof view.
-pub struct PaperproofViewInput {
+/// Input for updating the Steps mode.
+pub struct StepsModeInput {
     pub goals: Vec<Goal>,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
@@ -40,9 +33,9 @@ pub struct PaperproofViewInput {
     pub paperproof_steps: Option<Vec<PaperproofStep>>,
 }
 
-/// The main Paperproof view component.
+/// Steps display mode - sidebar + hypotheses + goals.
 #[derive(Default)]
-pub struct PaperproofView {
+pub struct StepsMode {
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
@@ -55,10 +48,13 @@ pub struct PaperproofView {
     selected_index: Option<usize>,
     click_regions: Vec<ClickRegion>,
     show_goal_before: bool,
-    tree_mode: bool,
 }
 
-impl PaperproofView {
+impl StepsMode {
+    pub const fn filters(&self) -> HypothesisFilters {
+        self.filters
+    }
+
     pub fn current_selection(&self) -> Option<SelectableItem> {
         let items = self.selectable_items();
         self.selected_index.and_then(|i| items.get(i).copied())
@@ -97,8 +93,10 @@ impl PaperproofView {
 
     fn handle_click(&mut self, x: u16, y: u16) -> bool {
         let clicked = self.click_regions.iter().find(|r| {
-            r.area.x <= x && x < r.area.x + r.area.width &&
-            r.area.y <= y && y < r.area.y + r.area.height
+            r.area.x <= x
+                && x < r.area.x + r.area.width
+                && r.area.y <= y
+                && y < r.area.y + r.area.height
         });
         if let Some(region) = clicked {
             let items = self.selectable_items();
@@ -114,21 +112,30 @@ impl PaperproofView {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
             FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
-            FilterToggle::Inaccessible => self.filters.hide_inaccessible = !self.filters.hide_inaccessible,
+            FilterToggle::Inaccessible => {
+                self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
+            }
             FilterToggle::LetValues => self.filters.hide_let_values = !self.filters.hide_let_values,
             FilterToggle::ReverseOrder => self.filters.reverse_order = !self.filters.reverse_order,
-            FilterToggle::Definition => self.filters.hide_definition = !self.filters.hide_definition,
+            FilterToggle::Definition => {
+                self.filters.hide_definition = !self.filters.hide_definition;
+            }
         }
     }
 }
 
 #[derive(Clone, Copy)]
 enum FilterToggle {
-    Instances, Types, Inaccessible, LetValues, ReverseOrder, Definition,
+    Instances,
+    Types,
+    Inaccessible,
+    LetValues,
+    ReverseOrder,
+    Definition,
 }
 
-impl Component for PaperproofView {
-    type Input = PaperproofViewInput;
+impl Component for StepsMode {
+    type Input = StepsModeInput;
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
@@ -148,30 +155,58 @@ impl Component for PaperproofView {
     fn handle_event(&mut self, event: Self::Event) -> bool {
         match event {
             KeyMouseEvent::Key(key) => match key.code {
-                KeyCode::Char('j') | KeyCode::Down => { self.select_next(); true }
-                KeyCode::Char('k') | KeyCode::Up => { self.select_previous(); true }
-                KeyCode::Char('i') => { self.toggle_filter(FilterToggle::Instances); true }
-                KeyCode::Char('t') => { self.toggle_filter(FilterToggle::Types); true }
-                KeyCode::Char('a') => { self.toggle_filter(FilterToggle::Inaccessible); true }
-                KeyCode::Char('l') => { self.toggle_filter(FilterToggle::LetValues); true }
-                KeyCode::Char('r') => { self.toggle_filter(FilterToggle::ReverseOrder); true }
-                KeyCode::Char('d') => { self.toggle_filter(FilterToggle::Definition); true }
-                KeyCode::Char('b') => { self.show_goal_before = !self.show_goal_before; true }
-                KeyCode::Char('g') => { self.tree_mode = !self.tree_mode; true }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.select_next();
+                    true
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.select_previous();
+                    true
+                }
+                KeyCode::Char('i') => {
+                    self.toggle_filter(FilterToggle::Instances);
+                    true
+                }
+                KeyCode::Char('t') => {
+                    self.toggle_filter(FilterToggle::Types);
+                    true
+                }
+                KeyCode::Char('a') => {
+                    self.toggle_filter(FilterToggle::Inaccessible);
+                    true
+                }
+                KeyCode::Char('l') => {
+                    self.toggle_filter(FilterToggle::LetValues);
+                    true
+                }
+                KeyCode::Char('r') => {
+                    self.toggle_filter(FilterToggle::ReverseOrder);
+                    true
+                }
+                KeyCode::Char('d') => {
+                    self.toggle_filter(FilterToggle::Definition);
+                    true
+                }
+                KeyCode::Char('b') => {
+                    self.show_goal_before = !self.show_goal_before;
+                    true
+                }
                 _ => false,
             },
             KeyMouseEvent::Mouse(mouse) => {
-                mouse.kind == MouseEventKind::Down(MouseButton::Left) && self.handle_click(mouse.column, mouse.row)
+                mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                    && self.handle_click(mouse.column, mouse.row)
             }
         }
     }
 
-    #[allow(clippy::option_if_let_else)]
+    #[allow(clippy::option_if_let_else, clippy::too_many_lines)]
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.click_regions.clear();
 
         let content = if let Some(ref error) = self.error {
-            let [err, rest] = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(area);
+            let [err, rest] =
+                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(area);
             frame.render_widget(Paragraph::new(format!("Error: {error}")).fg(Color::Red), err);
             rest
         } else {
@@ -187,48 +222,39 @@ impl Component for PaperproofView {
         }
 
         // Definition header
-        let content = if let Some(def) = self.definition.as_ref().filter(|_| !self.filters.hide_definition) {
-            let [hdr, rest] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(content);
+        let content = if let Some(def) = self
+            .definition
+            .as_ref()
+            .filter(|_| !self.filters.hide_definition)
+        {
+            let [hdr, rest] =
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(content);
             render_definition_header(frame, hdr, def);
             rest
         } else {
             content
         };
 
-        // Tree mode: use new box-based layout
-        if self.tree_mode {
-            if let Some(ref steps) = self.paperproof_steps {
-                render_tree_view(frame, content, steps, self.current_step_index);
-            } else {
-                frame.render_widget(
-                    Paragraph::new("Tree view requires Paperproof data").style(Style::new().fg(Color::DarkGray)),
-                    content,
-                );
-            }
-            return;
-        }
-
-        // Classic mode: sidebar + hypotheses + goals
-        self.render_classic_view(frame, content);
-    }
-}
-
-impl PaperproofView {
-    fn render_classic_view(&mut self, frame: &mut Frame, content: Rect) {
         // Split: proof steps sidebar | main content
         let (main, steps_area) = if self.proof_steps.is_empty() {
             (content, None)
         } else {
-            let [left, right] = Layout::horizontal([Constraint::Percentage(35), Constraint::Fill(1)]).areas(content);
+            let [left, right] =
+                Layout::horizontal([Constraint::Percentage(35), Constraint::Fill(1)])
+                    .areas(content);
             (right, Some(left))
         };
 
         if let Some(area) = steps_area {
-            render_proof_steps_sidebar(frame, area, &ProofStepsSidebarInput {
-                proof_steps: &self.proof_steps,
-                paperproof_steps: self.paperproof_steps.as_deref(),
-                current_step_index: self.current_step_index,
-            });
+            render_proof_steps_sidebar(
+                frame,
+                area,
+                &ProofStepsSidebarInput {
+                    proof_steps: &self.proof_steps,
+                    paperproof_steps: self.paperproof_steps.as_deref(),
+                    current_step_index: self.current_step_index,
+                },
+            );
         }
 
         // Get goal_before from current paperproof step if showing
@@ -244,24 +270,33 @@ impl PaperproofView {
         // Split main: hypotheses | divider | goal_before (optional) | goals
         let (hyps, div, goal_before_area, goals) = if goal_before.is_some() {
             let [hyps, div, goal_before_area, goals] = Layout::vertical([
-                Constraint::Percentage(45), Constraint::Length(1), Constraint::Length(3), Constraint::Fill(1),
-            ]).areas(main);
+                Constraint::Percentage(45),
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Fill(1),
+            ])
+            .areas(main);
             (hyps, div, Some(goal_before_area), goals)
         } else {
             let [hyps, div, goals] = Layout::vertical([
-                Constraint::Percentage(55), Constraint::Length(1), Constraint::Fill(1),
-            ]).areas(main);
+                Constraint::Percentage(55),
+                Constraint::Length(1),
+                Constraint::Fill(1),
+            ])
+            .areas(main);
             (hyps, div, None, goals)
         };
 
         // Collect depends_on from current proof step
-        let depends_on: HashSet<String> = self.proof_steps
+        let depends_on: HashSet<String> = self
+            .proof_steps
             .get(self.current_step_index)
             .map(|step| step.depends_on.iter().cloned().collect())
             .unwrap_or_default();
 
         // Collect spawned goal usernames from current paperproof step
-        let spawned_goal_ids: HashSet<String> = self.paperproof_steps
+        let spawned_goal_ids: HashSet<String> = self
+            .paperproof_steps
             .as_ref()
             .and_then(|steps| steps.get(self.current_step_index))
             .map(|step| step.spawned_goals.iter().map(|g| g.username.clone()).collect())
@@ -275,7 +310,8 @@ impl PaperproofView {
             selection: self.current_selection(),
         });
         self.hyp_section.render(frame, hyps);
-        self.click_regions.extend(self.hyp_section.click_regions().iter().cloned());
+        self.click_regions
+            .extend(self.hyp_section.click_regions().iter().cloned());
 
         render_divider(frame, div, None);
 
@@ -291,6 +327,7 @@ impl PaperproofView {
             spawned_goal_ids,
         });
         self.goal_section.render(frame, goals);
-        self.click_regions.extend(self.goal_section.click_regions().iter().cloned());
+        self.click_regions
+            .extend(self.goal_section.click_regions().iter().cloned());
     }
 }

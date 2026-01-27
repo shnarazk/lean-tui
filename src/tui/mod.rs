@@ -2,20 +2,22 @@
 
 pub mod app;
 mod components;
+mod modes;
 
 use std::{io::stdout, time::Duration};
 
-use app::{App, ViewMode};
-use components::{
-    Component, GoalView, GoalViewInput, Header, HelpMenu, KeyMouseEvent, KeyPress,
-    PaperproofView, PaperproofViewInput, StatusBar,
-};
+use app::App;
+use components::{Component, Header, HelpMenu, KeyMouseEvent, KeyPress, StatusBar};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
 use futures::StreamExt;
+use modes::{
+    BeforeAfterMode, BeforeAfterModeInput, DeductionTreeMode, DeductionTreeModeInput, DisplayMode,
+    GoalTreeMode, GoalTreeModeInput, StepsMode, StepsModeInput,
+};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     prelude::*,
@@ -28,6 +30,7 @@ use crate::{
     tui_ipc::{socket_path, spawn_socket_handler},
 };
 
+#[allow(clippy::too_many_lines)]
 pub async fn run() -> Result<()> {
     enable_raw_mode()?;
     stdout()
@@ -40,8 +43,10 @@ pub async fn run() -> Result<()> {
 
     // Create components
     let mut header = Header::default();
-    let mut goal_view = GoalView::default();
-    let mut paperproof_view = PaperproofView::default();
+    let mut goal_tree_mode = GoalTreeMode::default();
+    let mut before_after_mode = BeforeAfterMode::default();
+    let mut steps_mode = StepsMode::default();
+    let mut deduction_tree_mode = DeductionTreeMode::default();
     let mut status_bar = StatusBar::default();
     let mut help_menu = HelpMenu::default();
 
@@ -49,13 +54,22 @@ pub async fn run() -> Result<()> {
 
     while !app.should_exit {
         header.update(app.cursor.clone());
-        goal_view.update(GoalViewInput {
+
+        // Update all modes with current state
+        goal_tree_mode.update(GoalTreeModeInput {
             goals: app.goals().to_vec(),
             definition: app.definition.clone(),
             case_splits: app.case_splits.clone(),
             error: app.error.clone(),
         });
-        paperproof_view.update(PaperproofViewInput {
+        before_after_mode.update(BeforeAfterModeInput {
+            previous_goals: app.temporal_goals.previous.as_ref().map(|g| g.goals.clone()),
+            current_goals: app.goals().to_vec(),
+            next_goals: app.temporal_goals.next.as_ref().map(|g| g.goals.clone()),
+            definition: app.definition.clone(),
+            error: app.error.clone(),
+        });
+        steps_mode.update(StepsModeInput {
             goals: app.goals().to_vec(),
             definition: app.definition.clone(),
             error: app.error.clone(),
@@ -63,15 +77,32 @@ pub async fn run() -> Result<()> {
             current_step_index: app.current_step_index,
             paperproof_steps: app.paperproof_steps.clone(),
         });
-        status_bar.update(goal_view.filters());
+        deduction_tree_mode.update(DeductionTreeModeInput {
+            goals: app.goals().to_vec(),
+            definition: app.definition.clone(),
+            error: app.error.clone(),
+            current_step_index: app.current_step_index,
+            paperproof_steps: app.paperproof_steps.clone(),
+        });
+
+        // Use filters from the active mode for status bar
+        let filters = match app.display_mode {
+            DisplayMode::GoalTree => goal_tree_mode.filters(),
+            DisplayMode::BeforeAfter => before_after_mode.filters(),
+            DisplayMode::StepsView => steps_mode.filters(),
+            DisplayMode::DeductionTree => deduction_tree_mode.filters(),
+        };
+        status_bar.update(filters);
 
         terminal.draw(|frame| {
             render_frame(
                 frame,
                 &app,
                 &mut header,
-                &mut goal_view,
-                &mut paperproof_view,
+                &mut goal_tree_mode,
+                &mut before_after_mode,
+                &mut steps_mode,
+                &mut deduction_tree_mode,
                 &mut status_bar,
                 &mut help_menu,
             );
@@ -87,24 +118,44 @@ pub async fn run() -> Result<()> {
                         if help_menu.handle_event(KeyPress(*key)) {
                             continue;
                         }
-                        if !handle_global_event(&mut app, &mut help_menu, &goal_view, &paperproof_view, &event) {
-                            match app.view_mode {
-                                ViewMode::Standard => {
-                                    goal_view.handle_event(KeyMouseEvent::Key(*key));
+                        if !handle_global_event(
+                            &mut app,
+                            &mut help_menu,
+                            &goal_tree_mode,
+                            &before_after_mode,
+                            &steps_mode,
+                            &deduction_tree_mode,
+                            &event,
+                        ) {
+                            match app.display_mode {
+                                DisplayMode::GoalTree => {
+                                    goal_tree_mode.handle_event(KeyMouseEvent::Key(*key));
                                 }
-                                ViewMode::Paperproof => {
-                                    paperproof_view.handle_event(KeyMouseEvent::Key(*key));
+                                DisplayMode::BeforeAfter => {
+                                    before_after_mode.handle_event(KeyMouseEvent::Key(*key));
+                                }
+                                DisplayMode::StepsView => {
+                                    steps_mode.handle_event(KeyMouseEvent::Key(*key));
+                                }
+                                DisplayMode::DeductionTree => {
+                                    deduction_tree_mode.handle_event(KeyMouseEvent::Key(*key));
                                 }
                             }
                         }
                     }
                     Event::Mouse(mouse) => {
-                        match app.view_mode {
-                            ViewMode::Standard => {
-                                goal_view.handle_event(KeyMouseEvent::Mouse(*mouse));
+                        match app.display_mode {
+                            DisplayMode::GoalTree => {
+                                goal_tree_mode.handle_event(KeyMouseEvent::Mouse(*mouse));
                             }
-                            ViewMode::Paperproof => {
-                                paperproof_view.handle_event(KeyMouseEvent::Mouse(*mouse));
+                            DisplayMode::BeforeAfter => {
+                                before_after_mode.handle_event(KeyMouseEvent::Mouse(*mouse));
+                            }
+                            DisplayMode::StepsView => {
+                                steps_mode.handle_event(KeyMouseEvent::Mouse(*mouse));
+                            }
+                            DisplayMode::DeductionTree => {
+                                deduction_tree_mode.handle_event(KeyMouseEvent::Mouse(*mouse));
                             }
                         }
                     }
@@ -130,8 +181,10 @@ pub async fn run() -> Result<()> {
 fn handle_global_event(
     app: &mut App,
     help_menu: &mut HelpMenu,
-    goal_view: &GoalView,
-    paperproof_view: &PaperproofView,
+    goal_tree_mode: &GoalTreeMode,
+    before_after_mode: &BeforeAfterMode,
+    steps_mode: &StepsMode,
+    deduction_tree_mode: &DeductionTreeMode,
     event: &Event,
 ) -> bool {
     let Event::Key(key) = event else {
@@ -150,8 +203,12 @@ fn handle_global_event(
             help_menu.toggle();
             true
         }
-        KeyCode::Char('v') => {
-            app.toggle_view_mode();
+        KeyCode::Char(']') => {
+            app.next_mode();
+            true
+        }
+        KeyCode::Char('[') => {
+            app.prev_mode();
             true
         }
         KeyCode::Char('p') => {
@@ -163,46 +220,61 @@ fn handle_global_event(
             true
         }
         KeyCode::Enter => {
-            match app.view_mode {
-                ViewMode::Standard => app.navigate_to_selection(goal_view.current_selection()),
-                ViewMode::Paperproof => app.navigate_to_selection(paperproof_view.current_selection()),
-            }
+            let selection = match app.display_mode {
+                DisplayMode::GoalTree => goal_tree_mode.current_selection(),
+                DisplayMode::BeforeAfter => before_after_mode.current_selection(),
+                DisplayMode::StepsView => steps_mode.current_selection(),
+                DisplayMode::DeductionTree => deduction_tree_mode.current_selection(),
+            };
+            app.navigate_to_selection(selection);
             true
         }
         _ => false,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_frame(
     frame: &mut Frame,
     app: &App,
     header: &mut Header,
-    goal_view: &mut GoalView,
-    paperproof_view: &mut PaperproofView,
+    goal_tree_mode: &mut GoalTreeMode,
+    before_after_mode: &mut BeforeAfterMode,
+    steps_mode: &mut StepsMode,
+    deduction_tree_mode: &mut DeductionTreeMode,
     status_bar: &mut StatusBar,
     help_menu: &mut HelpMenu,
 ) {
     let [main_area, help_area] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
-    render_main(frame, app, main_area, header, goal_view, paperproof_view);
+    render_main(
+        frame,
+        app,
+        main_area,
+        header,
+        goal_tree_mode,
+        before_after_mode,
+        steps_mode,
+        deduction_tree_mode,
+    );
     status_bar.render(frame, help_area);
 
     help_menu.render(frame, frame.area());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_main(
     frame: &mut Frame,
     app: &App,
     area: Rect,
     header: &mut Header,
-    goal_view: &mut GoalView,
-    paperproof_view: &mut PaperproofView,
+    goal_tree_mode: &mut GoalTreeMode,
+    before_after_mode: &mut BeforeAfterMode,
+    steps_mode: &mut StepsMode,
+    deduction_tree_mode: &mut DeductionTreeMode,
 ) {
-    let title = match app.view_mode {
-        ViewMode::Standard => " lean-tui ",
-        ViewMode::Paperproof => " lean-tui [paperproof] ",
-    };
+    let title = format!(" lean-tui [{}] ", app.display_mode.name());
     let block = Block::bordered()
         .title(title)
         .border_style(Style::new().fg(Color::Cyan));
@@ -223,8 +295,10 @@ fn render_main(
 
     header.render(frame, header_area);
 
-    match app.view_mode {
-        ViewMode::Standard => goal_view.render(frame, content_area),
-        ViewMode::Paperproof => paperproof_view.render(frame, content_area),
+    match app.display_mode {
+        DisplayMode::GoalTree => goal_tree_mode.render(frame, content_area),
+        DisplayMode::BeforeAfter => before_after_mode.render(frame, content_area),
+        DisplayMode::StepsView => steps_mode.render(frame, content_area),
+        DisplayMode::DeductionTree => deduction_tree_mode.render(frame, content_area),
     }
 }

@@ -5,6 +5,7 @@ use std::mem;
 use async_lsp::lsp_types::Url;
 
 use super::components::SelectableItem;
+use super::modes::DisplayMode;
 use crate::{
     lean_rpc::{Goal, GotoLocation, PaperproofStep},
     tui_ipc::{
@@ -12,16 +13,6 @@ use crate::{
         ProofStep, TemporalSlot,
     },
 };
-
-/// View mode for the TUI display.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ViewMode {
-    /// Standard goal view with hypotheses and targets.
-    Standard,
-    /// Paperproof-style view with proof history.
-    #[default]
-    Paperproof,
-}
 
 /// A step in the local proof history (includes goals, used for navigation).
 #[derive(Debug, Clone, Default)]
@@ -103,8 +94,8 @@ pub struct App {
     outgoing_commands: Vec<Command>,
     /// Visibility settings for diff columns.
     pub columns: ColumnVisibility,
-    /// Current view mode (Standard or Paperproof).
-    pub view_mode: ViewMode,
+    /// Current display mode.
+    pub display_mode: DisplayMode,
     /// Proof history for Paperproof view.
     #[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
     pub proof_history: ProofHistory,
@@ -266,12 +257,14 @@ impl App {
         }
     }
 
-    /// Toggle between Standard and Paperproof view modes.
-    pub const fn toggle_view_mode(&mut self) {
-        self.view_mode = match self.view_mode {
-            ViewMode::Standard => ViewMode::Paperproof,
-            ViewMode::Paperproof => ViewMode::Standard,
-        };
+    /// Cycle to the next display mode.
+    pub const fn next_mode(&mut self) {
+        self.display_mode = self.display_mode.next();
+    }
+
+    /// Cycle to the previous display mode.
+    pub const fn prev_mode(&mut self) {
+        self.display_mode = self.display_mode.prev();
     }
 
     /// Navigate to the previous step in proof history.
