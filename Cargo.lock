@@ -623,7 +623,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lean-tui"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "async-lsp",
  "clap",

@@ -22,8 +22,7 @@ impl Theme {
     pub const TITLE_HYPOTHESIS: Color = Color::Blue;
     pub const TITLE_GOAL: Color = Color::Cyan;
 
-    // Tree rendering
-    pub const TREE_CHARS: Style = Style::new().fg(Color::DarkGray);
+    // List rendering
     pub const CASE_LABEL: Style = Style::new().fg(Color::Magenta);
     pub const GOAL_NUMBER: Style = Style::new().fg(Color::DarkGray);
 }

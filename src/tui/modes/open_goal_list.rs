@@ -1,4 +1,4 @@
-//! Goal Tree mode - displays hypotheses and goal targets in a navigable tree.
+//! Open Goal List mode - displays hypotheses and goal targets in a navigable list.
 
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{layout::Rect, Frame};
@@ -7,24 +7,24 @@ use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{
-        goal_tree::GoalTree, hypothesis_indices, render_helpers::render_error,
+        hypothesis_indices, open_goal_list::OpenGoalList, render_helpers::render_error,
         selection::SelectionState, FilterToggle, HypothesisFilters, InteractiveComponent,
         KeyMouseEvent, Selection,
     },
     tui_ipc::{DefinitionInfo, ProofDag, ProofState},
 };
 
-/// Input for updating the Goal Tree mode.
-pub struct GoalTreeModeInput {
+/// Input for updating the Open Goal List mode.
+pub struct OpenGoalListModeInput {
     pub goals: Vec<Goal>,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
     pub proof_dag: Option<ProofDag>,
 }
 
-/// Goal Tree display mode - navigable hypothesis and goal tree.
+/// Open Goal List display mode - navigable list of open goals with hypotheses.
 #[derive(Default)]
-pub struct GoalTreeMode {
+pub struct OpenGoalListMode {
     /// Current proof state (from DAG or converted from goals).
     state: ProofState,
     /// Current node ID in the DAG (for building selections).
@@ -37,7 +37,7 @@ pub struct GoalTreeMode {
     selection: SelectionState,
 }
 
-impl GoalTreeMode {
+impl OpenGoalListMode {
     pub const fn filters(&self) -> HypothesisFilters {
         self.filters
     }
@@ -76,8 +76,8 @@ impl GoalTreeMode {
     }
 }
 
-impl InteractiveComponent for GoalTreeMode {
-    type Input = GoalTreeModeInput;
+impl InteractiveComponent for OpenGoalListMode {
+    type Input = OpenGoalListModeInput;
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
@@ -143,14 +143,14 @@ impl InteractiveComponent for GoalTreeMode {
 
         let content_area = render_error(frame, area, self.error.as_deref());
 
-        // Render goal tree and collect click regions
-        let tree = GoalTree::new(
+        // Render open goal list and collect click regions
+        let goal_list = OpenGoalList::new(
             &self.goals,
             self.current_selection(),
             self.filters,
             self.current_node_id,
         );
-        let click_regions = tree.render_to_frame(frame, content_area);
+        let click_regions = goal_list.render_to_frame(frame, content_area);
 
         // Adjust click regions for error offset and add to selection
         let y_offset = if self.error.is_some() { 2 } else { 0 };
@@ -168,10 +168,10 @@ impl InteractiveComponent for GoalTreeMode {
     }
 }
 
-impl Mode for GoalTreeMode {
-    type Model = GoalTreeModeInput;
+impl Mode for OpenGoalListMode {
+    type Model = OpenGoalListModeInput;
 
-    const NAME: &'static str = "Goal Tree";
+    const NAME: &'static str = "Open Goals";
     const KEYBINDINGS: &'static [(&'static str, &'static str)] =
         &[("i", "inst"), ("a", "access"), ("l", "let"), ("r", "rev")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[

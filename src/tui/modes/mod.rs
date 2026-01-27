@@ -2,7 +2,7 @@
 
 mod before_after;
 pub mod deduction_tree;
-mod goal_tree;
+mod open_goal_list;
 mod steps_view;
 
 use std::mem::take;
@@ -11,8 +11,8 @@ use before_after::BeforeAfterMode;
 pub use before_after::BeforeAfterModeInput;
 use deduction_tree::DeductionTreeMode;
 pub use deduction_tree::DeductionTreeModeInput;
-use goal_tree::GoalTreeMode;
-pub use goal_tree::GoalTreeModeInput;
+use open_goal_list::OpenGoalListMode;
+pub use open_goal_list::OpenGoalListModeInput;
 use ratatui::{layout::Rect, Frame};
 use steps_view::StepsMode;
 pub use steps_view::StepsModeInput;
@@ -58,7 +58,7 @@ pub trait Mode: InteractiveComponent<Input = Self::Model, Event = KeyMouseEvent>
 /// Display mode with embedded state.
 #[allow(clippy::large_enum_variant)]
 pub enum DisplayMode {
-    GoalTree(GoalTreeMode),
+    OpenGoalList(OpenGoalListMode),
     BeforeAfter(BeforeAfterMode),
     StepsView(StepsMode),
     DeductionTree(DeductionTreeMode),
@@ -74,18 +74,18 @@ impl DisplayMode {
     /// Cycle to the next display mode, preserving state.
     pub fn next(&mut self) {
         *self = match take(self) {
-            Self::GoalTree(_) => Self::BeforeAfter(BeforeAfterMode::default()),
+            Self::OpenGoalList(_) => Self::BeforeAfter(BeforeAfterMode::default()),
             Self::BeforeAfter(_) => Self::StepsView(StepsMode::default()),
             Self::StepsView(_) => Self::DeductionTree(DeductionTreeMode::default()),
-            Self::DeductionTree(_) => Self::GoalTree(GoalTreeMode::default()),
+            Self::DeductionTree(_) => Self::OpenGoalList(OpenGoalListMode::default()),
         };
     }
 
     /// Cycle to the previous display mode, preserving state.
     pub fn prev(&mut self) {
         *self = match take(self) {
-            Self::GoalTree(_) => Self::DeductionTree(DeductionTreeMode::default()),
-            Self::BeforeAfter(_) => Self::GoalTree(GoalTreeMode::default()),
+            Self::OpenGoalList(_) => Self::DeductionTree(DeductionTreeMode::default()),
+            Self::BeforeAfter(_) => Self::OpenGoalList(OpenGoalListMode::default()),
             Self::StepsView(_) => Self::BeforeAfter(BeforeAfterMode::default()),
             Self::DeductionTree(_) => Self::StepsView(StepsMode::default()),
         };
@@ -94,7 +94,7 @@ impl DisplayMode {
     /// Get the display name of the current mode.
     pub const fn name(&self) -> &'static str {
         match self {
-            Self::GoalTree(_) => GoalTreeMode::NAME,
+            Self::OpenGoalList(_) => OpenGoalListMode::NAME,
             Self::BeforeAfter(_) => BeforeAfterMode::NAME,
             Self::StepsView(_) => StepsMode::NAME,
             Self::DeductionTree(_) => DeductionTreeMode::NAME,
@@ -104,7 +104,7 @@ impl DisplayMode {
     /// Get mode-specific keybindings.
     pub const fn keybindings(&self) -> &'static [(&'static str, &'static str)] {
         match self {
-            Self::GoalTree(_) => GoalTreeMode::KEYBINDINGS,
+            Self::OpenGoalList(_) => OpenGoalListMode::KEYBINDINGS,
             Self::BeforeAfter(_) => BeforeAfterMode::KEYBINDINGS,
             Self::StepsView(_) => StepsMode::KEYBINDINGS,
             Self::DeductionTree(_) => DeductionTreeMode::KEYBINDINGS,
@@ -114,7 +114,7 @@ impl DisplayMode {
     /// Get supported filter toggles.
     pub const fn supported_filters(&self) -> &'static [FilterToggle] {
         match self {
-            Self::GoalTree(_) => GoalTreeMode::SUPPORTED_FILTERS,
+            Self::OpenGoalList(_) => OpenGoalListMode::SUPPORTED_FILTERS,
             Self::BeforeAfter(_) => BeforeAfterMode::SUPPORTED_FILTERS,
             Self::StepsView(_) => StepsMode::SUPPORTED_FILTERS,
             Self::DeductionTree(_) => DeductionTreeMode::SUPPORTED_FILTERS,
@@ -124,7 +124,7 @@ impl DisplayMode {
     /// Get backend data sources.
     pub const fn backends(&self) -> &'static [Backend] {
         match self {
-            Self::GoalTree(_) => GoalTreeMode::BACKENDS,
+            Self::OpenGoalList(_) => OpenGoalListMode::BACKENDS,
             Self::BeforeAfter(_) => BeforeAfterMode::BACKENDS,
             Self::StepsView(_) => StepsMode::BACKENDS,
             Self::DeductionTree(_) => DeductionTreeMode::BACKENDS,
@@ -143,7 +143,7 @@ impl DisplayMode {
     /// Get current selection from active mode.
     pub fn current_selection(&self) -> Option<Selection> {
         match self {
-            Self::GoalTree(m) => m.current_selection(),
+            Self::OpenGoalList(m) => m.current_selection(),
             Self::BeforeAfter(m) => m.current_selection(),
             Self::StepsView(m) => m.current_selection(),
             Self::DeductionTree(m) => m.current_selection(),
@@ -153,7 +153,7 @@ impl DisplayMode {
     /// Get filters from active mode.
     pub const fn filters(&self) -> HypothesisFilters {
         match self {
-            Self::GoalTree(m) => m.filters(),
+            Self::OpenGoalList(m) => m.filters(),
             Self::BeforeAfter(m) => m.filters(),
             Self::StepsView(m) => m.filters(),
             Self::DeductionTree(m) => m.filters(),
@@ -179,7 +179,7 @@ impl DisplayMode {
     /// Handle event for active mode.
     pub fn handle_event(&mut self, event: KeyMouseEvent) -> bool {
         match self {
-            Self::GoalTree(m) => m.handle_event(event),
+            Self::OpenGoalList(m) => m.handle_event(event),
             Self::BeforeAfter(m) => m.handle_event(event),
             Self::StepsView(m) => m.handle_event(event),
             Self::DeductionTree(m) => m.handle_event(event),
@@ -189,7 +189,7 @@ impl DisplayMode {
     /// Render active mode.
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         match self {
-            Self::GoalTree(m) => m.render(frame, area),
+            Self::OpenGoalList(m) => m.render(frame, area),
             Self::BeforeAfter(m) => m.render(frame, area),
             Self::StepsView(m) => m.render(frame, area),
             Self::DeductionTree(m) => m.render(frame, area),
@@ -197,8 +197,8 @@ impl DisplayMode {
     }
 
     /// Update active mode with appropriate input.
-    pub fn update_goal_tree(&mut self, input: GoalTreeModeInput) {
-        if let Self::GoalTree(m) = self {
+    pub fn update_open_goal_list(&mut self, input: OpenGoalListModeInput) {
+        if let Self::OpenGoalList(m) = self {
             m.update(input);
         }
     }

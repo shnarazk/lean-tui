@@ -39,7 +39,7 @@ Screenshots of different display modes
 
 Display styles:
 
-- Goal tree: open goals as a tree
+- Open goal list: simplest display mode with just a list of open goals
 - Before after: current active goal state and previous and next goal state
 - Deduction tree: proof shown as a deduction tree (with Paperproof)
 - Steps: steps shown next to all active hypotheses and goals

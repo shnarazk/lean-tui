@@ -1,11 +1,10 @@
-//! Hierarchical goal tree with case labels.
+//! List of open goals widget.
 
 use std::iter;
 
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    text::{Line, Span},
     widgets::{Paragraph, StatefulWidget, Widget},
     Frame,
 };
@@ -19,8 +18,8 @@ use crate::{
     tui::widgets::{layout_metrics::LayoutMetrics, theme::Theme},
 };
 
-/// Widget for rendering a hierarchical tree of goals.
-pub struct GoalTree<'a> {
+/// Widget for rendering a list of open goals.
+pub struct OpenGoalList<'a> {
     goals: &'a [Goal],
     selection: Option<Selection>,
     filters: HypothesisFilters,
@@ -28,21 +27,21 @@ pub struct GoalTree<'a> {
     node_id: Option<u32>,
 }
 
-/// Mutable state for `GoalTree` that tracks click regions.
+/// Mutable state for `OpenGoalList` that tracks click regions.
 #[derive(Default)]
-pub struct GoalTreeState {
+pub struct OpenGoalListState {
     click_regions: Vec<ClickRegion>,
     goal_box_states: Vec<GoalBoxState>,
 }
 
-impl GoalTreeState {
+impl OpenGoalListState {
     #[allow(dead_code)]
     pub fn click_regions(&self) -> &[ClickRegion] {
         &self.click_regions
     }
 }
 
-impl<'a> GoalTree<'a> {
+impl<'a> OpenGoalList<'a> {
     pub const fn new(
         goals: &'a [Goal],
         selection: Option<Selection>,
@@ -59,28 +58,13 @@ impl<'a> GoalTree<'a> {
 
     /// Render using Frame (convenience method for non-stateful usage).
     pub fn render_to_frame(&self, frame: &mut Frame, area: Rect) -> Vec<ClickRegion> {
-        let mut state = GoalTreeState::default();
+        let mut state = OpenGoalListState::default();
         frame.render_stateful_widget(
-            GoalTree::new(self.goals, self.selection, self.filters, self.node_id),
+            OpenGoalList::new(self.goals, self.selection, self.filters, self.node_id),
             area,
             &mut state,
         );
         state.click_regions
-    }
-
-    /// Determine the tree prefix for a goal at the given index.
-    /// Returns a prefix string for visual tree structure when multiple goals
-    /// exist.
-    fn goal_prefix(&self, idx: usize) -> String {
-        if self.goals.len() <= 1 {
-            return String::new();
-        }
-        let is_last = idx == self.goals.len() - 1;
-        if is_last {
-            tree_chars::EMPTY.to_string()
-        } else {
-            tree_chars::VERTICAL.to_string()
-        }
     }
 
     fn min_goal_height(&self, goal: &Goal) -> u16 {
@@ -93,8 +77,8 @@ impl<'a> GoalTree<'a> {
     }
 }
 
-impl StatefulWidget for GoalTree<'_> {
-    type State = GoalTreeState;
+impl StatefulWidget for OpenGoalList<'_> {
+    type State = OpenGoalListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         state.click_regions.clear();
@@ -123,33 +107,17 @@ impl StatefulWidget for GoalTree<'_> {
 
         // Render each goal directly
         for (idx, (goal, goal_area)) in self.goals.iter().zip(areas.iter()).enumerate() {
-            let prefix = self.goal_prefix(idx);
-            let content_area = layout_with_prefix(*goal_area, &prefix, buf);
-
             let goal_box = GoalBox::new(goal, idx, self.selection, self.filters, self.node_id);
 
-            goal_box.render(content_area, buf, &mut state.goal_box_states[idx]);
+            goal_box.render(*goal_area, buf, &mut state.goal_box_states[idx]);
 
             // Collect click regions from this goal box
-            state
-                .click_regions
-                .extend(state.goal_box_states[idx].click_regions().iter().cloned());
+            state.click_regions.extend(
+                state.goal_box_states[idx]
+                    .click_regions()
+                    .iter()
+                    .cloned(),
+            );
         }
-    }
-}
-
-fn layout_with_prefix(area: Rect, prefix: &str, buf: &mut Buffer) -> Rect {
-    #[allow(clippy::cast_possible_truncation)]
-    let prefix_width = prefix.chars().count() as u16;
-    let min_content_width = 10;
-
-    if prefix_width > 0 && area.width > prefix_width + min_content_width {
-        let [prefix_area, content_area] =
-            Layout::horizontal([Constraint::Length(prefix_width), Constraint::Fill(1)]).areas(area);
-
-        render_vertical_prefix(prefix_area, prefix, buf);
-        content_area
-    } else {
-        area
     }
 }

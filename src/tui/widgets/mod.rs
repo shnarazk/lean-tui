@@ -3,8 +3,8 @@
 pub mod diff_text;
 pub mod goal_box;
 pub mod goal_section;
-pub mod goal_tree;
 pub mod goals_column;
+pub mod open_goal_list;
 pub mod help_menu;
 pub mod hyp_layer;
 pub mod hyp_section;

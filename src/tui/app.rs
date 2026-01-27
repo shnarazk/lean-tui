@@ -13,7 +13,7 @@ use ratatui::{
 
 use super::{
     modes::{
-        BeforeAfterModeInput, DeductionTreeModeInput, DisplayMode, GoalTreeModeInput,
+        BeforeAfterModeInput, DeductionTreeModeInput, DisplayMode, OpenGoalListModeInput,
         StepsModeInput,
     },
     widgets::{welcome::WelcomeScreen, KeyMouseEvent, Selection},
@@ -384,7 +384,7 @@ impl App {
     }
 
     fn update_display_mode(&mut self) {
-        self.display_mode.update_goal_tree(GoalTreeModeInput {
+        self.display_mode.update_open_goal_list(OpenGoalListModeInput {
             goals: self.goals().to_vec(),
             definition: self.definition.clone(),
             error: self.error.clone(),
@@ -446,7 +446,11 @@ impl App {
         }
 
         let title = self.build_title();
-        let backends = format!(" {} ", self.display_mode.backends_display());
+        let backends = format!(
+            " {} ({}) ",
+            self.display_mode.backends_display(),
+            self.display_mode.name()
+        );
         let position_info = self.build_position_info();
 
         let block = Block::bordered()
