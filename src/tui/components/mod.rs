@@ -22,10 +22,11 @@ use crossterm::event::{KeyEvent, MouseEvent};
 pub use header::Header;
 pub use help_menu::HelpMenu;
 use ratatui::{layout::Rect, Frame};
-pub use status_bar::StatusBar;
+pub use status_bar::{StatusBar, StatusBarInput};
 
 // Re-exports for modes
 pub use definition_header::render_definition_header;
+pub use diff_text::{diff_style, DiffState, TaggedTextExt};
 pub use goal_before::render_goal_before;
 pub use goal_section::{GoalSection, GoalSectionInput};
 pub use hyp_section::{HypSection, HypSectionInput};
@@ -78,6 +79,17 @@ impl Default for HypothesisFilters {
             hide_definition: true,
         }
     }
+}
+
+/// Filter toggles that modes can support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterToggle {
+    Instances,
+    Types,
+    Inaccessible,
+    LetValues,
+    ReverseOrder,
+    Definition,
 }
 
 impl HypothesisFilters {

@@ -38,11 +38,20 @@ pub struct ProofHistory {
     pub current_step_index: usize,
 }
 
-/// Visibility settings for diff columns (both hidden by default).
-#[derive(Debug, Clone, Copy, Default)]
+/// Visibility settings for diff columns.
+#[derive(Debug, Clone, Copy)]
 pub struct ColumnVisibility {
     pub previous: bool,
     pub next: bool,
+}
+
+impl Default for ColumnVisibility {
+    fn default() -> Self {
+        Self {
+            previous: true, // Show previous column by default
+            next: false,
+        }
+    }
 }
 
 /// Loading status for goal state (used for temporal goals feature).

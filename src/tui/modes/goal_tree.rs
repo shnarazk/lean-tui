@@ -11,11 +11,12 @@ use ratatui::{
     Frame,
 };
 
+use super::Mode;
 use crate::{
     lean_rpc::Goal,
     tui::components::{
-        goal_tree::GoalTree, hypothesis_indices, ClickRegion, Component, HypothesisFilters,
-        KeyMouseEvent, SelectableItem,
+        goal_tree::GoalTree, hypothesis_indices, ClickRegion, Component, FilterToggle,
+        HypothesisFilters, KeyMouseEvent, SelectableItem,
     },
     tui_ipc::{CaseSplitInfo, DefinitionInfo},
 };
@@ -45,7 +46,7 @@ impl GoalTreeMode {
         self.filters
     }
 
-    pub const fn toggle_filter(&mut self, filter: &FilterToggle) {
+    pub const fn toggle_filter(&mut self, filter: FilterToggle) {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
             FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
@@ -58,11 +59,6 @@ impl GoalTreeMode {
                 self.filters.hide_definition = !self.filters.hide_definition;
             }
         }
-    }
-
-    pub fn current_selection(&self) -> Option<SelectableItem> {
-        let items = self.selectable_items();
-        self.selected_index.and_then(|i| items.get(i).copied())
     }
 
     fn selectable_items(&self) -> Vec<SelectableItem> {
@@ -127,15 +123,6 @@ impl GoalTreeMode {
     }
 }
 
-pub enum FilterToggle {
-    Instances,
-    Types,
-    Inaccessible,
-    LetValues,
-    ReverseOrder,
-    Definition,
-}
-
 impl Component for GoalTreeMode {
     type Input = GoalTreeModeInput;
     type Event = KeyMouseEvent;
@@ -163,27 +150,27 @@ impl Component for GoalTreeMode {
                     true
                 }
                 KeyCode::Char('i') => {
-                    self.toggle_filter(&FilterToggle::Instances);
+                    self.toggle_filter(FilterToggle::Instances);
                     true
                 }
                 KeyCode::Char('t') => {
-                    self.toggle_filter(&FilterToggle::Types);
+                    self.toggle_filter(FilterToggle::Types);
                     true
                 }
                 KeyCode::Char('a') => {
-                    self.toggle_filter(&FilterToggle::Inaccessible);
+                    self.toggle_filter(FilterToggle::Inaccessible);
                     true
                 }
                 KeyCode::Char('l') => {
-                    self.toggle_filter(&FilterToggle::LetValues);
+                    self.toggle_filter(FilterToggle::LetValues);
                     true
                 }
                 KeyCode::Char('r') => {
-                    self.toggle_filter(&FilterToggle::ReverseOrder);
+                    self.toggle_filter(FilterToggle::ReverseOrder);
                     true
                 }
                 KeyCode::Char('d') => {
-                    self.toggle_filter(&FilterToggle::Definition);
+                    self.toggle_filter(FilterToggle::Definition);
                     true
                 }
                 _ => false,
@@ -238,5 +225,32 @@ impl Component for GoalTreeMode {
                 item: region.item,
             });
         }
+    }
+}
+
+impl Mode for GoalTreeMode {
+    type Model = GoalTreeModeInput;
+
+    const NAME: &'static str = "Goal Tree";
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
+        ("i", "inst"),
+        ("t", "type"),
+        ("a", "access"),
+        ("l", "let"),
+        ("r", "rev"),
+        ("d", "def"),
+    ];
+    const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
+        FilterToggle::Instances,
+        FilterToggle::Types,
+        FilterToggle::Inaccessible,
+        FilterToggle::LetValues,
+        FilterToggle::ReverseOrder,
+        FilterToggle::Definition,
+    ];
+
+    fn current_selection(&self) -> Option<SelectableItem> {
+        let items = self.selectable_items();
+        self.selected_index.and_then(|i| items.get(i).copied())
     }
 }

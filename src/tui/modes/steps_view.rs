@@ -12,13 +12,14 @@ use ratatui::{
     Frame,
 };
 
+use super::Mode;
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
     tui::components::{
         hypothesis_indices, render_definition_header, render_divider, render_goal_before,
-        render_proof_steps_sidebar, ClickRegion, Component, GoalSection, GoalSectionInput,
-        HypSection, HypSectionInput, HypothesisFilters, KeyMouseEvent, ProofStepsSidebarInput,
-        SelectableItem,
+        render_proof_steps_sidebar, ClickRegion, Component, FilterToggle, GoalSection,
+        GoalSectionInput, HypSection, HypSectionInput, HypothesisFilters, KeyMouseEvent,
+        ProofStepsSidebarInput, SelectableItem,
     },
     tui_ipc::{DefinitionInfo, ProofStep},
 };
@@ -51,15 +52,6 @@ pub struct StepsMode {
 }
 
 impl StepsMode {
-    pub const fn filters(&self) -> HypothesisFilters {
-        self.filters
-    }
-
-    pub fn current_selection(&self) -> Option<SelectableItem> {
-        let items = self.selectable_items();
-        self.selected_index.and_then(|i| items.get(i).copied())
-    }
-
     fn selectable_items(&self) -> Vec<SelectableItem> {
         self.goals
             .iter()
@@ -108,6 +100,10 @@ impl StepsMode {
         false
     }
 
+    pub const fn filters(&self) -> HypothesisFilters {
+        self.filters
+    }
+
     const fn toggle_filter(&mut self, filter: FilterToggle) {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
@@ -122,16 +118,6 @@ impl StepsMode {
             }
         }
     }
-}
-
-#[derive(Clone, Copy)]
-enum FilterToggle {
-    Instances,
-    Types,
-    Inaccessible,
-    LetValues,
-    ReverseOrder,
-    Definition,
 }
 
 impl Component for StepsMode {
@@ -329,5 +315,33 @@ impl Component for StepsMode {
         self.goal_section.render(frame, goals);
         self.click_regions
             .extend(self.goal_section.click_regions().iter().cloned());
+    }
+}
+
+impl Mode for StepsMode {
+    type Model = StepsModeInput;
+
+    const NAME: &'static str = "Steps";
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
+        ("b", "before"),
+        ("i", "inst"),
+        ("t", "type"),
+        ("a", "access"),
+        ("l", "let"),
+        ("r", "rev"),
+        ("d", "def"),
+    ];
+    const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
+        FilterToggle::Instances,
+        FilterToggle::Types,
+        FilterToggle::Inaccessible,
+        FilterToggle::LetValues,
+        FilterToggle::ReverseOrder,
+        FilterToggle::Definition,
+    ];
+
+    fn current_selection(&self) -> Option<SelectableItem> {
+        let items = self.selectable_items();
+        self.selected_index.and_then(|i| items.get(i).copied())
     }
 }

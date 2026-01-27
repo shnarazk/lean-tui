@@ -12,11 +12,12 @@ use ratatui::{
     Frame,
 };
 
+use super::Mode;
 use crate::{
     lean_rpc::Goal,
     tui::components::{
-        hypothesis_indices, ClickRegion, Component, HypothesisFilters, KeyMouseEvent,
-        SelectableItem,
+        diff_style, hypothesis_indices, ClickRegion, Component, DiffState, FilterToggle,
+        HypothesisFilters, KeyMouseEvent, SelectableItem, TaggedTextExt,
     },
     tui_ipc::DefinitionInfo,
 };
@@ -48,7 +49,7 @@ impl BeforeAfterMode {
         self.filters
     }
 
-    pub const fn toggle_filter(&mut self, filter: &FilterToggle) {
+    pub const fn toggle_filter(&mut self, filter: FilterToggle) {
         match filter {
             FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
             FilterToggle::Types => self.filters.hide_types = !self.filters.hide_types,
@@ -61,11 +62,6 @@ impl BeforeAfterMode {
                 self.filters.hide_definition = !self.filters.hide_definition;
             }
         }
-    }
-
-    pub fn current_selection(&self) -> Option<SelectableItem> {
-        let items = self.selectable_items();
-        self.selected_index.and_then(|i| items.get(i).copied())
     }
 
     fn selectable_items(&self) -> Vec<SelectableItem> {
@@ -130,15 +126,6 @@ impl BeforeAfterMode {
     }
 }
 
-pub enum FilterToggle {
-    Instances,
-    Types,
-    Inaccessible,
-    LetValues,
-    ReverseOrder,
-    Definition,
-}
-
 impl Component for BeforeAfterMode {
     type Input = BeforeAfterModeInput;
     type Event = KeyMouseEvent;
@@ -167,27 +154,27 @@ impl Component for BeforeAfterMode {
                     true
                 }
                 KeyCode::Char('i') => {
-                    self.toggle_filter(&FilterToggle::Instances);
+                    self.toggle_filter(FilterToggle::Instances);
                     true
                 }
                 KeyCode::Char('t') => {
-                    self.toggle_filter(&FilterToggle::Types);
+                    self.toggle_filter(FilterToggle::Types);
                     true
                 }
                 KeyCode::Char('a') => {
-                    self.toggle_filter(&FilterToggle::Inaccessible);
+                    self.toggle_filter(FilterToggle::Inaccessible);
                     true
                 }
                 KeyCode::Char('l') => {
-                    self.toggle_filter(&FilterToggle::LetValues);
+                    self.toggle_filter(FilterToggle::LetValues);
                     true
                 }
                 KeyCode::Char('r') => {
-                    self.toggle_filter(&FilterToggle::ReverseOrder);
+                    self.toggle_filter(FilterToggle::ReverseOrder);
                     true
                 }
                 KeyCode::Char('d') => {
-                    self.toggle_filter(&FilterToggle::Definition);
+                    self.toggle_filter(FilterToggle::Definition);
                     true
                 }
                 _ => false,
@@ -370,12 +357,23 @@ impl BeforeAfterMode {
             let is_selected = is_current && selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
             let names = hyp.names.join(", ");
 
-            lines.push(Line::from(vec![
+            // Build diff state for fine-grained coloring
+            let diff_state = DiffState {
+                is_inserted: hyp.is_inserted,
+                is_removed: hyp.is_removed,
+                has_diff: hyp.type_.has_any_diff(),
+            };
+            let diff = diff_style(&diff_state, is_selected, Color::White);
+
+            // Build line with spans
+            let mut spans = vec![
                 diff_marker(hyp.is_inserted, hyp.is_removed),
                 Span::styled(selection_indicator(is_selected), Style::new().fg(Color::Cyan)),
-                Span::styled(format!("{names}: "), Style::new().fg(Color::White)),
-                Span::styled(hyp.type_.to_plain_text(), Style::new().fg(Color::Gray)),
-            ]));
+                Span::styled(format!("{names}: "), diff.style),
+            ];
+            spans.extend(hyp.type_.to_spans(diff.style));
+
+            lines.push(Line::from(spans));
 
             self.track_click_region(lines, inner, is_current, SelectableItem::Hypothesis { goal_idx, hyp_idx });
         }
@@ -392,14 +390,23 @@ impl BeforeAfterMode {
     ) {
         let is_selected = is_current && selection == Some(SelectableItem::GoalTarget { goal_idx });
 
-        lines.push(Line::from(vec![
+        // Build diff state for fine-grained coloring
+        let diff_state = DiffState {
+            is_inserted: goal.is_inserted,
+            is_removed: goal.is_removed,
+            has_diff: goal.target.has_any_diff(),
+        };
+        let diff = diff_style(&diff_state, is_selected, Color::Cyan);
+
+        // Build line with spans
+        let mut spans = vec![
             diff_marker(goal.is_inserted, goal.is_removed),
             Span::styled(selection_indicator(is_selected), Style::new().fg(Color::Cyan)),
-            Span::styled(
-                format!("{}{}", goal.prefix, goal.target.to_plain_text()),
-                Style::new().fg(Color::Cyan),
-            ),
-        ]));
+            Span::styled(goal.prefix.clone(), diff.style),
+        ];
+        spans.extend(goal.target.to_spans(diff.style));
+
+        lines.push(Line::from(spans));
 
         self.track_click_region(lines, inner, is_current, SelectableItem::GoalTarget { goal_idx });
     }
@@ -419,5 +426,34 @@ impl BeforeAfterMode {
                 item,
             });
         }
+    }
+}
+
+impl Mode for BeforeAfterMode {
+    type Model = BeforeAfterModeInput;
+
+    const NAME: &'static str = "Before/After";
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
+        ("p", "prev"),
+        ("n", "next"),
+        ("i", "inst"),
+        ("t", "type"),
+        ("a", "access"),
+        ("l", "let"),
+        ("r", "rev"),
+        ("d", "def"),
+    ];
+    const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
+        FilterToggle::Instances,
+        FilterToggle::Types,
+        FilterToggle::Inaccessible,
+        FilterToggle::LetValues,
+        FilterToggle::ReverseOrder,
+        FilterToggle::Definition,
+    ];
+
+    fn current_selection(&self) -> Option<SelectableItem> {
+        let items = self.selectable_items();
+        self.selected_index.and_then(|i| items.get(i).copied())
     }
 }

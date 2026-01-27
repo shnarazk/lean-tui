@@ -7,7 +7,7 @@ mod modes;
 use std::{io::stdout, time::Duration};
 
 use app::App;
-use components::{Component, Header, HelpMenu, KeyMouseEvent, KeyPress, StatusBar};
+use components::{Component, Header, HelpMenu, KeyMouseEvent, KeyPress, StatusBar, StatusBarInput};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -16,7 +16,7 @@ use crossterm::{
 use futures::StreamExt;
 use modes::{
     BeforeAfterMode, BeforeAfterModeInput, DeductionTreeMode, DeductionTreeModeInput, DisplayMode,
-    GoalTreeMode, GoalTreeModeInput, StepsMode, StepsModeInput,
+    GoalTreeMode, GoalTreeModeInput, Mode, StepsMode, StepsModeInput,
 };
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -63,9 +63,17 @@ pub async fn run() -> Result<()> {
             error: app.error.clone(),
         });
         before_after_mode.update(BeforeAfterModeInput {
-            previous_goals: app.temporal_goals.previous.as_ref().map(|g| g.goals.clone()),
+            previous_goals: app
+                .columns
+                .previous
+                .then(|| app.temporal_goals.previous.as_ref().map(|g| g.goals.clone()))
+                .flatten(),
             current_goals: app.goals().to_vec(),
-            next_goals: app.temporal_goals.next.as_ref().map(|g| g.goals.clone()),
+            next_goals: app
+                .columns
+                .next
+                .then(|| app.temporal_goals.next.as_ref().map(|g| g.goals.clone()))
+                .flatten(),
             definition: app.definition.clone(),
             error: app.error.clone(),
         });
@@ -92,7 +100,11 @@ pub async fn run() -> Result<()> {
             DisplayMode::StepsView => steps_mode.filters(),
             DisplayMode::DeductionTree => deduction_tree_mode.filters(),
         };
-        status_bar.update(filters);
+        status_bar.update(StatusBarInput {
+            filters,
+            display_mode: app.display_mode,
+            supported_filters: app.display_mode.supported_filters(),
+        });
 
         terminal.draw(|frame| {
             render_frame(

@@ -11,11 +11,12 @@ use ratatui::{
     Frame,
 };
 
+use super::Mode;
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
     tui::components::{
         hypothesis_indices, render_definition_header, render_tree_view, ClickRegion, Component,
-        HypothesisFilters, KeyMouseEvent, SelectableItem,
+        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
     },
     tui_ipc::DefinitionInfo,
 };
@@ -47,17 +48,10 @@ impl DeductionTreeMode {
         self.filters
     }
 
-    pub const fn toggle_filter(&mut self, filter: &FilterToggle) {
-        match filter {
-            FilterToggle::Definition => {
-                self.filters.hide_definition = !self.filters.hide_definition;
-            }
+    pub const fn toggle_filter(&mut self, filter: FilterToggle) {
+        if matches!(filter, FilterToggle::Definition) {
+            self.filters.hide_definition = !self.filters.hide_definition;
         }
-    }
-
-    pub fn current_selection(&self) -> Option<SelectableItem> {
-        let items = self.selectable_items();
-        self.selected_index.and_then(|i| items.get(i).copied())
     }
 
     fn selectable_items(&self) -> Vec<SelectableItem> {
@@ -122,10 +116,6 @@ impl DeductionTreeMode {
     }
 }
 
-pub enum FilterToggle {
-    Definition,
-}
-
 impl Component for DeductionTreeMode {
     type Input = DeductionTreeModeInput;
     type Event = KeyMouseEvent;
@@ -154,7 +144,7 @@ impl Component for DeductionTreeMode {
                     true
                 }
                 KeyCode::Char('d') => {
-                    self.toggle_filter(&FilterToggle::Definition);
+                    self.toggle_filter(FilterToggle::Definition);
                     true
                 }
                 _ => false,
@@ -215,5 +205,18 @@ impl Component for DeductionTreeMode {
                 content_area,
             );
         }
+    }
+}
+
+impl Mode for DeductionTreeMode {
+    type Model = DeductionTreeModeInput;
+
+    const NAME: &'static str = "Deduction Tree";
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("d", "def")];
+    const SUPPORTED_FILTERS: &'static [FilterToggle] = &[FilterToggle::Definition];
+
+    fn current_selection(&self) -> Option<SelectableItem> {
+        let items = self.selectable_items();
+        self.selected_index.and_then(|i| items.get(i).copied())
     }
 }
