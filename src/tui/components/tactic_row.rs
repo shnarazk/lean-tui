@@ -1,42 +1,96 @@
 //! Tactic row component - displays divider between hypotheses and goals.
 
 use ratatui::{
+    buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    widgets::Paragraph,
-    Frame,
+    widgets::Widget,
 };
 
-/// Render a divider between hypotheses and goals.
-#[allow(clippy::cast_possible_truncation)]
-pub fn render_divider(frame: &mut Frame, area: Rect, tactic: Option<&str>) {
-    let style = Style::new().fg(Color::DarkGray);
-    let half_width = area.width.saturating_sub(3) / 2;
+/// A horizontal divider with an optional centered label.
+pub struct Divider<'a> {
+    label: Option<&'a str>,
+    style: Style,
+}
 
-    let line = tactic.map_or_else(
-        || {
-            format!(
-                "{}▼{}",
-                "─".repeat(half_width as usize),
-                "─".repeat(half_width as usize)
-            )
-        },
-        |label| {
-            let label_width = label.chars().count().min(20);
-            let side_width = area.width.saturating_sub(label_width as u16 + 4) / 2;
-            let display = if label.len() > 20 {
-                format!("{}...", &label[..17])
-            } else {
-                label.to_string()
-            };
-            format!(
-                "{}─[{}]─{}",
-                "─".repeat(side_width as usize),
-                display,
-                "─".repeat(side_width as usize)
-            )
-        },
-    );
+impl<'a> Divider<'a> {
+    pub const fn new() -> Self {
+        Self {
+            label: None,
+            style: Style::new(),
+        }
+    }
 
-    frame.render_widget(Paragraph::new(line).style(style).centered(), area);
+    #[allow(dead_code)]
+    pub const fn label(mut self, label: &'a str) -> Self {
+        self.label = Some(label);
+        self
+    }
+
+    pub const fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
+    }
+}
+
+impl Default for Divider<'_> {
+    fn default() -> Self {
+        Self::new().style(Style::new().fg(Color::DarkGray))
+    }
+}
+
+impl Widget for Divider<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        if area.height == 0 || area.width == 0 {
+            return;
+        }
+
+        let line = self.label.map_or_else(
+            || build_simple_divider(area.width),
+            |label| build_labeled_divider(area.width, label),
+        );
+
+        buf.set_string(area.x, area.y, &line, self.style);
+    }
+}
+
+fn build_simple_divider(width: u16) -> String {
+    let half = width.saturating_sub(1) / 2;
+    let remainder = width.saturating_sub(1) % 2;
+    format!(
+        "{}▼{}",
+        "─".repeat(half as usize),
+        "─".repeat((half + remainder) as usize)
+    )
+}
+
+fn build_labeled_divider(width: u16, label: &str) -> String {
+    let max_label_len = 20;
+    let display = if label.chars().count() > max_label_len {
+        format!(
+            "{}…",
+            label.chars().take(max_label_len - 1).collect::<String>()
+        )
+    } else {
+        label.to_string()
+    };
+
+    #[allow(clippy::cast_possible_truncation)]
+    let label_width = display.chars().count() as u16;
+    let brackets_width = 4; // "─[" + "]─"
+    let available = width.saturating_sub(label_width + brackets_width);
+    let left = available / 2;
+    let right = available - left;
+
+    format!(
+        "{}─[{}]─{}",
+        "─".repeat(left as usize),
+        display,
+        "─".repeat(right as usize)
+    )
+}
+
+/// Convenience function for simple divider rendering.
+pub fn divider() -> Divider<'static> {
+    Divider::default()
 }

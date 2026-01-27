@@ -2,8 +2,8 @@
 
 mod diff_text;
 mod goal_before;
+mod goal_box;
 mod goal_section;
-mod goal_state;
 pub mod goal_tree;
 mod help_menu;
 mod hyp_layer;
@@ -24,13 +24,13 @@ pub use goal_before::render_goal_before;
 pub use goal_section::{GoalSection, GoalSectionInput};
 pub use help_menu::HelpMenu;
 pub use hyp_section::{HypSection, HypSectionInput};
-pub use proof_steps_sidebar::{render_proof_steps_sidebar, ProofStepsSidebarInput};
+pub use proof_steps_sidebar::ProofStepsSidebar;
 use ratatui::{layout::Rect, Frame};
 // Re-exports for modes
 pub use render_helpers::{render_error, render_no_goals};
 pub use selection::SelectionState;
 pub use status_bar::{StatusBar, StatusBarInput};
-pub use tactic_row::render_divider;
+pub use tactic_row::divider;
 pub use tree_view::render_tree_view;
 
 #[derive(Clone)]

@@ -111,18 +111,18 @@ impl Component for GoalTreeMode {
 
         let content_area = render_error(frame, area, self.error.as_deref());
 
-        // Render goal tree
-        let mut tree = GoalTree::new(
+        // Render goal tree and collect click regions
+        let tree = GoalTree::new(
             &self.goals,
             &self.case_splits,
             self.current_selection(),
             self.filters,
         );
-        tree.render(frame, content_area);
+        let click_regions = tree.render_to_frame(frame, content_area);
 
-        // Collect click regions from tree, adjusting for error offset
+        // Adjust click regions for error offset and add to selection
         let y_offset = if self.error.is_some() { 2 } else { 0 };
-        for region in tree.click_regions() {
+        for region in click_regions {
             self.selection.add_region(
                 Rect::new(
                     region.area.x,

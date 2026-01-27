@@ -3,14 +3,18 @@
 use std::iter;
 
 use ratatui::{
+    buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Paragraph, StatefulWidget, Widget},
     Frame,
 };
 
-use super::{goal_state::GoalState, ClickRegion, HypothesisFilters, SelectableItem};
+use super::{
+    goal_box::{GoalBox, GoalBoxState},
+    ClickRegion, HypothesisFilters, SelectableItem,
+};
 use crate::{lean_rpc::Goal, tui_ipc::CaseSplitInfo};
 
 mod tree_chars {
@@ -22,28 +26,29 @@ mod tree_chars {
 
 enum TreeElement {
     Label(Line<'static>),
-    Goal {
-        idx: usize,
-        prefix: String,
-        height: u16,
-    },
+    Goal { idx: usize, prefix: String },
 }
 
-impl TreeElement {
-    const fn height(&self) -> u16 {
-        match self {
-            Self::Label(_) => 1,
-            Self::Goal { height, .. } => *height,
-        }
-    }
-}
-
+/// Widget for rendering a hierarchical tree of goals.
 pub struct GoalTree<'a> {
     goals: &'a [Goal],
     case_splits: &'a [CaseSplitInfo],
     selection: Option<SelectableItem>,
     filters: HypothesisFilters,
+}
+
+/// Mutable state for `GoalTree` that tracks click regions.
+#[derive(Default)]
+pub struct GoalTreeState {
     click_regions: Vec<ClickRegion>,
+    goal_box_states: Vec<GoalBoxState>,
+}
+
+impl GoalTreeState {
+    #[allow(dead_code)]
+    pub fn click_regions(&self) -> &[ClickRegion] {
+        &self.click_regions
+    }
 }
 
 impl<'a> GoalTree<'a> {
@@ -58,42 +63,18 @@ impl<'a> GoalTree<'a> {
             case_splits,
             selection,
             filters,
-            click_regions: Vec::new(),
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.click_regions.clear();
-
-        if self.goals.is_empty() {
-            frame.render_widget(
-                Paragraph::new("No goals").style(Style::new().fg(Color::DarkGray)),
-                area,
-            );
-            return;
-        }
-
-        // Build tree elements
-        let elements = self.build_tree_elements();
-
-        let constraints: Vec<Constraint> = elements
-            .iter()
-            .map(|e| Constraint::Length(e.height()))
-            .chain(iter::once(Constraint::Fill(1)))
-            .collect();
-
-        let areas = Layout::vertical(constraints).split(area);
-
-        for (element, area) in elements.iter().zip(areas.iter()) {
-            match element {
-                TreeElement::Label(line) => {
-                    frame.render_widget(Paragraph::new(line.clone()), *area);
-                }
-                TreeElement::Goal { idx, prefix, .. } => {
-                    self.render_goal_with_prefix(frame, *area, *idx, prefix);
-                }
-            }
-        }
+    /// Render using Frame (convenience method for non-stateful usage).
+    pub fn render_to_frame(&self, frame: &mut Frame, area: Rect) -> Vec<ClickRegion> {
+        let mut state = GoalTreeState::default();
+        frame.render_stateful_widget(
+            GoalTree::new(self.goals, self.case_splits, self.selection, self.filters),
+            area,
+            &mut state,
+        );
+        state.click_regions
     }
 
     fn build_tree_elements(&self) -> Vec<TreeElement> {
@@ -129,10 +110,9 @@ impl<'a> GoalTree<'a> {
             self.goals
                 .iter()
                 .enumerate()
-                .map(|(idx, goal)| TreeElement::Goal {
+                .map(|(idx, _)| TreeElement::Goal {
                     idx,
                     prefix: String::new(),
-                    height: self.goal_height(goal),
                 }),
         );
     }
@@ -159,12 +139,11 @@ impl<'a> GoalTree<'a> {
             elements.push(TreeElement::Goal {
                 idx,
                 prefix: format!("{base_prefix}{continuation}"),
-                height: self.goal_height(goal),
             });
         }
     }
 
-    fn goal_height(&self, goal: &Goal) -> u16 {
+    fn min_goal_height(&self, goal: &Goal) -> u16 {
         let visible_hyps = goal
             .hyps
             .iter()
@@ -172,43 +151,105 @@ impl<'a> GoalTree<'a> {
             .count()
             .max(1);
         #[allow(clippy::cast_possible_truncation)]
-        let hyp_table_height = 1 + visible_hyps as u16;
-        let target_table_height = 3;
-        hyp_table_height + target_table_height
-    }
-
-    fn render_goal_with_prefix(&mut self, frame: &mut Frame, area: Rect, idx: usize, prefix: &str) {
-        #[allow(clippy::cast_possible_truncation)]
-        let prefix_width = prefix.chars().count() as u16;
-        let min_content_width = 10;
-
-        let content_area = if prefix_width > 0 && area.width > prefix_width + min_content_width {
-            let [prefix_area, goal_area] =
-                Layout::horizontal([Constraint::Length(prefix_width), Constraint::Fill(1)])
-                    .areas(area);
-
-            render_vertical_prefix(frame, prefix_area, prefix);
-            goal_area
-        } else {
-            area
-        };
-
-        let mut state = GoalState::new(&self.goals[idx], idx, self.selection, self.filters);
-        state.render(frame, content_area);
-        self.click_regions
-            .extend(state.click_regions().iter().cloned());
-    }
-
-    pub fn click_regions(&self) -> &[ClickRegion] {
-        &self.click_regions
+        let hyp_height = 1 + visible_hyps as u16; // border + content
+        let target_height = 3; // border + content + border
+        hyp_height + target_height
     }
 }
 
-fn render_vertical_prefix(frame: &mut Frame, area: Rect, prefix: &str) {
+impl StatefulWidget for GoalTree<'_> {
+    type State = GoalTreeState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        state.click_regions.clear();
+
+        if self.goals.is_empty() {
+            Paragraph::new("No goals")
+                .style(Style::new().fg(Color::DarkGray))
+                .render(area, buf);
+            return;
+        }
+
+        let elements = self.build_tree_elements();
+
+        // Build flexible constraints
+        let constraints: Vec<Constraint> = elements
+            .iter()
+            .map(|e| match e {
+                TreeElement::Label(_) => Constraint::Length(1),
+                TreeElement::Goal { idx, .. } => {
+                    Constraint::Min(self.min_goal_height(&self.goals[*idx]))
+                }
+            })
+            .chain(iter::once(Constraint::Fill(1)))
+            .collect();
+
+        let areas = Layout::vertical(constraints).split(area);
+
+        // Ensure we have enough goal box states
+        let goal_count = elements
+            .iter()
+            .filter(|e| matches!(e, TreeElement::Goal { .. }))
+            .count();
+        state
+            .goal_box_states
+            .resize_with(goal_count, GoalBoxState::default);
+
+        let mut goal_state_idx = 0;
+
+        for (element, elem_area) in elements.iter().zip(areas.iter()) {
+            match element {
+                TreeElement::Label(line) => {
+                    Paragraph::new(line.clone()).render(*elem_area, buf);
+                }
+                TreeElement::Goal { idx, prefix } => {
+                    let content_area = layout_with_prefix(*elem_area, prefix, buf);
+
+                    let goal_box =
+                        GoalBox::new(&self.goals[*idx], *idx, self.selection, self.filters);
+
+                    goal_box.render(
+                        content_area,
+                        buf,
+                        &mut state.goal_box_states[goal_state_idx],
+                    );
+
+                    // Collect click regions from this goal box
+                    state.click_regions.extend(
+                        state.goal_box_states[goal_state_idx]
+                            .click_regions()
+                            .iter()
+                            .cloned(),
+                    );
+
+                    goal_state_idx += 1;
+                }
+            }
+        }
+    }
+}
+
+fn layout_with_prefix(area: Rect, prefix: &str, buf: &mut Buffer) -> Rect {
+    #[allow(clippy::cast_possible_truncation)]
+    let prefix_width = prefix.chars().count() as u16;
+    let min_content_width = 10;
+
+    if prefix_width > 0 && area.width > prefix_width + min_content_width {
+        let [prefix_area, content_area] =
+            Layout::horizontal([Constraint::Length(prefix_width), Constraint::Fill(1)]).areas(area);
+
+        render_vertical_prefix(prefix_area, prefix, buf);
+        content_area
+    } else {
+        area
+    }
+}
+
+fn render_vertical_prefix(area: Rect, prefix: &str, buf: &mut Buffer) {
     let style = Style::new().fg(Color::DarkGray);
     let line = Line::from(Span::styled(prefix.to_string(), style));
     let lines: Vec<Line> = iter::repeat_n(line, area.height as usize).collect();
-    frame.render_widget(Paragraph::new(lines), area);
+    Paragraph::new(lines).render(area, buf);
 }
 
 fn render_case_split_label(

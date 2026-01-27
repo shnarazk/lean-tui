@@ -1,101 +1,120 @@
-//! Proof steps sidebar component for the Paperproof view.
+//! Proof steps sidebar widget for the Paperproof view.
 
 use ratatui::{
+    buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
-    Frame,
+    widgets::{Paragraph, Widget},
 };
 
 use crate::{lean_rpc::PaperproofStep, tui_ipc::ProofStep};
 
-/// Input for rendering the proof steps sidebar.
-pub struct ProofStepsSidebarInput<'a> {
-    pub proof_steps: &'a [ProofStep],
-    pub paperproof_steps: Option<&'a [PaperproofStep]>,
-    pub current_step_index: usize,
+/// Widget displaying proof steps in a sidebar.
+pub struct ProofStepsSidebar<'a> {
+    proof_steps: &'a [ProofStep],
+    paperproof_steps: Option<&'a [PaperproofStep]>,
+    current_step_index: usize,
 }
 
-/// Render the proof steps sidebar.
-#[allow(clippy::cast_possible_truncation)]
-pub fn render_proof_steps_sidebar(
-    frame: &mut Frame,
-    area: Rect,
-    input: &ProofStepsSidebarInput<'_>,
-) {
-    let mut lines = Vec::new();
-
-    for (i, step) in input.proof_steps.iter().enumerate() {
-        let is_current = i == input.current_step_index;
-        render_step_line(&mut lines, step, i, is_current);
-        render_step_dependencies(&mut lines, step);
-        render_step_theorems(&mut lines, input.paperproof_steps, i);
+impl<'a> ProofStepsSidebar<'a> {
+    pub const fn new(
+        proof_steps: &'a [ProofStep],
+        paperproof_steps: Option<&'a [PaperproofStep]>,
+        current_step_index: usize,
+    ) -> Self {
+        Self {
+            proof_steps,
+            paperproof_steps,
+            current_step_index,
+        }
     }
 
-    frame.render_widget(Paragraph::new(lines), area);
+    fn build_lines(&self) -> Vec<Line<'static>> {
+        self.proof_steps
+            .iter()
+            .enumerate()
+            .flat_map(|(i, step)| {
+                let is_current = i == self.current_step_index;
+                let mut lines = vec![step_line(step, i, is_current)];
+
+                if let Some(deps) = dependency_line(step) {
+                    lines.push(deps);
+                }
+                if let Some(thms) = theorem_line(self.paperproof_steps, i) {
+                    lines.push(thms);
+                }
+
+                lines
+            })
+            .collect()
+    }
 }
 
-fn render_step_line(
-    lines: &mut Vec<Line<'static>>,
-    step: &ProofStep,
-    index: usize,
-    is_current: bool,
-) {
+impl Widget for ProofStepsSidebar<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let lines = self.build_lines();
+        Paragraph::new(lines).render(area, buf);
+    }
+}
+
+fn step_line(step: &ProofStep, index: usize, is_current: bool) -> Line<'static> {
     let style = if is_current {
         Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(Color::White)
     };
 
-    lines.push(Line::from(vec![
+    let marker = if is_current { "▶ " } else { "  " };
+    let indent = "  ".repeat(step.depth);
+
+    Line::from(vec![
         Span::styled(
             format!("{:>3}.", index + 1),
             Style::new().fg(Color::DarkGray),
         ),
-        Span::styled(
-            if is_current { "▶ " } else { "  " },
-            Style::new().fg(Color::Cyan),
-        ),
-        Span::styled("  ".repeat(step.depth), Style::new().fg(Color::DarkGray)),
+        Span::styled(marker, Style::new().fg(Color::Cyan)),
+        Span::styled(indent, Style::new().fg(Color::DarkGray)),
         Span::styled(step.tactic.clone(), style),
-    ]));
+    ])
 }
 
-fn render_step_dependencies(lines: &mut Vec<Line<'static>>, step: &ProofStep) {
-    if !step.depends_on.is_empty() {
-        lines.push(Line::from(vec![
-            Span::raw("     "),
-            Span::styled(
-                format!("uses: {}", step.depends_on.join(", ")),
-                Style::new().fg(Color::Yellow).add_modifier(Modifier::DIM),
-            ),
-        ]));
-    }
-}
-
-fn render_step_theorems(
-    lines: &mut Vec<Line<'static>>,
-    paperproof_steps: Option<&[PaperproofStep]>,
-    index: usize,
-) {
-    let Some(pp_steps) = paperproof_steps else {
-        return;
-    };
-    let Some(pp_step) = pp_steps.get(index) else {
-        return;
-    };
-    if pp_step.theorems.is_empty() {
-        return;
+fn dependency_line(step: &ProofStep) -> Option<Line<'static>> {
+    if step.depends_on.is_empty() {
+        return None;
     }
 
-    let thm_names: Vec<_> = pp_step.theorems.iter().map(|t| t.name.as_str()).collect();
-
-    lines.push(Line::from(vec![
+    Some(Line::from(vec![
         Span::raw("     "),
         Span::styled(
-            format!("thms: {}", thm_names.join(", ")),
+            format!("uses: {}", step.depends_on.join(", ")),
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::DIM),
+        ),
+    ]))
+}
+
+fn theorem_line(
+    paperproof_steps: Option<&[PaperproofStep]>,
+    index: usize,
+) -> Option<Line<'static>> {
+    let pp_step = paperproof_steps?.get(index)?;
+
+    if pp_step.theorems.is_empty() {
+        return None;
+    }
+
+    let thm_names: String = pp_step
+        .theorems
+        .iter()
+        .map(|t| t.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    Some(Line::from(vec![
+        Span::raw("     "),
+        Span::styled(
+            format!("thms: {thm_names}"),
             Style::new().fg(Color::Blue).add_modifier(Modifier::DIM),
         ),
-    ]));
+    ]))
 }
