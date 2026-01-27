@@ -1,52 +1,37 @@
 //! Component-based UI architecture.
 
-mod diff_text;
-mod goal_before;
-mod goal_box;
-mod goal_section;
+pub mod diff_text;
+pub mod goal_before;
+pub mod goal_box;
+pub mod goal_section;
 pub mod goal_tree;
-mod goals_column;
-mod help_menu;
-mod hyp_layer;
-mod hyp_section;
-mod layout_metrics;
-mod proof_steps_sidebar;
-mod render_helpers;
-mod selection;
-mod status_bar;
-mod tactic_row;
-mod theme;
-mod tree_builder;
-mod tree_colors;
-mod tree_hyp_bar;
-mod tree_view;
+pub mod goals_column;
+pub mod help_menu;
+pub mod hyp_layer;
+pub mod hyp_section;
+pub mod interactive_widget;
+pub mod layout_metrics;
+pub mod proof_steps_sidebar;
+pub mod render_helpers;
+pub mod selection;
+pub mod status_bar;
+pub mod tactic_row;
+pub mod theme;
+pub mod tree_builder;
+pub mod tree_colors;
+pub mod tree_hyp_bar;
+pub mod tree_view;
 
 use crossterm::event::{KeyEvent, MouseEvent};
-pub use goal_before::render_goal_before;
-pub use goal_section::{GoalSection, GoalSectionState};
-pub use goals_column::{GoalsColumn, GoalsColumnState};
-pub use help_menu::HelpMenu;
-pub use hyp_section::{HypSection, HypSectionState};
-pub use layout_metrics::LayoutMetrics;
-pub use proof_steps_sidebar::{ProofStepsSidebar, ProofStepsSidebarState};
-use ratatui::{layout::Rect, Frame};
-pub use render_helpers::{render_error, render_no_goals};
-pub use selection::SelectionState;
-pub use status_bar::{StatusBar, StatusBarInput};
-pub use tactic_row::divider;
-pub use theme::Theme;
-pub use tree_view::render_tree_view;
+use ratatui::layout::Rect;
 
-#[derive(Clone)]
-pub struct KeyPress(pub KeyEvent);
+use crate::lean_rpc::Hypothesis;
 
 #[derive(Clone)]
 pub enum KeyMouseEvent {
     Key(KeyEvent),
     Mouse(MouseEvent),
 }
-
-use crate::lean_rpc::Hypothesis;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectableItem {
@@ -107,18 +92,4 @@ pub fn hypothesis_indices(len: usize, reverse: bool) -> Box<dyn Iterator<Item = 
     } else {
         Box::new(range)
     }
-}
-
-pub trait Component {
-    type Input;
-    /// Use `()` for noninteractive components.
-    type Event;
-
-    fn update(&mut self, input: Self::Input);
-
-    fn handle_event(&mut self, _event: Self::Event) -> bool {
-        false
-    }
-
-    fn render(&mut self, frame: &mut Frame, area: Rect);
 }

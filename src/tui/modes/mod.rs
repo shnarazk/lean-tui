@@ -17,8 +17,9 @@ use ratatui::{layout::Rect, Frame};
 use steps_view::StepsMode;
 pub use steps_view::StepsModeInput;
 
-use crate::tui::components::{
-    Component, FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
+use crate::tui::widgets::{
+    interactive_widget::InteractiveWidget, FilterToggle, HypothesisFilters, KeyMouseEvent,
+    SelectableItem,
 };
 
 /// Backend data source for a display mode.
@@ -44,7 +45,7 @@ impl Backend {
 }
 
 /// Trait for display modes in the TUI.
-pub trait Mode: Component<Input = Self::Model, Event = KeyMouseEvent> {
+pub trait Mode: InteractiveWidget<Input = Self::Model, Event = KeyMouseEvent> {
     type Model;
 
     const NAME: &'static str;

@@ -8,9 +8,10 @@ use ratatui::{layout::Rect, Frame};
 use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
-    tui::components::{
-        goal_tree::GoalTree, hypothesis_indices, render_error, Component, FilterToggle,
-        HypothesisFilters, KeyMouseEvent, SelectableItem, SelectionState,
+    tui::widgets::{
+        goal_tree::GoalTree, hypothesis_indices, interactive_widget::InteractiveWidget,
+        render_helpers::render_error, selection::SelectionState, FilterToggle, HypothesisFilters,
+        KeyMouseEvent, SelectableItem,
     },
     tui_ipc::{CaseSplitInfo, DefinitionInfo},
 };
@@ -54,7 +55,7 @@ impl GoalTreeMode {
     }
 }
 
-impl Component for GoalTreeMode {
+impl InteractiveWidget for GoalTreeMode {
     type Input = GoalTreeModeInput;
     type Event = KeyMouseEvent;
 

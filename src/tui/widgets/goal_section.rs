@@ -15,9 +15,11 @@ use ratatui::{
 
 use crate::{
     lean_rpc::Goal,
-    tui::components::{
+    tui::widgets::{
         diff_text::{diff_style, DiffState, TaggedTextExt},
-        ClickRegion, LayoutMetrics, SelectableItem, Theme,
+        layout_metrics::LayoutMetrics,
+        theme::Theme,
+        ClickRegion, SelectableItem,
     },
 };
 

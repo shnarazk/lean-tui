@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::{
     lean_rpc::Hypothesis,
-    tui::components::{
+    tui::widgets::{
         diff_text::{diff_style, DiffState, TaggedTextExt},
         ClickRegion, SelectableItem,
     },

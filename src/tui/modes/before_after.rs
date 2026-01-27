@@ -11,9 +11,13 @@ use ratatui::{
 use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
-    tui::components::{
-        hypothesis_indices, render_error, Component, FilterToggle, GoalsColumn, GoalsColumnState,
-        HypothesisFilters, KeyMouseEvent, SelectableItem, SelectionState,
+    tui::widgets::{
+        goals_column::{GoalsColumn, GoalsColumnState},
+        hypothesis_indices,
+        interactive_widget::InteractiveWidget,
+        render_helpers::render_error,
+        selection::SelectionState,
+        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
     },
     tui_ipc::DefinitionInfo,
 };
@@ -92,7 +96,7 @@ impl BeforeAfterMode {
     }
 }
 
-impl Component for BeforeAfterMode {
+impl InteractiveWidget for BeforeAfterMode {
     type Input = BeforeAfterModeInput;
     type Event = KeyMouseEvent;
 

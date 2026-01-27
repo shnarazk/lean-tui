@@ -13,9 +13,13 @@ use ratatui::{
 use super::{Backend, Mode};
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
-    tui::components::{
-        hypothesis_indices, render_error, render_no_goals, render_tree_view, Component,
-        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem, SelectionState,
+    tui::widgets::{
+        hypothesis_indices,
+        interactive_widget::InteractiveWidget,
+        render_helpers::{render_error, render_no_goals},
+        selection::SelectionState,
+        tree_view::render_tree_view,
+        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
     },
     tui_ipc::DefinitionInfo,
 };
@@ -61,7 +65,7 @@ impl DeductionTreeMode {
     }
 }
 
-impl Component for DeductionTreeMode {
+impl InteractiveWidget for DeductionTreeMode {
     type Input = DeductionTreeModeInput;
     type Event = KeyMouseEvent;
 

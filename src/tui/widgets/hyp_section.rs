@@ -15,7 +15,9 @@ use ratatui::{
 use super::hyp_layer::HypLayer;
 use crate::{
     lean_rpc::Goal,
-    tui::components::{ClickRegion, HypothesisFilters, LayoutMetrics, SelectableItem, Theme},
+    tui::widgets::{
+        layout_metrics::LayoutMetrics, theme::Theme, ClickRegion, HypothesisFilters, SelectableItem,
+    },
 };
 
 impl Default for HypLayer {

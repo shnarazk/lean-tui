@@ -11,9 +11,12 @@ use ratatui::{
 
 use super::{
     diff_text::{render_hypothesis_line, render_target_line},
-    hypothesis_indices, ClickRegion, HypothesisFilters, LayoutMetrics, SelectableItem, Theme,
+    hypothesis_indices, ClickRegion, HypothesisFilters, SelectableItem,
 };
-use crate::lean_rpc::Goal;
+use crate::{
+    lean_rpc::Goal,
+    tui::widgets::{layout_metrics::LayoutMetrics, theme::Theme},
+};
 
 const BORDER: Set = Set {
     top_left: "┌",

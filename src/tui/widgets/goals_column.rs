@@ -13,9 +13,9 @@ use ratatui::{
 
 use super::{
     diff_text::{render_hypothesis_line, render_target_line},
-    ClickRegion, HypothesisFilters, SelectableItem, Theme,
+    ClickRegion, HypothesisFilters, SelectableItem,
 };
-use crate::lean_rpc::Goal;
+use crate::{lean_rpc::Goal, tui::widgets::theme::Theme};
 
 /// State for the goals column widget.
 #[derive(Default)]

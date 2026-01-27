@@ -11,8 +11,7 @@ use ratatui::{
     },
 };
 
-use super::Theme;
-use crate::{lean_rpc::PaperproofStep, tui_ipc::ProofStep};
+use crate::{lean_rpc::PaperproofStep, tui::widgets::theme::Theme, tui_ipc::ProofStep};
 
 /// State for the proof steps sidebar widget.
 #[derive(Default)]

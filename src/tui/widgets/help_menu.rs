@@ -9,7 +9,8 @@ use ratatui::{
     Frame,
 };
 
-use super::{Component, KeyPress};
+use super::KeyEvent;
+use crate::tui::widgets::interactive_widget::InteractiveWidget;
 
 const KEYBINDINGS: &[(&str, &str)] = &[
     // Display modes
@@ -42,9 +43,9 @@ impl HelpMenu {
     }
 }
 
-impl Component for HelpMenu {
+impl InteractiveWidget for HelpMenu {
     type Input = ();
-    type Event = KeyPress;
+    type Event = KeyEvent;
 
     fn update(&mut self, _input: Self::Input) {}
 
@@ -53,7 +54,7 @@ impl Component for HelpMenu {
             return false;
         }
 
-        match event.0.code {
+        match event.code {
             KeyCode::Esc | KeyCode::Char('?') => {
                 self.visible = false;
                 true

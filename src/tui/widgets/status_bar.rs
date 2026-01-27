@@ -8,7 +8,8 @@ use ratatui::{
     Frame,
 };
 
-use super::{Component, FilterToggle, HypothesisFilters};
+use super::{FilterToggle, HypothesisFilters};
+use crate::tui::widgets::interactive_widget::InteractiveWidget;
 
 /// Input for the status bar.
 pub struct StatusBarInput {
@@ -24,7 +25,7 @@ pub struct StatusBar {
     supported_filters: &'static [FilterToggle],
 }
 
-impl Component for StatusBar {
+impl InteractiveWidget for StatusBar {
     type Input = StatusBarInput;
     type Event = ();
 

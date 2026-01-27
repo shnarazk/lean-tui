@@ -2,12 +2,49 @@
 
 (**Warning**: early release, under development)
 
-This is a **terminal-only info view**, comparable to the VS Code info view for [Lean 4](https://lean-lang.org/).
+This is a **terminal-only (TUI) info view**, comparable to the VS Code info view for [Lean 4](https://lean-lang.org/).
 
 It shows:
 
 - The active variable bindings for a developer writing code (term mode).
 - The hypotheses and goals for a mathematician proving and formalizing proofs (tactic mode).
+
+See below (or go to [codeberg](https://codeberg.org/wvhulle/lean-tui)) for a screenshot of this program rendering the proof state of a simple but incomplete Lean proof:
+
+```lean
+import Mathlib.Data.Set.Basic
+import Paperproof
+
+theorem commutativityOfIntersections
+    (s t : Set Nat) : s ∩ t = t ∩ s := by
+  ext x
+  apply Iff.intro
+
+  intro h1
+  rw [Set.mem_inter_iff, and_comm] at h1
+  exact h1
+
+  intro h2
+  rw [Set.mem_inter_iff, and_comm] at h2
+
+  -- exact h2
+```
+
+Screenshots of different display modes
+
+| Tree-Sitter                  | PaperProof                            |
+| ---------------------------- | ------------------------------------- |
+| ![](./imgs/before_after.png) | ![](./imgs/deduction_style.png)       |
+| ![](./imgs/goal_tree.png)    | ![](./imgs/step_hypotheses_goals.png) |
+
+Display styles:
+
+- Goal tree: open goals as a tree
+- Before after: current active goal state and previous and next goal state
+- Deduction tree: proof shown as a deduction tree (with Paperproof)
+- Steps: steps shown next to all active hypotheses and goals
+
+Switch proof display styles: `[`, `]`
 
 ## How does it work?
 
@@ -34,37 +71,15 @@ flowchart LR
     Proxy --> |Unix socket| TUI
 ```
 
-Start typing a proof in your editor and you will see the proof state appear in the terminal.
-
-Key bindings:
-
-- Use `j`, `k` to go up or down in hypotheses
-- Use `d` to jump to term definition
-- Use `t`to jump to type definition
-- Help menu `?`
-- Close with `q`
-
-Display styles:
-
-- Goal tree: open goals as a tree
-- Before after: current active goal state and previous and next goal state
-- Deduction tree: proof shown as a deduction tree (with Paperproof)
-- Steps: steps shown next to all active hypotheses and goals
-
-Switch proof display styles: `[`, `]`
-
-For screenshots, see [codeberg](https://codeberg.org/wvhulle/lean-tui) or below:
-
-| Tree-Sitter                  | PaperProof                            |
-| ---------------------------- | ------------------------------------- |
-| ![](./imgs/before_after.png) | ![](./imgs/deduction_style.png)       |
-| ![](./imgs/goal_tree.png)    | ![](./imgs/step_hypotheses_goals.png) |
-
 ## Installation
+
+### 1. Compiler toolchains
 
 If you have never used Lean before, install `elan`, the Lean compiler toolchain manager. Run at least a `lake build` or `lake run`in your Lean test project to make sure your Lean code has its dependencies fetched (otherwise the LSP will not work)
 
 Install Rust (through [`rustup`](https://rustup.rs/)) if you haven't compiled Rust programs before.
+
+### 2. Install this TUI
 
 Then install this crate as a binary in your user with:
 
@@ -74,7 +89,27 @@ cargo install lean-tui
 
 If `~/.cargo/bin` is in your path, you can now run this program with `lean-tui`.
 
-Install [PaperProof](https://github.com/Paper-Proof/paperproof/tree/main) if you want to use deduction-style display mode.
+### 3. Import PaperProof (optional)
+
+If you want to use the more detailed display mode, add [PaperProof](https://github.com/Paper-Proof/paperproof/tree/main) as a Lake dependency.
+
+In your `lakefile.toml`:
+
+```toml
+[[require]]
+name = "Paperproof"
+git = "https://github.com/Paper-Proof/paperproof.git"
+subDir = "lean"
+rev = "main"
+```
+
+Fetch the source code for dependencies: `lake update Paperproof`.
+
+Add this line to the Lean source code of which you want to visualize proof state:
+
+```lean
+import Paperproof
+```
 
 ## Configuration
 
@@ -110,7 +145,15 @@ Switch back to your editor:
 
 1. Move your cursor somewhere in a proof or function
 2. Enter "insert mode" in a proof
-3. Start typing.
+3. Start typing or hover
+
+Key bindings:
+
+- Use `j`, `k` to go up or down in hypotheses
+- Use `d` to jump to term definition
+- Use `t`to jump to type definition
+- Help menu `?`
+- Close with `q`
 
 (Note that the goals in the TUI update but only if you actually perform edits in insert mode or use the hover action)
 

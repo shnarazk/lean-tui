@@ -1,8 +1,8 @@
 //! TUI for displaying Lean proof goals.
 
 pub mod app;
-mod components;
 mod modes;
+mod widgets;
 
 use std::{io::stdout, time::Duration};
 

@@ -11,11 +11,17 @@ use ratatui::{
 use super::{Backend, Mode};
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
-    tui::components::{
-        divider, hypothesis_indices, render_error, render_goal_before, render_no_goals, Component,
-        FilterToggle, GoalSection, GoalSectionState, HypSection, HypSectionState,
-        HypothesisFilters, KeyMouseEvent, ProofStepsSidebar, ProofStepsSidebarState,
-        SelectableItem, SelectionState,
+    tui::widgets::{
+        goal_before::render_goal_before,
+        goal_section::{GoalSection, GoalSectionState},
+        hyp_section::{HypSection, HypSectionState},
+        hypothesis_indices,
+        interactive_widget::InteractiveWidget,
+        proof_steps_sidebar::{ProofStepsSidebar, ProofStepsSidebarState},
+        render_helpers::{render_error, render_no_goals},
+        selection::SelectionState,
+        tactic_row::divider,
+        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
     },
     tui_ipc::{DefinitionInfo, ProofStep},
 };
@@ -121,7 +127,7 @@ struct MainLayout {
     goals: Rect,
 }
 
-impl Component for StepsMode {
+impl InteractiveWidget for StepsMode {
     type Input = StepsModeInput;
     type Event = KeyMouseEvent;
 

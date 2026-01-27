@@ -12,9 +12,13 @@ use ratatui::{
 
 use super::{
     goal_box::{GoalBox, GoalBoxState},
-    ClickRegion, HypothesisFilters, LayoutMetrics, SelectableItem, Theme,
+    ClickRegion, HypothesisFilters, SelectableItem,
 };
-use crate::{lean_rpc::Goal, tui_ipc::CaseSplitInfo};
+use crate::{
+    lean_rpc::Goal,
+    tui::widgets::{layout_metrics::LayoutMetrics, theme::Theme},
+    tui_ipc::CaseSplitInfo,
+};
 
 mod tree_chars {
     pub const MIDDLE: &str = "├── ";

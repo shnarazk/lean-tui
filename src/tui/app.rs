@@ -12,16 +12,19 @@ use ratatui::{
 };
 
 use super::{
-    components::{
-        Component, HelpMenu, KeyMouseEvent, KeyPress, SelectableItem, StatusBar, StatusBarInput,
-    },
     modes::{
         BeforeAfterModeInput, DeductionTreeModeInput, DisplayMode, GoalTreeModeInput,
         StepsModeInput,
     },
+    widgets::{KeyMouseEvent, SelectableItem},
 };
 use crate::{
     lean_rpc::{Goal, GotoLocation, GotoLocations, PaperproofStep},
+    tui::widgets::{
+        help_menu::HelpMenu,
+        interactive_widget::InteractiveWidget,
+        status_bar::{StatusBar, StatusBarInput},
+    },
     tui_ipc::{
         socket_path, CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message,
         Position, ProofStep, TemporalSlot,
@@ -486,7 +489,7 @@ impl App {
     pub fn handle_event(&mut self, event: &Event) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                if self.help_menu.handle_event(KeyPress(*key)) {
+                if self.help_menu.handle_event(*key) {
                     return;
                 }
                 if !self.handle_global_key(key.code) {
