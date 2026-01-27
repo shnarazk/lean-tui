@@ -34,8 +34,8 @@ pub fn render_hyp_bar(frame: &mut Frame, area: Rect, hyps: &[PaperproofHypothesi
                 Span::styled(
                     format!(" {}: {} ", h.username, truncate(&h.type_, 20)),
                     Style::new()
-                        .fg(tree_colors::HYPOTHESIS_FG)
-                        .bg(tree_colors::HYPOTHESIS_BG)
+                        .fg(tree_colors::DATA_HYP_FG)
+                        .bg(tree_colors::DATA_HYP_BG)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),

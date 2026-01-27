@@ -2,10 +2,18 @@
 
 use ratatui::style::Color;
 
-pub const HYPOTHESIS_BG: Color = Color::Rgb(60, 80, 60);
-pub const HYPOTHESIS_FG: Color = Color::Rgb(200, 230, 200);
+// Proof hypothesis colors (green tones)
+pub const HYPOTHESIS_BG: Color = Color::Rgb(30, 45, 30);
+pub const HYPOTHESIS_FG: Color = Color::Rgb(150, 200, 150);
+
+// Data hypothesis colors (yellow/tan tones)
+pub const DATA_HYP_BG: Color = Color::Rgb(50, 45, 25);
+pub const DATA_HYP_FG: Color = Color::Rgb(200, 180, 120);
+
 pub const TACTIC_BORDER: Color = Color::DarkGray;
-pub const GOAL_FG: Color = Color::Rgb(180, 100, 100);
+
+// Goal color
+pub const GOAL_FG: Color = Color::Rgb(200, 140, 140);
 pub const COMPLETED_FG: Color = Color::Green;
 pub const CURRENT_BORDER: Color = Color::Cyan;
 pub const INCOMPLETE_BORDER: Color = Color::Yellow;

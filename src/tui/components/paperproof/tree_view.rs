@@ -74,7 +74,7 @@ fn render_conclusion(frame: &mut Frame, area: Rect, goal: &str) {
 
     let goal_text = Paragraph::new(Line::from(vec![Span::styled(
         format!("⊢ {goal}"),
-        Style::new().fg(Color::White),
+        Style::new().fg(tree_colors::GOAL_FG),
     )]))
     .wrap(Wrap { trim: true });
 
@@ -242,12 +242,16 @@ fn render_step_box(
                 if i > 0 {
                     spans.push(Span::raw(" "));
                 }
+                // Choose colors based on hypothesis type
+                let (fg, bg) = if h.is_proof == "proof" {
+                    (tree_colors::HYPOTHESIS_FG, tree_colors::HYPOTHESIS_BG)
+                } else {
+                    (tree_colors::DATA_HYP_FG, tree_colors::DATA_HYP_BG)
+                };
                 // Render as colored pill: [name: type]
                 spans.push(Span::styled(
                     format!(" {}: {} ", h.username, truncate(&h.type_, 15)),
-                    Style::new()
-                        .fg(tree_colors::HYPOTHESIS_FG)
-                        .bg(tree_colors::HYPOTHESIS_BG),
+                    Style::new().fg(fg).bg(bg),
                 ));
                 spans
             })
