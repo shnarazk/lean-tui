@@ -7,23 +7,19 @@
 //!        SocketServer → TUI clients
 //! ```
 
+pub mod ast;
 mod commands;
-mod cursor;
-mod documents;
 mod goals;
-mod service;
-pub mod tactic_finder;
+mod lake;
+mod lsp;
 
-use std::{process::Stdio, sync::Arc};
+use std::sync::Arc;
 
 use async_lsp::MainLoop;
 use commands::process_command;
-use documents::DocumentCache;
-use service::{DeferredService, InterceptService};
-use tokio::{
-    io::{stdin, stdout},
-    process::{ChildStdin, ChildStdout, Command},
-};
+use lake::spawn_lake_serve;
+use lsp::{DeferredService, DocumentCache, InterceptService};
+use tokio::io::{stdin, stdout};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
@@ -131,39 +127,4 @@ pub async fn run() -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Lean pretty-printer options for the server.
-const LEAN_PP_OPTIONS: &[&str] = &[
-    "pp.showLetValues=true", // Show full let-binding values (not ⋯)
-];
-
-/// Spawn lake serve child process with configured Lean options.
-fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
-    let mut cmd = Command::new("lake");
-    cmd.arg("serve").arg("--");
-    for opt in LEAN_PP_OPTIONS {
-        cmd.args(["-D", opt]);
-    }
-
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    let stdin = child.stdin.take().ok_or_else(|| {
-        Error::Lsp(LspError::RpcError {
-            code: None,
-            message: "Failed to capture lake serve stdin".to_string(),
-        })
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        Error::Lsp(LspError::RpcError {
-            code: None,
-            message: "Failed to capture lake serve stdout".to_string(),
-        })
-    })?;
-
-    Ok((stdin, stdout))
 }

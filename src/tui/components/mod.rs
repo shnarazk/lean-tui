@@ -6,12 +6,14 @@ mod goal_tree;
 mod goal_view;
 mod header;
 mod help_menu;
+mod paperproof;
 mod status_bar;
 
 use crossterm::event::{KeyEvent, MouseEvent};
 pub use goal_view::{GoalView, GoalViewInput};
 pub use header::Header;
 pub use help_menu::HelpMenu;
+pub use paperproof::{PaperproofView, PaperproofViewInput};
 use ratatui::{layout::Rect, Frame};
 pub use status_bar::StatusBar;
 

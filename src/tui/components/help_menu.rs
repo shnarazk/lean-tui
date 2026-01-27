@@ -14,6 +14,7 @@ use super::{Component, KeyPress};
 const KEYBINDINGS: &[(&str, &str)] = &[
     ("j/k", "navigate"),
     ("Enter", "go to definition"),
+    ("v", "toggle paperproof"),
     ("d", "toggle header"),
     ("i", "toggle instances"),
     ("t", "toggle types"),

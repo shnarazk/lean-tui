@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 
-use super::{documents::DocumentCache, goals::fetch_combined_goals, tactic_finder};
+use super::{ast, goals::fetch_combined_goals, lsp::DocumentCache};
 use crate::{
     lean_rpc::{GoToKind, RpcClient},
     tui_ipc::{Command, GoalResult, SocketServer, TemporalSlot},
@@ -94,9 +94,9 @@ async fn handle_fetch_temporal_goals(
     };
 
     let target_position = match slot {
-        TemporalSlot::Previous => tactic_finder::find_previous_tactic(&tree, cursor_position),
+        TemporalSlot::Previous => ast::find_previous_tactic(&tree, cursor_position),
         TemporalSlot::Current => Some(cursor_position),
-        TemporalSlot::Next => tactic_finder::find_next_tactic(&tree, cursor_position),
+        TemporalSlot::Next => ast::find_next_tactic(&tree, cursor_position),
     };
 
     let Some(target) = target_position else {

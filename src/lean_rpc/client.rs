@@ -15,6 +15,10 @@ use tokio::sync::Mutex;
 use tower_service::Service;
 
 use super::{
+    paperproof::{
+        PaperproofInputParams, PaperproofMode, PaperproofOutputParams,
+        PAPERPROOF_GET_SNAPSHOT_DATA,
+    },
     Goal, GotoLocation, InteractiveGoalsResponse, InteractiveTermGoalResponse, RpcConnectResponse,
     GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, RPC_CALL, RPC_CONNECT,
 };
@@ -338,5 +342,54 @@ impl RpcClient {
         }
 
         None
+    }
+
+    /// Get proof steps from Paperproof if available.
+    ///
+    /// Returns `None` if Paperproof is not available in the user's Lean project,
+    /// or `Some(output)` with the proof step data.
+    pub async fn get_paperproof_snapshot(
+        &self,
+        text_document: &TextDocumentIdentifier,
+        position: Position,
+        mode: PaperproofMode,
+    ) -> Result<Option<PaperproofOutputParams>, LspError> {
+        let uri = &text_document.uri;
+        let params = PaperproofInputParams { pos: position, mode };
+
+        let result = self
+            .rpc_call_with_retry(
+                uri,
+                text_document,
+                position,
+                PAPERPROOF_GET_SNAPSHOT_DATA,
+                params,
+            )
+            .await;
+
+        match result {
+            Ok(response) => {
+                if response.is_null() {
+                    return Ok(None);
+                }
+                let output: PaperproofOutputParams = serde_json::from_value(response)
+                    .map_err(|e| LspError::ParseError(e.to_string()))?;
+                tracing::info!(
+                    "Paperproof: got {} proof steps (version {})",
+                    output.steps.len(),
+                    output.version
+                );
+                Ok(Some(output))
+            }
+            Err(LspError::RpcError { message, .. })
+                if message.contains("unknown method")
+                    || message.contains("Paperproof")
+                    || message.contains("not found") =>
+            {
+                tracing::debug!("Paperproof not available: {message}");
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
     }
 }

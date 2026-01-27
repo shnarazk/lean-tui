@@ -14,9 +14,8 @@ use futures::Future;
 use super::{
     cursor::{extract_cursor_from_notification, extract_cursor_from_request},
     documents::DocumentCache,
-    goals::spawn_goal_fetch,
 };
-use crate::{lean_rpc::RpcClient, tui_ipc::SocketServer};
+use crate::{lean_rpc::RpcClient, proxy::goals::spawn_goal_fetch, tui_ipc::SocketServer};
 
 /// Intercepts LSP messages, extracts cursor position, and forwards to inner
 /// service.

@@ -6,12 +6,46 @@ use async_lsp::lsp_types::Url;
 
 use super::components::SelectableItem;
 use crate::{
-    lean_rpc::{Goal, GotoLocation},
+    lean_rpc::{Goal, GotoLocation, PaperproofStep},
     tui_ipc::{
         CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
-        TemporalSlot,
+        ProofStep, TemporalSlot,
     },
 };
+
+/// View mode for the TUI display.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ViewMode {
+    /// Standard goal view with hypotheses and targets.
+    #[default]
+    Standard,
+    /// Paperproof-style view with proof history.
+    Paperproof,
+}
+
+/// A step in the local proof history (includes goals, used for navigation).
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
+pub struct LocalProofStep {
+    /// Position in the source file where this step occurs.
+    pub position: Position,
+    /// The tactic text (if extractable).
+    pub tactic: Option<String>,
+    /// Goals at this proof step.
+    pub goals: Vec<Goal>,
+    /// Nesting depth (for have/cases scopes).
+    pub scope_depth: usize,
+}
+
+/// Proof history tracking all steps in the current proof.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
+pub struct ProofHistory {
+    /// All proof steps, ordered by position.
+    pub steps: Vec<LocalProofStep>,
+    /// Index of the currently selected step.
+    pub current_step_index: usize,
+}
 
 /// Visibility settings for diff columns (both hidden by default).
 #[derive(Debug, Clone, Copy, Default)]
@@ -69,6 +103,17 @@ pub struct App {
     outgoing_commands: Vec<Command>,
     /// Visibility settings for diff columns.
     pub columns: ColumnVisibility,
+    /// Current view mode (Standard or Paperproof).
+    pub view_mode: ViewMode,
+    /// Proof history for Paperproof view.
+    #[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
+    pub proof_history: ProofHistory,
+    /// Proof steps from Paperproof (if available).
+    pub paperproof_steps: Option<Vec<PaperproofStep>>,
+    /// Unified proof steps (from Paperproof or local tree-sitter analysis).
+    pub proof_steps: Vec<ProofStep>,
+    /// Index of current step (closest to cursor).
+    pub current_step_index: usize,
 }
 
 fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> GoalState {
@@ -133,6 +178,9 @@ impl App {
                 goals,
                 definition,
                 case_splits,
+                paperproof_steps,
+                proof_steps,
+                current_step_index,
             } => {
                 let goals_changed = self.temporal_goals.current.goals != goals;
                 let line_changed = self.temporal_goals.current.position.line != position.line;
@@ -148,6 +196,9 @@ impl App {
                     self.temporal_goals.current.position = position;
                     self.definition = new_definition;
                     self.case_splits = case_splits;
+                    self.paperproof_steps = paperproof_steps;
+                    self.proof_steps = proof_steps;
+                    self.current_step_index = current_step_index;
                     self.connected = true;
                     return;
                 }
@@ -159,9 +210,24 @@ impl App {
                 };
                 self.definition = new_definition;
                 self.case_splits = case_splits;
+                self.paperproof_steps = paperproof_steps;
+                self.proof_steps = proof_steps;
+                self.current_step_index = current_step_index;
                 self.connected = true;
                 self.error = None;
                 self.refresh_temporal_columns();
+            }
+            Message::PaperproofData {
+                uri: _,
+                position: _,
+                output,
+            } => {
+                self.paperproof_steps = if output.steps.is_empty() {
+                    None
+                } else {
+                    Some(output.steps)
+                };
+                self.connected = true;
             }
             Message::TemporalGoals {
                 uri: _,
@@ -198,6 +264,36 @@ impl App {
         if self.columns.next && self.temporal_goals.next.is_none() {
             self.request_temporal_goals(TemporalSlot::Next);
         }
+    }
+
+    /// Toggle between Standard and Paperproof view modes.
+    pub const fn toggle_view_mode(&mut self) {
+        self.view_mode = match self.view_mode {
+            ViewMode::Standard => ViewMode::Paperproof,
+            ViewMode::Paperproof => ViewMode::Standard,
+        };
+    }
+
+    /// Navigate to the previous step in proof history.
+    #[allow(dead_code)] // Will be used in Phase 5 for proof step navigation
+    pub const fn proof_step_previous(&mut self) {
+        if self.proof_history.current_step_index > 0 {
+            self.proof_history.current_step_index -= 1;
+        }
+    }
+
+    /// Navigate to the next step in proof history.
+    #[allow(dead_code)] // Will be used in Phase 5 for proof step navigation
+    pub const fn proof_step_next(&mut self) {
+        if self.proof_history.current_step_index + 1 < self.proof_history.steps.len() {
+            self.proof_history.current_step_index += 1;
+        }
+    }
+
+    /// Get the current proof step (if any).
+    #[allow(dead_code)] // Will be used in Phase 5 for proof step navigation
+    pub fn current_proof_step(&self) -> Option<&LocalProofStep> {
+        self.proof_history.steps.get(self.proof_history.current_step_index)
     }
 
     /// Navigate to the given selection.

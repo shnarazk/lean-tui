@@ -1,9 +1,11 @@
 //! Lean RPC protocol types and client.
 
 mod client;
+pub mod paperproof;
 
 use async_lsp::lsp_types::{Position, Range, Url};
 pub use client::{GoToKind, RpcClient};
+pub use paperproof::{PaperproofMode, PaperproofOutputParams, PaperproofStep};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

@@ -16,8 +16,8 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use super::protocol::{socket_path, Command, CursorInfo, GoalResult, Message, TemporalSlot};
-use crate::lean_rpc::Goal;
+use super::protocol::{socket_path, Command, CursorInfo, GoalResult, Message, ProofStep, TemporalSlot};
+use crate::lean_rpc::{Goal, PaperproofStep};
 
 // ============================================================================
 // SocketServer - broadcasts messages to TUI clients
@@ -63,6 +63,7 @@ impl SocketServer {
     }
 
     /// Broadcast goals to all connected clients.
+    #[allow(clippy::too_many_arguments)]
     pub fn broadcast_goals(
         &self,
         uri: Url,
@@ -70,6 +71,9 @@ impl SocketServer {
         goals: Vec<Goal>,
         definition: Option<super::DefinitionInfo>,
         case_splits: Vec<super::CaseSplitInfo>,
+        paperproof_steps: Option<Vec<PaperproofStep>>,
+        proof_steps: Vec<ProofStep>,
+        current_step_index: usize,
     ) {
         self.send(Message::Goals {
             uri,
@@ -77,6 +81,9 @@ impl SocketServer {
             goals,
             definition,
             case_splits,
+            paperproof_steps,
+            proof_steps,
+            current_step_index,
         });
     }
 

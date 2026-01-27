@@ -5,9 +5,10 @@ mod components;
 
 use std::{io::stdout, time::Duration};
 
-use app::App;
+use app::{App, ViewMode};
 use components::{
-    Component, GoalView, GoalViewInput, Header, HelpMenu, KeyMouseEvent, KeyPress, StatusBar,
+    Component, GoalView, GoalViewInput, Header, HelpMenu, KeyMouseEvent, KeyPress,
+    PaperproofView, PaperproofViewInput, StatusBar,
 };
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind},
@@ -40,6 +41,7 @@ pub async fn run() -> Result<()> {
     // Create components
     let mut header = Header::default();
     let mut goal_view = GoalView::default();
+    let mut paperproof_view = PaperproofView::default();
     let mut status_bar = StatusBar::default();
     let mut help_menu = HelpMenu::default();
 
@@ -53,6 +55,13 @@ pub async fn run() -> Result<()> {
             case_splits: app.case_splits.clone(),
             error: app.error.clone(),
         });
+        paperproof_view.update(PaperproofViewInput {
+            goals: app.goals().to_vec(),
+            definition: app.definition.clone(),
+            error: app.error.clone(),
+            proof_steps: app.proof_steps.clone(),
+            current_step_index: app.current_step_index,
+        });
         status_bar.update(goal_view.filters());
 
         terminal.draw(|frame| {
@@ -61,6 +70,7 @@ pub async fn run() -> Result<()> {
                 &app,
                 &mut header,
                 &mut goal_view,
+                &mut paperproof_view,
                 &mut status_bar,
                 &mut help_menu,
             );
@@ -76,12 +86,26 @@ pub async fn run() -> Result<()> {
                         if help_menu.handle_event(KeyPress(*key)) {
                             continue;
                         }
-                        if !handle_global_event(&mut app, &mut help_menu, &goal_view, &event) {
-                            goal_view.handle_event(KeyMouseEvent::Key(*key));
+                        if !handle_global_event(&mut app, &mut help_menu, &goal_view, &paperproof_view, &event) {
+                            match app.view_mode {
+                                ViewMode::Standard => {
+                                    goal_view.handle_event(KeyMouseEvent::Key(*key));
+                                }
+                                ViewMode::Paperproof => {
+                                    paperproof_view.handle_event(KeyMouseEvent::Key(*key));
+                                }
+                            }
                         }
                     }
                     Event::Mouse(mouse) => {
-                        goal_view.handle_event(KeyMouseEvent::Mouse(*mouse));
+                        match app.view_mode {
+                            ViewMode::Standard => {
+                                goal_view.handle_event(KeyMouseEvent::Mouse(*mouse));
+                            }
+                            ViewMode::Paperproof => {
+                                paperproof_view.handle_event(KeyMouseEvent::Mouse(*mouse));
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -106,6 +130,7 @@ fn handle_global_event(
     app: &mut App,
     help_menu: &mut HelpMenu,
     goal_view: &GoalView,
+    paperproof_view: &PaperproofView,
     event: &Event,
 ) -> bool {
     let Event::Key(key) = event else {
@@ -124,6 +149,10 @@ fn handle_global_event(
             help_menu.toggle();
             true
         }
+        KeyCode::Char('v') => {
+            app.toggle_view_mode();
+            true
+        }
         KeyCode::Char('p') => {
             app.toggle_previous_column();
             true
@@ -133,7 +162,10 @@ fn handle_global_event(
             true
         }
         KeyCode::Enter => {
-            app.navigate_to_selection(goal_view.current_selection());
+            match app.view_mode {
+                ViewMode::Standard => app.navigate_to_selection(goal_view.current_selection()),
+                ViewMode::Paperproof => app.navigate_to_selection(paperproof_view.current_selection()),
+            }
             true
         }
         _ => false,
@@ -145,13 +177,14 @@ fn render_frame(
     app: &App,
     header: &mut Header,
     goal_view: &mut GoalView,
+    paperproof_view: &mut PaperproofView,
     status_bar: &mut StatusBar,
     help_menu: &mut HelpMenu,
 ) {
     let [main_area, help_area] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
-    render_main(frame, app, main_area, header, goal_view);
+    render_main(frame, app, main_area, header, goal_view, paperproof_view);
     status_bar.render(frame, help_area);
 
     help_menu.render(frame, frame.area());
@@ -163,9 +196,14 @@ fn render_main(
     area: Rect,
     header: &mut Header,
     goal_view: &mut GoalView,
+    paperproof_view: &mut PaperproofView,
 ) {
+    let title = match app.view_mode {
+        ViewMode::Standard => " lean-tui ",
+        ViewMode::Paperproof => " lean-tui [paperproof] ",
+    };
     let block = Block::bordered()
-        .title(" lean-tui ")
+        .title(title)
         .border_style(Style::new().fg(Color::Cyan));
 
     let inner = block.inner(area);
@@ -183,5 +221,9 @@ fn render_main(
         Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(inner);
 
     header.render(frame, header_area);
-    goal_view.render(frame, content_area);
+
+    match app.view_mode {
+        ViewMode::Standard => goal_view.render(frame, content_area),
+        ViewMode::Paperproof => paperproof_view.render(frame, content_area),
+    }
 }
