@@ -1,16 +1,16 @@
 //! Component-based UI architecture.
 
-mod definition_header;
 mod diff_text;
 mod goal_before;
 mod goal_section;
 mod goal_state;
 pub mod goal_tree;
-mod header;
 mod help_menu;
 mod hyp_layer;
 mod hyp_section;
 mod proof_steps_sidebar;
+mod render_helpers;
+mod selection;
 mod status_bar;
 mod tactic_row;
 mod tree_builder;
@@ -19,16 +19,16 @@ mod tree_hyp_bar;
 mod tree_view;
 
 use crossterm::event::{KeyEvent, MouseEvent};
-// Re-exports for modes
-pub use definition_header::render_definition_header;
 pub use diff_text::{diff_style, DiffState, TaggedTextExt};
 pub use goal_before::render_goal_before;
 pub use goal_section::{GoalSection, GoalSectionInput};
-pub use header::Header;
 pub use help_menu::HelpMenu;
 pub use hyp_section::{HypSection, HypSectionInput};
 pub use proof_steps_sidebar::{render_proof_steps_sidebar, ProofStepsSidebarInput};
 use ratatui::{layout::Rect, Frame};
+// Re-exports for modes
+pub use render_helpers::{render_error, render_no_goals};
+pub use selection::SelectionState;
 pub use status_bar::{StatusBar, StatusBarInput};
 pub use tactic_row::render_divider;
 pub use tree_view::render_tree_view;
@@ -83,6 +83,16 @@ impl HypothesisFilters {
             return false;
         }
         true
+    }
+
+    /// Toggle a filter setting.
+    pub const fn toggle(&mut self, filter: FilterToggle) {
+        match filter {
+            FilterToggle::Instances => self.hide_instances = !self.hide_instances,
+            FilterToggle::Inaccessible => self.hide_inaccessible = !self.hide_inaccessible,
+            FilterToggle::LetValues => self.hide_let_values = !self.hide_let_values,
+            FilterToggle::ReverseOrder => self.reverse_order = !self.reverse_order,
+        }
     }
 }
 

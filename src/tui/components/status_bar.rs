@@ -9,19 +9,18 @@ use ratatui::{
 };
 
 use super::{Component, FilterToggle, HypothesisFilters};
-use crate::tui::modes::DisplayMode;
 
 /// Input for the status bar.
 pub struct StatusBarInput {
     pub filters: HypothesisFilters,
-    pub display_mode: DisplayMode,
+    pub keybindings: &'static [(&'static str, &'static str)],
     pub supported_filters: &'static [FilterToggle],
 }
 
 #[derive(Default)]
 pub struct StatusBar {
     filters: HypothesisFilters,
-    display_mode: DisplayMode,
+    keybindings: &'static [(&'static str, &'static str)],
     supported_filters: &'static [FilterToggle],
 }
 
@@ -31,7 +30,7 @@ impl Component for StatusBar {
 
     fn update(&mut self, input: Self::Input) {
         self.filters = input.filters;
-        self.display_mode = input.display_mode;
+        self.keybindings = input.keybindings;
         self.supported_filters = input.supported_filters;
     }
 
@@ -58,8 +57,7 @@ impl Component for StatusBar {
             });
 
         // Mode-specific keybindings
-        let mode_keybindings = self.display_mode.keybindings();
-        let mode_spans = mode_keybindings.iter().flat_map(|(key, desc)| {
+        let mode_spans = self.keybindings.iter().flat_map(|(key, desc)| {
             [
                 separator.clone(),
                 Span::styled(*key, Style::new().fg(Color::Yellow)),

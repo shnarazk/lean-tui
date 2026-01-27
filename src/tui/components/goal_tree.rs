@@ -4,17 +4,14 @@ use std::iter;
 
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
 
 use super::{goal_state::GoalState, ClickRegion, HypothesisFilters, SelectableItem};
-use crate::{
-    lean_rpc::Goal,
-    tui_ipc::{CaseSplitInfo, DefinitionInfo},
-};
+use crate::{lean_rpc::Goal, tui_ipc::CaseSplitInfo};
 
 mod tree_chars {
     pub const MIDDLE: &str = "├── ";
@@ -43,7 +40,6 @@ impl TreeElement {
 
 pub struct GoalTree<'a> {
     goals: &'a [Goal],
-    definition: Option<&'a DefinitionInfo>,
     case_splits: &'a [CaseSplitInfo],
     selection: Option<SelectableItem>,
     filters: HypothesisFilters,
@@ -53,14 +49,12 @@ pub struct GoalTree<'a> {
 impl<'a> GoalTree<'a> {
     pub const fn new(
         goals: &'a [Goal],
-        definition: Option<&'a DefinitionInfo>,
         case_splits: &'a [CaseSplitInfo],
         selection: Option<SelectableItem>,
         filters: HypothesisFilters,
     ) -> Self {
         Self {
             goals,
-            definition,
             case_splits,
             selection,
             filters,
@@ -105,27 +99,18 @@ impl<'a> GoalTree<'a> {
     fn build_tree_elements(&self) -> Vec<TreeElement> {
         let mut elements = Vec::new();
 
-        let show_header = self.definition.is_some();
         let has_case_splits = !self.case_splits.is_empty();
         let has_named_goals = self.goals.iter().any(|g| g.user_name.is_some());
-        let use_tree = show_header || has_case_splits || (self.goals.len() > 1 && has_named_goals);
-
-        if let Some(def) = self.definition.filter(|_| show_header) {
-            elements.push(TreeElement::Label(render_definition_header(def)));
-        }
-
-        let base_prefix = if show_header { "  " } else { "" };
+        let use_tree = has_case_splits || (self.goals.len() > 1 && has_named_goals);
 
         if let Some(split) = self.case_splits.last() {
             elements.push(TreeElement::Label(render_case_split_label(
-                split,
-                base_prefix,
-                show_header,
+                split, "", false,
             )));
         }
 
-        let root_prefix = if show_header || has_case_splits {
-            format!("{base_prefix}{}", tree_chars::EMPTY)
+        let root_prefix = if has_case_splits {
+            tree_chars::EMPTY.to_string()
         } else {
             String::new()
         };
@@ -224,22 +209,6 @@ fn render_vertical_prefix(frame: &mut Frame, area: Rect, prefix: &str) {
     let line = Line::from(Span::styled(prefix.to_string(), style));
     let lines: Vec<Line> = iter::repeat_n(line, area.height as usize).collect();
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn render_definition_header(def: &DefinitionInfo) -> Line<'static> {
-    let bold = Modifier::BOLD;
-    Line::from(vec![
-        Span::styled(
-            def.kind.clone(),
-            Style::new().fg(Color::Blue).add_modifier(bold),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            def.name.clone(),
-            Style::new().fg(Color::Cyan).add_modifier(bold),
-        ),
-        Span::raw(":"),
-    ])
 }
 
 fn render_case_split_label(

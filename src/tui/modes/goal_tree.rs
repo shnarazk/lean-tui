@@ -3,20 +3,14 @@
 use std::iter;
 
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
-use ratatui::{
-    layout::{Constraint, Layout, Rect},
-    prelude::Stylize,
-    style::Color,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, Frame};
 
 use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
     tui::components::{
-        goal_tree::GoalTree, hypothesis_indices, ClickRegion, Component, FilterToggle,
-        HypothesisFilters, KeyMouseEvent, SelectableItem,
+        goal_tree::GoalTree, hypothesis_indices, render_error, Component, FilterToggle,
+        HypothesisFilters, KeyMouseEvent, SelectableItem, SelectionState,
     },
     tui_ipc::{CaseSplitInfo, DefinitionInfo},
 };
@@ -37,24 +31,12 @@ pub struct GoalTreeMode {
     case_splits: Vec<CaseSplitInfo>,
     error: Option<String>,
     filters: HypothesisFilters,
-    selected_index: Option<usize>,
-    click_regions: Vec<ClickRegion>,
+    selection: SelectionState,
 }
 
 impl GoalTreeMode {
     pub const fn filters(&self) -> HypothesisFilters {
         self.filters
-    }
-
-    pub const fn toggle_filter(&mut self, filter: FilterToggle) {
-        match filter {
-            FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
-            FilterToggle::Inaccessible => {
-                self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
-            }
-            FilterToggle::LetValues => self.filters.hide_let_values = !self.filters.hide_let_values,
-            FilterToggle::ReverseOrder => self.filters.reverse_order = !self.filters.reverse_order,
-        }
     }
 
     fn selectable_items(&self) -> Vec<SelectableItem> {
@@ -70,53 +52,6 @@ impl GoalTreeMode {
             })
             .collect()
     }
-
-    fn reset_selection(&mut self) {
-        self.selected_index = (!self.selectable_items().is_empty()).then_some(0);
-    }
-
-    fn select_previous(&mut self) {
-        let count = self.selectable_items().len();
-        if count == 0 {
-            return;
-        }
-        self.selected_index = Some(self.selected_index.map_or(0, |i| i.saturating_sub(1)));
-    }
-
-    fn select_next(&mut self) {
-        let count = self.selectable_items().len();
-        if count == 0 {
-            return;
-        }
-        self.selected_index = Some(match self.selected_index {
-            Some(i) if i < count - 1 => i + 1,
-            Some(i) => i,
-            None => 0,
-        });
-    }
-
-    fn handle_click(&mut self, x: u16, y: u16) -> bool {
-        let clicked_item = self.find_click_region(x, y).map(|r| r.item);
-        let Some(item) = clicked_item else {
-            return false;
-        };
-
-        let items = self.selectable_items();
-        if let Some(idx) = items.iter().position(|i| *i == item) {
-            self.selected_index = Some(idx);
-            return true;
-        }
-        false
-    }
-
-    fn find_click_region(&self, x: u16, y: u16) -> Option<&ClickRegion> {
-        self.click_regions.iter().find(|region| {
-            region.area.x <= x
-                && x < region.area.x + region.area.width
-                && region.area.y <= y
-                && y < region.area.y + region.area.height
-        })
-    }
 }
 
 impl Component for GoalTreeMode {
@@ -130,88 +65,73 @@ impl Component for GoalTreeMode {
         self.case_splits = input.case_splits;
         self.error = input.error;
         if goals_changed {
-            self.reset_selection();
+            self.selection.reset(self.selectable_items().len());
         }
     }
 
     fn handle_event(&mut self, event: Self::Event) -> bool {
+        let items = self.selectable_items();
         match event {
             KeyMouseEvent::Key(key) => match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
-                    self.select_next();
+                    self.selection.select_next(items.len());
                     true
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    self.select_previous();
+                    self.selection.select_previous(items.len());
                     true
                 }
                 KeyCode::Char('i') => {
-                    self.toggle_filter(FilterToggle::Instances);
+                    self.filters.toggle(FilterToggle::Instances);
                     true
                 }
                 KeyCode::Char('a') => {
-                    self.toggle_filter(FilterToggle::Inaccessible);
+                    self.filters.toggle(FilterToggle::Inaccessible);
                     true
                 }
                 KeyCode::Char('l') => {
-                    self.toggle_filter(FilterToggle::LetValues);
+                    self.filters.toggle(FilterToggle::LetValues);
                     true
                 }
                 KeyCode::Char('r') => {
-                    self.toggle_filter(FilterToggle::ReverseOrder);
+                    self.filters.toggle(FilterToggle::ReverseOrder);
                     true
                 }
                 _ => false,
             },
             KeyMouseEvent::Mouse(mouse) => {
-                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                    self.handle_click(mouse.column, mouse.row)
-                } else {
-                    false
-                }
+                mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                    && self.selection.handle_click(mouse.column, mouse.row, &items)
             }
         }
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.click_regions.clear();
+        self.selection.clear_regions();
 
-        // Handle error display
-        #[allow(clippy::option_if_let_else)]
-        let content_area = if let Some(ref error) = self.error {
-            let [error_area, rest] =
-                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(area);
-            frame.render_widget(
-                Paragraph::new(format!("Error: {error}")).fg(Color::Red),
-                error_area,
-            );
-            rest
-        } else {
-            area
-        };
+        let content_area = render_error(frame, area, self.error.as_deref());
 
         // Render goal tree
         let mut tree = GoalTree::new(
             &self.goals,
-            self.definition.as_ref(),
             &self.case_splits,
             self.current_selection(),
             self.filters,
         );
         tree.render(frame, content_area);
 
-        // Collect click regions, adjusting for error offset
+        // Collect click regions from tree, adjusting for error offset
         let y_offset = if self.error.is_some() { 2 } else { 0 };
         for region in tree.click_regions() {
-            self.click_regions.push(ClickRegion {
-                area: Rect::new(
+            self.selection.add_region(
+                Rect::new(
                     region.area.x,
                     region.area.y + y_offset,
                     region.area.width,
                     region.area.height,
                 ),
-                item: region.item,
-            });
+                region.item,
+            );
         }
     }
 }
@@ -231,7 +151,8 @@ impl Mode for GoalTreeMode {
     const BACKENDS: &'static [Backend] = &[Backend::LeanRpc];
 
     fn current_selection(&self) -> Option<SelectableItem> {
-        let items = self.selectable_items();
-        self.selected_index.and_then(|i| items.get(i).copied())
+        self.selection
+            .current_selection(&self.selectable_items())
+            .copied()
     }
 }

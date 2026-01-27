@@ -3,13 +3,28 @@
 use std::mem;
 
 use async_lsp::lsp_types::Url;
+use crossterm::event::{Event, KeyCode, KeyEventKind};
+use ratatui::{
+    layout::{Constraint, Layout},
+    prelude::*,
+    widgets::{Block, Paragraph},
+    Frame,
+};
 
-use super::{components::SelectableItem, modes::DisplayMode};
+use super::{
+    components::{
+        Component, HelpMenu, KeyMouseEvent, KeyPress, SelectableItem, StatusBar, StatusBarInput,
+    },
+    modes::{
+        BeforeAfterModeInput, DeductionTreeModeInput, DisplayMode, GoalTreeModeInput,
+        StepsModeInput,
+    },
+};
 use crate::{
     lean_rpc::{Goal, GotoLocation, GotoLocations, PaperproofStep},
     tui_ipc::{
-        CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
-        ProofStep, TemporalSlot,
+        socket_path, CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message,
+        Position, ProofStep, TemporalSlot,
     },
 };
 
@@ -43,22 +58,6 @@ pub struct ProofHistory {
     pub steps: Vec<LocalProofStep>,
     /// Index of the currently selected step.
     pub current_step_index: usize,
-}
-
-/// Visibility settings for diff columns.
-#[derive(Debug, Clone, Copy)]
-pub struct ColumnVisibility {
-    pub previous: bool,
-    pub next: bool,
-}
-
-impl Default for ColumnVisibility {
-    fn default() -> Self {
-        Self {
-            previous: true, // Show previous column by default
-            next: false,
-        }
-    }
 }
 
 /// Loading status for goal state (used for temporal goals feature).
@@ -108,19 +107,21 @@ pub struct App {
     pub should_exit: bool,
     /// Outgoing commands queue.
     outgoing_commands: Vec<Command>,
-    /// Visibility settings for diff columns.
-    pub columns: ColumnVisibility,
     /// Current display mode.
-    pub display_mode: DisplayMode,
+    display_mode: DisplayMode,
     /// Proof history for Paperproof view.
     #[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
-    pub proof_history: ProofHistory,
+    proof_history: ProofHistory,
     /// Proof steps from Paperproof (if available).
-    pub paperproof_steps: Option<Vec<PaperproofStep>>,
+    paperproof_steps: Option<Vec<PaperproofStep>>,
     /// Unified proof steps (from Paperproof or local tree-sitter analysis).
-    pub proof_steps: Vec<ProofStep>,
+    proof_steps: Vec<ProofStep>,
     /// Index of current step (closest to cursor).
-    pub current_step_index: usize,
+    current_step_index: usize,
+    /// Status bar component.
+    status_bar: StatusBar,
+    /// Help menu overlay.
+    help_menu: HelpMenu,
 }
 
 fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> GoalState {
@@ -257,54 +258,14 @@ impl App {
         }
     }
 
-    /// Toggle the previous column visibility.
-    pub fn toggle_previous_column(&mut self) {
-        self.columns.previous = !self.columns.previous;
-        if self.columns.previous && self.temporal_goals.previous.is_none() {
-            self.request_temporal_goals(TemporalSlot::Previous);
-        }
-    }
-
-    /// Toggle the next column visibility.
-    pub fn toggle_next_column(&mut self) {
-        self.columns.next = !self.columns.next;
-        if self.columns.next && self.temporal_goals.next.is_none() {
-            self.request_temporal_goals(TemporalSlot::Next);
-        }
-    }
-
     /// Cycle to the next display mode.
-    pub const fn next_mode(&mut self) {
-        self.display_mode = self.display_mode.next();
+    pub fn next_mode(&mut self) {
+        self.display_mode.next();
     }
 
     /// Cycle to the previous display mode.
-    pub const fn prev_mode(&mut self) {
-        self.display_mode = self.display_mode.prev();
-    }
-
-    /// Navigate to the previous step in proof history.
-    #[allow(dead_code)] // Will be used in Phase 5 for proof step navigation
-    pub const fn proof_step_previous(&mut self) {
-        if self.proof_history.current_step_index > 0 {
-            self.proof_history.current_step_index -= 1;
-        }
-    }
-
-    /// Navigate to the next step in proof history.
-    #[allow(dead_code)] // Will be used in Phase 5 for proof step navigation
-    pub const fn proof_step_next(&mut self) {
-        if self.proof_history.current_step_index + 1 < self.proof_history.steps.len() {
-            self.proof_history.current_step_index += 1;
-        }
-    }
-
-    /// Get the current proof step (if any).
-    #[allow(dead_code)] // Will be used in Phase 5 for proof step navigation
-    pub fn current_proof_step(&self) -> Option<&LocalProofStep> {
-        self.proof_history
-            .steps
-            .get(self.proof_history.current_step_index)
+    pub fn prev_mode(&mut self) {
+        self.display_mode.prev();
     }
 
     /// Navigate to the given selection (go to definition).
@@ -360,10 +321,10 @@ impl App {
     }
 
     fn refresh_temporal_columns(&mut self) {
-        if self.columns.previous {
+        if self.display_mode.show_previous() {
             self.request_temporal_goals(TemporalSlot::Previous);
         }
-        if self.columns.next {
+        if self.display_mode.show_next() {
             self.request_temporal_goals(TemporalSlot::Next);
         }
     }
@@ -407,6 +368,177 @@ impl App {
             TemporalSlot::Previous => self.temporal_goals.previous = Some(goal_state),
             TemporalSlot::Current => self.temporal_goals.current = goal_state,
             TemporalSlot::Next => self.temporal_goals.next = Some(goal_state),
+        }
+    }
+
+    /// Update all components with current state.
+    pub fn update(&mut self) {
+        // Fetch temporal goals if needed
+        if self.display_mode.show_previous() && self.temporal_goals.previous.is_none() {
+            self.request_temporal_goals(TemporalSlot::Previous);
+        }
+        if self.display_mode.show_next() && self.temporal_goals.next.is_none() {
+            self.request_temporal_goals(TemporalSlot::Next);
+        }
+
+        self.update_display_mode();
+        self.status_bar.update(StatusBarInput {
+            filters: self.display_mode.filters(),
+            keybindings: self.display_mode.keybindings(),
+            supported_filters: self.display_mode.supported_filters(),
+        });
+    }
+
+    fn update_display_mode(&mut self) {
+        self.display_mode.update_goal_tree(GoalTreeModeInput {
+            goals: self.goals().to_vec(),
+            definition: self.definition.clone(),
+            case_splits: self.case_splits.clone(),
+            error: self.error.clone(),
+        });
+        self.display_mode.update_before_after(BeforeAfterModeInput {
+            previous_goals: self
+                .display_mode
+                .show_previous()
+                .then(|| {
+                    self.temporal_goals
+                        .previous
+                        .as_ref()
+                        .map(|g| g.goals.clone())
+                })
+                .flatten(),
+            current_goals: self.goals().to_vec(),
+            next_goals: self
+                .display_mode
+                .show_next()
+                .then(|| self.temporal_goals.next.as_ref().map(|g| g.goals.clone()))
+                .flatten(),
+            definition: self.definition.clone(),
+            error: self.error.clone(),
+        });
+        self.display_mode.update_steps(StepsModeInput {
+            goals: self.goals().to_vec(),
+            definition: self.definition.clone(),
+            error: self.error.clone(),
+            proof_steps: self.proof_steps.clone(),
+            current_step_index: self.current_step_index,
+            paperproof_steps: self.paperproof_steps.clone(),
+        });
+        self.display_mode
+            .update_deduction_tree(DeductionTreeModeInput {
+                goals: self.goals().to_vec(),
+                definition: self.definition.clone(),
+                error: self.error.clone(),
+                current_step_index: self.current_step_index,
+                paperproof_steps: self.paperproof_steps.clone(),
+            });
+    }
+
+    /// Render the entire UI.
+    pub fn render(&mut self, frame: &mut Frame) {
+        let [main_area, status_area] =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
+
+        self.render_main(frame, main_area);
+        self.status_bar.render(frame, status_area);
+        self.help_menu.render(frame, frame.area());
+    }
+
+    fn render_main(&mut self, frame: &mut Frame, area: Rect) {
+        let title = self.build_title();
+        let backends = format!(" {} ", self.display_mode.backends_display());
+        let position_info = self.build_position_info();
+
+        let block = Block::bordered()
+            .title(title)
+            .title_top(Line::from(backends).right_aligned())
+            .title_bottom(Line::from(position_info).right_aligned())
+            .border_style(Style::new().fg(Color::Cyan));
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if !self.connected {
+            frame.render_widget(
+                Paragraph::new(format!("Connecting to {}...", socket_path().display())),
+                inner,
+            );
+            return;
+        }
+
+        self.display_mode.render(frame, inner);
+    }
+
+    fn build_title(&self) -> String {
+        if let (Some(def), Some(cursor)) = (&self.definition, &self.cursor) {
+            let filename = cursor.filename().unwrap_or("?");
+            format!(" {} {} ({}) ", def.kind, def.name, filename)
+        } else if let Some(cursor) = &self.cursor {
+            let filename = cursor.filename().unwrap_or("?");
+            format!(" lean-tui [{}] ({}) ", self.display_mode.name(), filename)
+        } else {
+            format!(" lean-tui [{}] ", self.display_mode.name())
+        }
+    }
+
+    fn build_position_info(&self) -> String {
+        self.cursor.as_ref().map_or(String::new(), |cursor| {
+            format!(
+                " {}:{} ({}) ",
+                cursor.position.line + 1,
+                cursor.position.character + 1,
+                cursor.method
+            )
+        })
+    }
+
+    /// Handle crossterm events.
+    pub fn handle_event(&mut self, event: &Event) {
+        match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                if self.help_menu.handle_event(KeyPress(*key)) {
+                    return;
+                }
+                if !self.handle_global_key(key.code) {
+                    self.display_mode.handle_event(KeyMouseEvent::Key(*key));
+                }
+            }
+            Event::Mouse(mouse) => {
+                self.display_mode.handle_event(KeyMouseEvent::Mouse(*mouse));
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_global_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Char('q') => {
+                self.should_exit = true;
+                true
+            }
+            KeyCode::Char('?') => {
+                self.help_menu.toggle();
+                true
+            }
+            KeyCode::Char(']') => {
+                self.next_mode();
+                true
+            }
+            KeyCode::Char('[') => {
+                self.prev_mode();
+                true
+            }
+            KeyCode::Char('d') | KeyCode::Enter => {
+                let selection = self.display_mode.current_selection();
+                self.navigate_to_selection(selection);
+                true
+            }
+            KeyCode::Char('t') => {
+                let selection = self.display_mode.current_selection();
+                self.navigate_to_selection_with_kind(selection, NavigationKind::TypeDefinition);
+                true
+            }
+            _ => false,
         }
     }
 }

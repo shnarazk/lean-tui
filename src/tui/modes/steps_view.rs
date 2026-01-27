@@ -5,9 +5,6 @@ use std::{collections::HashSet, iter};
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    prelude::Stylize,
-    style::{Color, Style},
-    widgets::Paragraph,
     Frame,
 };
 
@@ -15,10 +12,10 @@ use super::{Backend, Mode};
 use crate::{
     lean_rpc::{Goal, PaperproofStep},
     tui::components::{
-        hypothesis_indices, render_definition_header, render_divider, render_goal_before,
-        render_proof_steps_sidebar, ClickRegion, Component, FilterToggle, GoalSection,
-        GoalSectionInput, HypSection, HypSectionInput, HypothesisFilters, KeyMouseEvent,
-        ProofStepsSidebarInput, SelectableItem,
+        hypothesis_indices, render_divider, render_error, render_goal_before, render_no_goals,
+        render_proof_steps_sidebar, Component, FilterToggle, GoalSection, GoalSectionInput,
+        HypSection, HypSectionInput, HypothesisFilters, KeyMouseEvent, ProofStepsSidebarInput,
+        SelectableItem, SelectionState,
     },
     tui_ipc::{DefinitionInfo, ProofStep},
 };
@@ -45,8 +42,7 @@ pub struct StepsMode {
     hyp_section: HypSection,
     goal_section: GoalSection,
     filters: HypothesisFilters,
-    selected_index: Option<usize>,
-    click_regions: Vec<ClickRegion>,
+    selection: SelectionState,
     show_goal_before: bool,
 }
 
@@ -67,54 +63,8 @@ impl StepsMode {
             .collect()
     }
 
-    fn select_previous(&mut self) {
-        let count = self.selectable_items().len();
-        if count > 0 {
-            self.selected_index = Some(self.selected_index.map_or(0, |i| i.saturating_sub(1)));
-        }
-    }
-
-    fn select_next(&mut self) {
-        let count = self.selectable_items().len();
-        if count > 0 {
-            self.selected_index = Some(match self.selected_index {
-                Some(i) if i < count - 1 => i + 1,
-                Some(i) => i,
-                None => 0,
-            });
-        }
-    }
-
-    fn handle_click(&mut self, x: u16, y: u16) -> bool {
-        let clicked = self.click_regions.iter().find(|r| {
-            r.area.x <= x
-                && x < r.area.x + r.area.width
-                && r.area.y <= y
-                && y < r.area.y + r.area.height
-        });
-        if let Some(region) = clicked {
-            let items = self.selectable_items();
-            if let Some(idx) = items.iter().position(|i| *i == region.item) {
-                self.selected_index = Some(idx);
-                return true;
-            }
-        }
-        false
-    }
-
     pub const fn filters(&self) -> HypothesisFilters {
         self.filters
-    }
-
-    const fn toggle_filter(&mut self, filter: FilterToggle) {
-        match filter {
-            FilterToggle::Instances => self.filters.hide_instances = !self.filters.hide_instances,
-            FilterToggle::Inaccessible => {
-                self.filters.hide_inaccessible = !self.filters.hide_inaccessible;
-            }
-            FilterToggle::LetValues => self.filters.hide_let_values = !self.filters.hide_let_values,
-            FilterToggle::ReverseOrder => self.filters.reverse_order = !self.filters.reverse_order,
-        }
     }
 }
 
@@ -132,35 +82,36 @@ impl Component for StepsMode {
         self.paperproof_steps = input.paperproof_steps;
 
         if goals_changed {
-            self.selected_index = (!self.selectable_items().is_empty()).then_some(0);
+            self.selection.reset(self.selectable_items().len());
         }
     }
 
     fn handle_event(&mut self, event: Self::Event) -> bool {
+        let items = self.selectable_items();
         match event {
             KeyMouseEvent::Key(key) => match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
-                    self.select_next();
+                    self.selection.select_next(items.len());
                     true
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    self.select_previous();
+                    self.selection.select_previous(items.len());
                     true
                 }
                 KeyCode::Char('i') => {
-                    self.toggle_filter(FilterToggle::Instances);
+                    self.filters.toggle(FilterToggle::Instances);
                     true
                 }
                 KeyCode::Char('a') => {
-                    self.toggle_filter(FilterToggle::Inaccessible);
+                    self.filters.toggle(FilterToggle::Inaccessible);
                     true
                 }
                 KeyCode::Char('l') => {
-                    self.toggle_filter(FilterToggle::LetValues);
+                    self.filters.toggle(FilterToggle::LetValues);
                     true
                 }
                 KeyCode::Char('r') => {
-                    self.toggle_filter(FilterToggle::ReverseOrder);
+                    self.filters.toggle(FilterToggle::ReverseOrder);
                     true
                 }
                 KeyCode::Char('b') => {
@@ -171,44 +122,21 @@ impl Component for StepsMode {
             },
             KeyMouseEvent::Mouse(mouse) => {
                 mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                    && self.handle_click(mouse.column, mouse.row)
+                    && self.selection.handle_click(mouse.column, mouse.row, &items)
             }
         }
     }
 
-    #[allow(clippy::option_if_let_else, clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)]
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.click_regions.clear();
+        self.selection.clear_regions();
 
-        let content = if let Some(ref error) = self.error {
-            let [err, rest] =
-                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(area);
-            frame.render_widget(
-                Paragraph::new(format!("Error: {error}")).fg(Color::Red),
-                err,
-            );
-            rest
-        } else {
-            area
-        };
+        let content = render_error(frame, area, self.error.as_deref());
 
         if self.goals.is_empty() {
-            frame.render_widget(
-                Paragraph::new("No goals").style(Style::new().fg(Color::DarkGray)),
-                content,
-            );
+            render_no_goals(frame, content);
             return;
         }
-
-        // Definition header (always shown if available)
-        let content = if let Some(def) = self.definition.as_ref() {
-            let [hdr, rest] =
-                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(content);
-            render_definition_header(frame, hdr, def);
-            rest
-        } else {
-            content
-        };
 
         // Split: proof steps sidebar | main content
         let (main, steps_area) = if self.proof_steps.is_empty() {
@@ -290,8 +218,9 @@ impl Component for StepsMode {
             selection: self.current_selection(),
         });
         self.hyp_section.render(frame, hyps);
-        self.click_regions
-            .extend(self.hyp_section.click_regions().iter().cloned());
+        for region in self.hyp_section.click_regions() {
+            self.selection.add_region(region.area, region.item);
+        }
 
         render_divider(frame, div, None);
 
@@ -307,8 +236,9 @@ impl Component for StepsMode {
             spawned_goal_ids,
         });
         self.goal_section.render(frame, goals);
-        self.click_regions
-            .extend(self.goal_section.click_regions().iter().cloned());
+        for region in self.goal_section.click_regions() {
+            self.selection.add_region(region.area, region.item);
+        }
     }
 }
 
@@ -332,7 +262,8 @@ impl Mode for StepsMode {
     const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
 
     fn current_selection(&self) -> Option<SelectableItem> {
-        let items = self.selectable_items();
-        self.selected_index.and_then(|i| items.get(i).copied())
+        self.selection
+            .current_selection(&self.selectable_items())
+            .copied()
     }
 }
