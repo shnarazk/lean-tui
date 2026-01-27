@@ -7,7 +7,7 @@ This is a **terminal-only (TUI) info view**, comparable to the VS Code info view
 It shows:
 
 - The active variable bindings for a developer writing code (term mode).
-- The hypotheses and goals for a mathematician proving and formalizing proofs (tactic mode).
+- The proof structure, hypotheses and goals for a mathematician proving and formalizing proofs (tactic mode).
 
 See below (or go to [codeberg](https://codeberg.org/wvhulle/lean-tui)) for a screenshot of this program rendering the proof state of a simple but incomplete Lean proof:
 
@@ -70,6 +70,8 @@ flowchart LR
     Proxy <--> |LSP + Lean RPC| Lake[Lake LSP]
     Proxy --> |Unix socket| TUI
 ```
+
+Paperproof is optional and runs inside Lake LSP. It has access to detailed information about the Lean program itself.
 
 ## Installation
 
@@ -147,7 +149,7 @@ Switch back to your editor:
 2. Enter "insert mode" in a proof
 3. Start typing or hover
 
-Key bindings:
+Switch to the TUI. Key bindings:
 
 - Use `j`, `k` to go up or down in hypotheses
 - Use `d` to jump to term definition
@@ -155,7 +157,9 @@ Key bindings:
 - Help menu `?`
 - Close with `q`
 
-(Note that the goals in the TUI update but only if you actually perform edits in insert mode or use the hover action)
+Normally, you **should not need to switch** often from now on, as the Lean-TUI window will follow your edits/hovers in the editor by default.
+
+*Under development: filtering certain types of hypotheses with keyboard shortcuts (`i` for class instance terms and so on).*
 
 ## Debugging
 
