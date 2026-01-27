@@ -7,6 +7,7 @@ theorem commutativityOfIntersections
   apply Iff.intro
 
   intro h1
+
   rw [Set.mem_inter_iff, and_comm] at h1
   exact h1
 

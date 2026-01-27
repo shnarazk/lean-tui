@@ -113,7 +113,14 @@ fn render_node_recursive(frame: &mut Frame, area: Rect, ctx: &mut RenderContext,
     let (children_area, step_area) =
         layout_node_areas(area, box_height, node.children.is_empty(), ctx.top_down);
 
-    render_node_box(frame, step_area, node, ctx.selection, ctx.click_regions);
+    render_node_box(
+        frame,
+        step_area,
+        node,
+        ctx.selection,
+        ctx.click_regions,
+        ctx.top_down,
+    );
 
     if let Some(children_area) = children_area {
         render_children(frame, children_area, ctx, &node.children);

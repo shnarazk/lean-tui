@@ -154,6 +154,7 @@ pub fn render_node_box(
     node: &ProofDagNode,
     selection: Option<Selection>,
     click_regions: &mut Vec<ClickRegion>,
+    top_down: bool,
 ) {
     let border_color = node_border_color(node);
     let border_style = if node.is_current {
@@ -180,10 +181,15 @@ pub fn render_node_box(
     };
     let title_style = Style::new().fg(title_fg).add_modifier(title_mod);
 
+    // Use arrows on borders to indicate deduction direction
+    let arrow = if top_down { "▼" } else { "▲" };
+    let arrow_title = Span::styled(format!(" {arrow} "), border_style);
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
-        .title(Span::styled(title, title_style));
+        .title(Span::styled(title, title_style))
+        .title_bottom(arrow_title);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -192,22 +198,33 @@ pub fn render_node_box(
         return;
     }
 
-    let mut lines: Vec<Line> = Vec::new();
     let has_hyps = !node.new_hypotheses.is_empty();
+    let hyps_line = render_new_hyps_line(node, selection);
+    let goals_line = render_goals_line(node, selection);
 
-    if let Some(line) = render_new_hyps_line(node, selection) {
-        lines.push(line);
+    // Order lines based on direction: top-down = hyps then goals, bottom-up = goals
+    // then hyps
+    let lines: Vec<Line> = if top_down {
+        let mut v: Vec<Line> = hyps_line.into_iter().collect();
+        v.push(goals_line);
+        v
+    } else {
+        let mut v = vec![goals_line];
+        v.extend(hyps_line);
+        v
+    };
+
+    // Track click regions with Y positions based on direction
+    let (hyps_y, goals_y) = if top_down {
+        (inner.y, if has_hyps { inner.y + 1 } else { inner.y })
+    } else {
+        (if has_hyps { inner.y + 1 } else { inner.y }, inner.y)
+    };
+
+    if has_hyps && hyps_y < inner.y + inner.height {
+        track_hyp_click_regions(click_regions, node, inner, hyps_y);
     }
 
-    lines.push(render_goals_line(node, selection));
-
-    // Track click regions for hypotheses (first line if present)
-    if has_hyps && inner.height >= 1 {
-        track_hyp_click_regions(click_regions, node, inner);
-    }
-
-    // Track click regions for goals (second line if hyps present, first otherwise)
-    let goals_y = if has_hyps { inner.y + 1 } else { inner.y };
     if goals_y < inner.y + inner.height {
         track_goal_click_regions(click_regions, node, inner, goals_y);
     }
@@ -215,14 +232,18 @@ pub fn render_node_box(
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
-/// Track click regions for new hypotheses on the first line based on actual
-/// text widths.
-fn track_hyp_click_regions(click_regions: &mut Vec<ClickRegion>, node: &ProofDagNode, inner: Rect) {
+/// Track click regions for new hypotheses based on actual text widths.
+fn track_hyp_click_regions(
+    click_regions: &mut Vec<ClickRegion>,
+    node: &ProofDagNode,
+    inner: Rect,
+    hyps_y: u16,
+) {
     if node.new_hypotheses.is_empty() {
         return;
     }
 
-    let mut tracker = ClickRegionTracker::new(inner.x, inner.y, inner.width);
+    let mut tracker = ClickRegionTracker::new(inner.x, hyps_y, inner.width);
 
     for (i, &hyp_idx) in node.new_hypotheses.iter().take(3).enumerate() {
         if i > 0 {
