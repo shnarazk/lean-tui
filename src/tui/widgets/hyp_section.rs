@@ -16,7 +16,7 @@ use super::hyp_layer::HypLayer;
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{
-        layout_metrics::LayoutMetrics, theme::Theme, ClickRegion, HypothesisFilters, SelectableItem,
+        layout_metrics::LayoutMetrics, theme::Theme, ClickRegion, HypothesisFilters, Selection,
     },
 };
 
@@ -31,7 +31,7 @@ impl Default for HypLayer {
 pub struct HypSectionState {
     layer: HypLayer,
     depends_on: HashSet<String>,
-    selection: Option<SelectableItem>,
+    selection: Option<Selection>,
     click_regions: Vec<ClickRegion>,
     scroll_state: ScrollbarState,
     vertical_scroll: usize,
@@ -44,24 +44,26 @@ impl HypSectionState {
         goals: &[Goal],
         filters: HypothesisFilters,
         depends_on: HashSet<String>,
-        selection: Option<SelectableItem>,
+        selection: Option<Selection>,
+        node_id: Option<u32>,
     ) {
         self.layer = HypLayer::new();
+        self.layer.set_node_id(node_id);
         self.depends_on = depends_on;
         self.selection = selection;
         let mut seen: HashSet<String> = HashSet::new();
 
-        let hyps = goals.iter().enumerate().flat_map(|(goal_idx, goal)| {
+        let hyps = goals.iter().flat_map(|goal| {
             goal.hyps
                 .iter()
                 .enumerate()
                 .filter(|(_, hyp)| filters.should_show(hyp))
-                .map(move |(hyp_idx, hyp)| (goal_idx, hyp_idx, hyp.clone()))
+                .map(|(hyp_idx, hyp)| (hyp_idx, hyp.clone()))
         });
 
-        for (goal_idx, hyp_idx, hyp) in hyps {
+        for (hyp_idx, hyp) in hyps {
             if seen.insert(hyp.names.join(",")) {
-                self.layer.add(goal_idx, hyp_idx, hyp);
+                self.layer.add(hyp_idx, hyp);
             }
         }
     }
@@ -99,7 +101,7 @@ impl StatefulWidget for HypSection {
         }
 
         // Calculate scroll position from selection
-        if let Some(SelectableItem::Hypothesis { hyp_idx, .. }) = state.selection {
+        if let Some(Selection::Hyp { hyp_idx, .. }) = state.selection {
             state.vertical_scroll = LayoutMetrics::scroll_position(hyp_idx);
         }
 

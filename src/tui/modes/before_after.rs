@@ -14,12 +14,11 @@ use crate::{
     tui::widgets::{
         goals_column::{GoalsColumn, GoalsColumnState},
         hypothesis_indices,
-        interactive_widget::InteractiveWidget,
         render_helpers::render_error,
         selection::SelectionState,
-        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
+        FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
     },
-    tui_ipc::DefinitionInfo,
+    tui_ipc::{DefinitionInfo, ProofDag},
 };
 
 /// Input for updating the Before/After mode.
@@ -29,6 +28,7 @@ pub struct BeforeAfterModeInput {
     pub next_goals: Option<Vec<Goal>>,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
+    pub proof_dag: Option<ProofDag>,
 }
 
 /// Before/After display mode - temporal comparison of goal states.
@@ -38,6 +38,8 @@ pub struct BeforeAfterMode {
     next_goals: Option<Vec<Goal>>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
+    /// Current node ID in the DAG (for building selections).
+    current_node_id: Option<u32>,
     filters: HypothesisFilters,
     selection: SelectionState,
     show_previous: bool,
@@ -55,6 +57,7 @@ impl Default for BeforeAfterMode {
             next_goals: None,
             definition: None,
             error: None,
+            current_node_id: None,
             filters: HypothesisFilters::default(),
             selection: SelectionState::default(),
             show_previous: true, // Show previous column by default
@@ -81,22 +84,26 @@ impl BeforeAfterMode {
         self.show_next
     }
 
-    fn selectable_items(&self) -> Vec<SelectableItem> {
+    fn selectable_items(&self) -> Vec<Selection> {
+        let Some(node_id) = self.current_node_id else {
+            return Vec::new();
+        };
+
         self.current_goals
             .iter()
             .enumerate()
             .flat_map(|(goal_idx, goal)| {
                 let hyp_items = hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
                     .filter(|&hyp_idx| self.filters.should_show(&goal.hyps[hyp_idx]))
-                    .map(move |hyp_idx| SelectableItem::Hypothesis { goal_idx, hyp_idx });
+                    .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
 
-                hyp_items.chain(iter::once(SelectableItem::GoalTarget { goal_idx }))
+                hyp_items.chain(iter::once(Selection::Goal { node_id, goal_idx }))
             })
             .collect()
     }
 }
 
-impl InteractiveWidget for BeforeAfterMode {
+impl InteractiveComponent for BeforeAfterMode {
     type Input = BeforeAfterModeInput;
     type Event = KeyMouseEvent;
 
@@ -107,6 +114,7 @@ impl InteractiveWidget for BeforeAfterMode {
         self.next_goals = input.next_goals;
         self.definition = input.definition;
         self.error = input.error;
+        self.current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
         if goals_changed {
             self.selection.reset(self.selectable_items().len());
         }
@@ -185,10 +193,8 @@ impl InteractiveWidget for BeforeAfterMode {
         // Previous column
         if let Some(ref goals) = self.previous_goals {
             if self.show_previous {
-                self.previous_column_state
-                    .update(goals.clone(), self.filters, None, false);
                 frame.render_stateful_widget(
-                    GoalsColumn::new("Previous"),
+                    GoalsColumn::new("Previous", goals, self.filters, None, false, None),
                     columns[col_idx],
                     &mut self.previous_column_state,
                 );
@@ -197,26 +203,29 @@ impl InteractiveWidget for BeforeAfterMode {
         }
 
         // Current column (always shown)
-        self.current_column_state
-            .update(self.current_goals.clone(), self.filters, selection, true);
         frame.render_stateful_widget(
-            GoalsColumn::new("Current"),
+            GoalsColumn::new(
+                "Current",
+                &self.current_goals,
+                self.filters,
+                selection,
+                true,
+                self.current_node_id,
+            ),
             columns[col_idx],
             &mut self.current_column_state,
         );
         // Register click regions from current column
         for region in self.current_column_state.click_regions() {
-            self.selection.add_region(region.area, region.item);
+            self.selection.add_region(region.area, region.selection);
         }
         col_idx += 1;
 
         // Next column
         if let Some(ref goals) = self.next_goals {
             if self.show_next {
-                self.next_column_state
-                    .update(goals.clone(), self.filters, None, false);
                 frame.render_stateful_widget(
-                    GoalsColumn::new("Next"),
+                    GoalsColumn::new("Next", goals, self.filters, None, false, None),
                     columns[col_idx],
                     &mut self.next_column_state,
                 );
@@ -245,7 +254,7 @@ impl Mode for BeforeAfterMode {
     ];
     const BACKENDS: &'static [Backend] = &[Backend::LeanRpc];
 
-    fn current_selection(&self) -> Option<SelectableItem> {
+    fn current_selection(&self) -> Option<Selection> {
         self.selection
             .current_selection(&self.selectable_items())
             .copied()

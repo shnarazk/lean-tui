@@ -19,7 +19,7 @@ use crate::{
         diff_text::{diff_style, DiffState, TaggedTextExt},
         layout_metrics::LayoutMetrics,
         theme::Theme,
-        ClickRegion, SelectableItem,
+        ClickRegion, Selection,
     },
 };
 
@@ -27,8 +27,10 @@ use crate::{
 #[derive(Default)]
 pub struct GoalSectionState {
     goals: Vec<Goal>,
-    selection: Option<SelectableItem>,
+    selection: Option<Selection>,
     spawned_goal_ids: HashSet<String>,
+    /// Node ID for creating click region selections.
+    node_id: Option<u32>,
     click_regions: Vec<ClickRegion>,
     scroll_state: ScrollbarState,
     vertical_scroll: usize,
@@ -39,12 +41,14 @@ impl GoalSectionState {
     pub fn update(
         &mut self,
         goals: Vec<Goal>,
-        selection: Option<SelectableItem>,
+        selection: Option<Selection>,
         spawned_goal_ids: HashSet<String>,
+        node_id: Option<u32>,
     ) {
         self.goals = goals;
         self.selection = selection;
         self.spawned_goal_ids = spawned_goal_ids;
+        self.node_id = node_id;
     }
 
     /// Get the click regions computed during the last render.
@@ -80,7 +84,7 @@ impl StatefulWidget for GoalSection {
         }
 
         // Calculate scroll position from selection
-        if let Some(SelectableItem::GoalTarget { goal_idx }) = state.selection {
+        if let Some(Selection::Goal { goal_idx, .. }) = state.selection {
             state.vertical_scroll = LayoutMetrics::scroll_position(goal_idx);
         }
 
@@ -93,24 +97,24 @@ impl StatefulWidget for GoalSection {
             .content_length(total_goals)
             .position(state.vertical_scroll);
 
+        // Track click regions for goals
+        if let Some(node_id) = state.node_id {
+            track_goal_click_regions(&mut state.click_regions, inner, node_id, state.goals.len());
+        }
+
         let lines: Vec<Line<'static>> = state
             .goals
             .iter()
             .enumerate()
             .map(|(goal_idx, goal)| {
-                let is_selected = state.selection == Some(SelectableItem::GoalTarget { goal_idx });
+                let is_selected = matches!(
+                    state.selection,
+                    Some(Selection::Goal { goal_idx: gi, .. }) if gi == goal_idx
+                );
                 let is_spawned = goal
                     .user_name
                     .as_ref()
                     .is_some_and(|name| state.spawned_goal_ids.contains(name));
-
-                let y = inner.y + goal_idx as u16;
-                if y < inner.y + inner.height {
-                    state.click_regions.push(ClickRegion {
-                        area: Rect::new(inner.x, y, inner.width, 1),
-                        item: SelectableItem::GoalTarget { goal_idx },
-                    });
-                }
 
                 render_goal_line(goal, is_selected, is_spawned, goal_idx, state.goals.len())
             })
@@ -132,6 +136,24 @@ impl StatefulWidget for GoalSection {
                 &mut state.scroll_state,
             );
         }
+    }
+}
+
+fn track_goal_click_regions(
+    click_regions: &mut Vec<ClickRegion>,
+    inner: Rect,
+    node_id: u32,
+    goal_count: usize,
+) {
+    for goal_idx in 0..goal_count {
+        let y = inner.y + goal_idx as u16;
+        if y >= inner.y + inner.height {
+            break;
+        }
+        click_regions.push(ClickRegion {
+            area: Rect::new(inner.x, y, inner.width, 1),
+            selection: Selection::Goal { node_id, goal_idx },
+        });
     }
 }
 

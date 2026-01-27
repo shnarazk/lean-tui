@@ -3,8 +3,11 @@
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Point, Tree};
 
-use super::{case_splits::CASE_SPLITTING_TACTICS, definitions::DEFINITION_KINDS};
+use super::definitions::DEFINITION_KINDS;
 use crate::tui_ipc::Position;
+
+/// Tactics that create branching/case structure in proofs.
+const CASE_SPLITTING_TACTICS: &[&str] = &["cases", "induction", "rcases", "obtain", "by_cases"];
 
 /// Information about a tactic in the proof.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

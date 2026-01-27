@@ -8,13 +8,11 @@ use crate::{
     error::LspError,
     lean_rpc::{Goal, PaperproofMode, PaperproofStep, RpcClient},
     proxy::{
-        ast::{
-            find_all_tactics_in_proof, find_case_splits, find_enclosing_definition, CaseSplitInfo,
-            DefinitionInfo, TacticInfo,
-        },
+        ast::{find_all_tactics_in_proof, find_enclosing_definition, DefinitionInfo, TacticInfo},
+        dag::{ProofDag, ProofDagSource},
         lsp::DocumentCache,
     },
-    tui_ipc::{CursorInfo, ProofStep, SocketServer},
+    tui_ipc::{CursorInfo, SocketServer},
 };
 
 pub async fn fetch_combined_goals(
@@ -69,24 +67,24 @@ pub fn spawn_goal_fetch(
 
         match goals_result {
             Ok(goals) => {
-                // Extract AST info (definition name, case splits, and tactics)
-                let (definition, case_splits, local_tactics) =
+                // Extract AST info (definition name and tactics)
+                let (definition, local_tactics) =
                     extract_ast_info(&doc_cache, uri.as_str(), position);
 
-                // Build unified proof steps: prefer Paperproof if available, else use local
-                let (proof_steps, current_step_index) =
-                    build_proof_steps(paperproof_result.as_ref(), &local_tactics, position);
-
-                socket_server.broadcast_goals(
-                    uri,
+                // Build ProofDag: prefer Paperproof, fallback to local tactics
+                let mut proof_dag = build_proof_dag(
+                    paperproof_result.as_ref(),
+                    &local_tactics,
+                    &goals,
                     position,
-                    goals,
-                    definition,
-                    case_splits,
-                    paperproof_result,
-                    proof_steps,
-                    current_step_index,
+                    definition.as_ref().map(|d| d.name.clone()),
                 );
+
+                // Resolve goto locations for Paperproof-based DAGs
+                // (local tactics DAGs already have locations from the goals)
+                resolve_dag_goto_locations(&mut proof_dag, &rpc, &text_document).await;
+
+                socket_server.broadcast_goals(uri, position, goals, definition, proof_dag);
             }
             Err(e) => {
                 tracing::warn!(
@@ -129,15 +127,14 @@ fn extract_ast_info(
     doc_cache: &DocumentCache,
     uri: &str,
     position: Position,
-) -> (Option<DefinitionInfo>, Vec<CaseSplitInfo>, Vec<TacticInfo>) {
+) -> (Option<DefinitionInfo>, Vec<TacticInfo>) {
     tracing::debug!("Looking up URI: {uri}");
     let Some((tree, source)) = doc_cache.get_tree_and_content(uri) else {
         tracing::warn!("No tree found for URI: {uri}");
-        return (None, vec![], vec![]);
+        return (None, vec![]);
     };
 
     let definition = find_enclosing_definition(&tree, &source, position);
-    let case_splits = find_case_splits(&tree, &source, position);
     let tactics = find_all_tactics_in_proof(&tree, &source, position);
 
     tracing::debug!(
@@ -147,94 +144,55 @@ fn extract_ast_info(
         tactics.len()
     );
 
-    (definition, case_splits, tactics)
+    (definition, tactics)
 }
 
-/// Build unified proof steps from either Paperproof or local tactics.
-fn build_proof_steps(
+/// Build a `ProofDag` from available data.
+///
+/// Prefers Paperproof data when available (richer information),
+/// falls back to local tree-sitter tactics otherwise.
+fn build_proof_dag(
     paperproof_steps: Option<&Vec<PaperproofStep>>,
     local_tactics: &[TacticInfo],
+    goals: &[Goal],
     cursor_position: Position,
-) -> (Vec<ProofStep>, usize) {
-    // Prefer Paperproof data if available
+    definition_name: Option<String>,
+) -> Option<ProofDag> {
+    // Prefer Paperproof data when available
     if let Some(steps) = paperproof_steps {
         if !steps.is_empty() {
-            let proof_steps: Vec<ProofStep> =
-                steps.iter().map(ProofStep::from_paperproof).collect();
-            let current_index = find_current_step_index(&proof_steps, cursor_position);
-            return (proof_steps, current_index);
+            return Some(ProofDag::from_paperproof_steps(
+                steps,
+                cursor_position,
+                definition_name,
+            ));
         }
     }
 
     // Fall back to local tactics
-    if local_tactics.is_empty() {
-        return (vec![], 0);
+    if !local_tactics.is_empty() {
+        return Some(ProofDag::from_local_tactics(
+            local_tactics,
+            goals,
+            cursor_position,
+            definition_name,
+        ));
     }
 
-    let proof_steps: Vec<ProofStep> = local_tactics
-        .iter()
-        .map(|t| {
-            let depends_on = extract_dependencies(&t.text);
-            ProofStep::from_local(t, depends_on)
-        })
-        .collect();
-
-    let current_index = find_current_step_index(&proof_steps, cursor_position);
-    (proof_steps, current_index)
+    None
 }
 
-/// Extract hypothesis names that appear in the tactic text.
-fn extract_dependencies(tactic_text: &str) -> Vec<String> {
-    let mut deps = Vec::new();
-    let words: Vec<&str> = tactic_text.split_whitespace().collect();
-
-    for (i, word) in words.iter().enumerate() {
-        if i == 0 {
-            continue;
-        }
-
-        let clean = word.trim_matches(|c| c == '[' || c == ']' || c == ',' || c == '⟨' || c == '⟩');
-
-        if clean.is_empty()
-            || clean.starts_with('-')
-            || clean.starts_with('*')
-            || clean == "with"
-            || clean == "at"
-            || clean == "only"
-        {
-            continue;
-        }
-
-        if clean.chars().next().is_some_and(char::is_lowercase) {
-            deps.push(clean.to_string());
-        }
-    }
-
-    deps
-}
-
-/// Find the index of the step closest to the cursor position.
-fn find_current_step_index(steps: &[ProofStep], cursor: Position) -> usize {
-    let mut best_index = 0;
-    let mut best_distance = i64::MAX;
-
-    for (i, step) in steps.iter().enumerate() {
-        let line_diff = (i64::from(step.position.line) - i64::from(cursor.line)).abs();
-        let char_diff = (i64::from(step.position.character) - i64::from(cursor.character)).abs();
-        let distance = line_diff * 1000 + char_diff;
-
-        // Prefer steps at or before cursor
-        let penalty = if step.position.line > cursor.line {
-            10000
-        } else {
-            0
-        };
-
-        if distance + penalty < best_distance {
-            best_distance = distance + penalty;
-            best_index = i;
-        }
-    }
-
-    best_index
+/// Resolve goto locations for Paperproof-based DAGs.
+async fn resolve_dag_goto_locations(
+    proof_dag: &mut Option<ProofDag>,
+    rpc: &RpcClient,
+    text_document: &TextDocumentIdentifier,
+) {
+    let Some(dag) = proof_dag
+        .as_mut()
+        .filter(|d| d.source == ProofDagSource::Paperproof)
+    else {
+        return;
+    };
+    dag.resolve_goto_locations(rpc, text_document).await;
 }

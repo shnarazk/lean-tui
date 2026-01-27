@@ -12,25 +12,32 @@ use crate::{
     lean_rpc::Hypothesis,
     tui::widgets::{
         diff_text::{diff_style, DiffState, TaggedTextExt},
-        ClickRegion, SelectableItem,
+        ClickRegion, Selection,
     },
 };
 
 /// A layer of hypotheses.
 #[derive(Debug, Clone)]
 pub struct HypLayer {
-    pub hypotheses: Vec<(usize, usize, Hypothesis)>, // (goal_idx, hyp_idx, hyp)
+    /// Node ID for creating selections (from DAG).
+    node_id: Option<u32>,
+    pub hypotheses: Vec<(usize, Hypothesis)>, // (hyp_idx, hyp)
 }
 
 impl HypLayer {
     pub const fn new() -> Self {
         Self {
+            node_id: None,
             hypotheses: Vec::new(),
         }
     }
 
-    pub fn add(&mut self, goal_idx: usize, hyp_idx: usize, hyp: Hypothesis) {
-        self.hypotheses.push((goal_idx, hyp_idx, hyp));
+    pub const fn set_node_id(&mut self, node_id: Option<u32>) {
+        self.node_id = node_id;
+    }
+
+    pub fn add(&mut self, hyp_idx: usize, hyp: Hypothesis) {
+        self.hypotheses.push((hyp_idx, hyp));
     }
 
     pub const fn len(&self) -> usize {
@@ -40,37 +47,51 @@ impl HypLayer {
     #[allow(clippy::cast_possible_truncation)]
     pub fn render(
         &self,
-        selected: Option<SelectableItem>,
+        selected: Option<Selection>,
         base_y: u16,
         area: Rect,
         click_regions: &mut Vec<ClickRegion>,
         depends_on: &HashSet<String>,
     ) -> Vec<Line<'static>> {
+        // Track click regions
+        if let Some(node_id) = self.node_id {
+            self.track_click_regions(click_regions, node_id, base_y, area);
+        }
+
         self.hypotheses
             .iter()
-            .enumerate()
-            .map(|(i, (goal_idx, hyp_idx, hyp))| {
-                let is_selected = selected
-                    == Some(SelectableItem::Hypothesis {
-                        goal_idx: *goal_idx,
-                        hyp_idx: *hyp_idx,
-                    });
+            .map(|(hyp_idx, hyp)| {
+                let is_selected = matches!(
+                    selected,
+                    Some(Selection::Hyp { hyp_idx: hi, .. }) if hi == *hyp_idx
+                );
                 let is_dependency = hyp.names.iter().any(|n| depends_on.contains(n));
-
-                let y = base_y + i as u16;
-                if y < area.y + area.height {
-                    click_regions.push(ClickRegion {
-                        area: Rect::new(area.x, y, area.width, 1),
-                        item: SelectableItem::Hypothesis {
-                            goal_idx: *goal_idx,
-                            hyp_idx: *hyp_idx,
-                        },
-                    });
-                }
-
                 render_hyp_line(hyp, is_selected, is_dependency)
             })
             .collect()
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn track_click_regions(
+        &self,
+        click_regions: &mut Vec<ClickRegion>,
+        node_id: u32,
+        base_y: u16,
+        area: Rect,
+    ) {
+        for (i, (hyp_idx, _)) in self.hypotheses.iter().enumerate() {
+            let y = base_y + i as u16;
+            if y >= area.y + area.height {
+                break;
+            }
+            click_regions.push(ClickRegion {
+                area: Rect::new(area.x, y, area.width, 1),
+                selection: Selection::Hyp {
+                    node_id,
+                    hyp_idx: *hyp_idx,
+                },
+            });
+        }
     }
 }
 

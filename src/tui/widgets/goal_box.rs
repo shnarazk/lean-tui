@@ -11,7 +11,7 @@ use ratatui::{
 
 use super::{
     diff_text::{render_hypothesis_line, render_target_line},
-    hypothesis_indices, ClickRegion, HypothesisFilters, SelectableItem,
+    hypothesis_indices, ClickRegion, HypothesisFilters, Selection,
 };
 use crate::{
     lean_rpc::Goal,
@@ -33,8 +33,10 @@ const BORDER: Set = Set {
 pub struct GoalBox<'a> {
     goal: &'a Goal,
     goal_idx: usize,
-    selection: Option<SelectableItem>,
+    selection: Option<Selection>,
     filters: HypothesisFilters,
+    /// Node ID for creating click region selections.
+    node_id: Option<u32>,
 }
 
 /// Mutable state for `GoalBox` that tracks click regions.
@@ -53,14 +55,16 @@ impl<'a> GoalBox<'a> {
     pub const fn new(
         goal: &'a Goal,
         goal_idx: usize,
-        selection: Option<SelectableItem>,
+        selection: Option<Selection>,
         filters: HypothesisFilters,
+        node_id: Option<u32>,
     ) -> Self {
         Self {
             goal,
             goal_idx,
             selection,
             filters,
+            node_id,
         }
     }
 
@@ -78,19 +82,20 @@ impl<'a> GoalBox<'a> {
         }
     }
 
+    #[allow(clippy::missing_const_for_fn)] // matches! with guard cannot be const
     fn is_hyp_selected(&self, hyp_idx: usize) -> bool {
-        self.selection
-            == Some(SelectableItem::Hypothesis {
-                goal_idx: self.goal_idx,
-                hyp_idx,
-            })
+        matches!(
+            self.selection,
+            Some(Selection::Hyp { hyp_idx: hi, .. }) if hi == hyp_idx
+        )
     }
 
+    #[allow(clippy::missing_const_for_fn)] // matches! with guard cannot be const
     fn is_target_selected(&self) -> bool {
-        self.selection
-            == Some(SelectableItem::GoalTarget {
-                goal_idx: self.goal_idx,
-            })
+        matches!(
+            self.selection,
+            Some(Selection::Goal { goal_idx: gi, .. }) if gi == self.goal_idx
+        )
     }
 
     fn build_hyp_widget(&self, visible_indices: &[usize]) -> Table<'static> {
@@ -166,38 +171,61 @@ impl StatefulWidget for GoalBox<'_> {
         Widget::render(self.build_target_widget(), target_area, buf);
 
         // Compute click regions - track actual rendered positions
-        let goal_idx = self.goal_idx;
-        let content_y = hyp_area.y + hyp_border_height; // Content starts after top border
-
-        for (i, &hyp_idx) in visible_indices.iter().enumerate() {
-            #[allow(clippy::cast_possible_truncation)]
-            let hyp_y = content_y + (i as u16 * LayoutMetrics::HYP_LINE_HEIGHT);
-            if hyp_y < hyp_area.y + hyp_area.height {
-                state.click_regions.push(ClickRegion {
-                    area: Rect::new(
-                        hyp_area.x,
-                        hyp_y,
-                        hyp_area.width,
-                        LayoutMetrics::HYP_LINE_HEIGHT,
-                    ),
-                    item: SelectableItem::Hypothesis { goal_idx, hyp_idx },
-                });
-            }
+        if let Some(node_id) = self.node_id {
+            track_goal_box_click_regions(
+                &mut state.click_regions,
+                node_id,
+                self.goal_idx,
+                &visible_indices,
+                hyp_area,
+                hyp_border_height,
+                target_area,
+            );
         }
+    }
+}
 
-        // Validate click regions match visible rows
-        debug_assert!(
-            state.click_regions.len() <= visible_indices.len(),
-            "Click regions must not exceed visible rows"
-        );
+#[allow(clippy::too_many_arguments)]
+fn track_goal_box_click_regions(
+    click_regions: &mut Vec<ClickRegion>,
+    node_id: u32,
+    goal_idx: usize,
+    visible_indices: &[usize],
+    hyp_area: Rect,
+    hyp_border_height: u16,
+    target_area: Rect,
+) {
+    let content_y = hyp_area.y + hyp_border_height;
 
-        let target_y = target_area.y + 1; // +1 for top border
-        if target_y < target_area.y + target_area.height {
-            state.click_regions.push(ClickRegion {
-                area: Rect::new(target_area.x, target_y, target_area.width, 1),
-                item: SelectableItem::GoalTarget { goal_idx },
-            });
+    for (i, &hyp_idx) in visible_indices.iter().enumerate() {
+        #[allow(clippy::cast_possible_truncation)]
+        let hyp_y = content_y + (i as u16 * LayoutMetrics::HYP_LINE_HEIGHT);
+        if hyp_y >= hyp_area.y + hyp_area.height {
+            continue;
         }
+        click_regions.push(ClickRegion {
+            area: Rect::new(
+                hyp_area.x,
+                hyp_y,
+                hyp_area.width,
+                LayoutMetrics::HYP_LINE_HEIGHT,
+            ),
+            selection: Selection::Hyp { node_id, hyp_idx },
+        });
+    }
+
+    // Validate click regions match visible rows
+    debug_assert!(
+        click_regions.len() <= visible_indices.len(),
+        "Click regions must not exceed visible rows"
+    );
+
+    let target_y = target_area.y + 1; // +1 for top border
+    if target_y < target_area.y + target_area.height {
+        click_regions.push(ClickRegion {
+            area: Rect::new(target_area.x, target_y, target_area.width, 1),
+            selection: Selection::Goal { node_id, goal_idx },
+        });
     }
 }
 

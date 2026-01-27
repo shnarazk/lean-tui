@@ -18,8 +18,7 @@ use steps_view::StepsMode;
 pub use steps_view::StepsModeInput;
 
 use crate::tui::widgets::{
-    interactive_widget::InteractiveWidget, FilterToggle, HypothesisFilters, KeyMouseEvent,
-    SelectableItem,
+    FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
 };
 
 /// Backend data source for a display mode.
@@ -45,7 +44,7 @@ impl Backend {
 }
 
 /// Trait for display modes in the TUI.
-pub trait Mode: InteractiveWidget<Input = Self::Model, Event = KeyMouseEvent> {
+pub trait Mode: InteractiveComponent<Input = Self::Model, Event = KeyMouseEvent> {
     type Model;
 
     const NAME: &'static str;
@@ -53,7 +52,7 @@ pub trait Mode: InteractiveWidget<Input = Self::Model, Event = KeyMouseEvent> {
     const SUPPORTED_FILTERS: &'static [FilterToggle];
     const BACKENDS: &'static [Backend];
 
-    fn current_selection(&self) -> Option<SelectableItem>;
+    fn current_selection(&self) -> Option<Selection>;
 }
 
 /// Display mode with embedded state.
@@ -142,7 +141,7 @@ impl DisplayMode {
     }
 
     /// Get current selection from active mode.
-    pub fn current_selection(&self) -> Option<SelectableItem> {
+    pub fn current_selection(&self) -> Option<Selection> {
         match self {
             Self::GoalTree(m) => m.current_selection(),
             Self::BeforeAfter(m) => m.current_selection(),

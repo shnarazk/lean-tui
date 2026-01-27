@@ -1,7 +1,5 @@
 //! Deduction Tree mode - Paperproof tree visualization.
 
-use std::collections::HashSet;
-
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
     layout::Rect,
@@ -10,70 +8,24 @@ use ratatui::{
     Frame,
 };
 
-/// A click region mapping screen area to a tree selection.
-#[derive(Debug, Clone)]
-pub struct TreeClickRegion {
-    pub area: Rect,
-    pub selection: TreeSelection,
-}
-
-/// Collects click regions during rendering.
-#[derive(Default)]
-pub struct TreeClickRegions {
-    pub regions: Vec<TreeClickRegion>,
-}
-
-impl TreeClickRegions {
-    pub fn add(&mut self, area: Rect, selection: TreeSelection) {
-        self.regions.push(TreeClickRegion { area, selection });
-    }
-
-    pub fn find_at(&self, x: u16, y: u16) -> Option<TreeSelection> {
-        self.regions
-            .iter()
-            .find(|r| {
-                x >= r.area.x
-                    && x < r.area.x + r.area.width
-                    && y >= r.area.y
-                    && y < r.area.y + r.area.height
-            })
-            .map(|r| r.selection)
-    }
-}
-
 use super::{Backend, Mode};
 use crate::{
-    lean_rpc::{Goal, PaperproofStep},
+    lean_rpc::Goal,
     tui::widgets::{
-        interactive_widget::InteractiveWidget,
         render_helpers::{render_error, render_no_goals},
-        tree_view::render_tree_view,
-        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
+        tree_view::render_tree_view_from_dag,
+        ClickRegion, FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent,
+        Selection,
     },
-    tui_ipc::DefinitionInfo,
+    tui_ipc::{DefinitionInfo, ProofDag},
 };
-
-/// Selection within the deduction tree.
-/// Tracks step index and item index within that step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TreeSelection {
-    /// Initial hypothesis (from `goal_before` of first step).
-    InitialHyp { hyp_idx: usize },
-    /// Hypothesis introduced by a step.
-    StepHyp { step_idx: usize, hyp_idx: usize },
-    /// Goal after a step.
-    StepGoal { step_idx: usize, goal_idx: usize },
-    /// The theorem (final goal).
-    Theorem,
-}
 
 /// Input for updating the Deduction Tree mode.
 pub struct DeductionTreeModeInput {
     pub goals: Vec<Goal>,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
-    pub current_step_index: usize,
-    pub paperproof_steps: Option<Vec<PaperproofStep>>,
+    pub proof_dag: Option<ProofDag>,
 }
 
 /// Deduction Tree display mode - Paperproof tree visualization.
@@ -81,8 +33,7 @@ pub struct DeductionTreeMode {
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
-    current_step_index: usize,
-    paperproof_steps: Option<Vec<PaperproofStep>>,
+    proof_dag: Option<ProofDag>,
     filters: HypothesisFilters,
     /// Flat index into `tree_selectable_items()`.
     selected_idx: Option<usize>,
@@ -90,7 +41,7 @@ pub struct DeductionTreeMode {
     /// When false, renders bottom-up (children above parent).
     tree_top_down: bool,
     /// Click regions from last render.
-    click_regions: TreeClickRegions,
+    click_regions: Vec<ClickRegion>,
 }
 
 impl Default for DeductionTreeMode {
@@ -99,12 +50,11 @@ impl Default for DeductionTreeMode {
             goals: Vec::new(),
             definition: None,
             error: None,
-            current_step_index: 0,
-            paperproof_steps: None,
+            proof_dag: None,
             filters: HypothesisFilters::default(),
             selected_idx: None,
             tree_top_down: true,
-            click_regions: TreeClickRegions::default(),
+            click_regions: Vec::new(),
         }
     }
 }
@@ -114,59 +64,46 @@ impl DeductionTreeMode {
         self.filters
     }
 
-    /// Build list of all selectable items in the tree.
-    fn tree_selectable_items(&self) -> Vec<TreeSelection> {
-        let Some(steps) = &self.paperproof_steps else {
+    /// Build list of all selectable items in the tree from `proof_dag`.
+    fn tree_selectable_items(&self) -> Vec<Selection> {
+        let Some(dag) = &self.proof_dag else {
             return Vec::new();
         };
-        if steps.is_empty() {
+        if dag.is_empty() {
             return Vec::new();
         }
 
         let mut items = Vec::new();
 
-        // Initial hypotheses (non-proof ones from first step's goal_before)
-        for (idx, h) in steps[0].goal_before.hyps.iter().enumerate() {
-            if h.is_proof != "proof" {
-                items.push(TreeSelection::InitialHyp { hyp_idx: idx });
+        // Initial hypotheses from the initial_state
+        for (idx, h) in dag.initial_state.hypotheses.iter().enumerate() {
+            if !h.is_proof {
+                items.push(Selection::InitialHyp { hyp_idx: idx });
             }
         }
 
-        // For each step: new hypotheses and goals
-        for (step_idx, step) in steps.iter().enumerate() {
-            // New hypotheses introduced by this step
-            let before_ids: HashSet<&str> = step
-                .goal_before
-                .hyps
-                .iter()
-                .map(|h| h.id.as_str())
-                .collect();
+        // For each node: new hypotheses and goals
+        for node in dag.dfs_iter() {
+            let node_id = node.id;
 
-            let new_hyp_items = step.goals_after.first().into_iter().flat_map(|g| {
-                g.hyps
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, h)| !before_ids.contains(h.id.as_str()))
-                    .map(move |(hyp_idx, _)| TreeSelection::StepHyp { step_idx, hyp_idx })
-            });
-            items.extend(new_hyp_items);
+            // New hypotheses introduced by this step
+            for &hyp_idx in &node.new_hypotheses {
+                items.push(Selection::Hyp { node_id, hyp_idx });
+            }
 
             // Goals after this step
-            let goal_items = step
-                .goals_after
-                .iter()
-                .enumerate()
-                .map(|(goal_idx, _)| TreeSelection::StepGoal { step_idx, goal_idx });
-            items.extend(goal_items);
+            for (goal_idx, _) in node.state_after.goals.iter().enumerate() {
+                items.push(Selection::Goal { node_id, goal_idx });
+            }
         }
 
         // Theorem (final goal)
-        items.push(TreeSelection::Theorem);
+        items.push(Selection::Theorem);
 
         items
     }
 
-    fn current_tree_selection(&self) -> Option<TreeSelection> {
+    fn current_tree_selection(&self) -> Option<Selection> {
         let items = self.tree_selectable_items();
         self.selected_idx.and_then(|idx| items.get(idx).copied())
     }
@@ -190,28 +127,39 @@ impl DeductionTreeMode {
         );
     }
 
-    fn select_by_tree_selection(&mut self, sel: TreeSelection) {
+    fn select_by_selection(&mut self, sel: Selection) {
         let items = self.tree_selectable_items();
         if let Some(idx) = items.iter().position(|s| *s == sel) {
             self.selected_idx = Some(idx);
         }
     }
+
+    fn find_click_at(&self, x: u16, y: u16) -> Option<Selection> {
+        self.click_regions
+            .iter()
+            .find(|r| {
+                x >= r.area.x
+                    && x < r.area.x + r.area.width
+                    && y >= r.area.y
+                    && y < r.area.y + r.area.height
+            })
+            .map(|r| r.selection)
+    }
 }
 
-impl InteractiveWidget for DeductionTreeMode {
+impl InteractiveComponent for DeductionTreeMode {
     type Input = DeductionTreeModeInput;
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
         // Reset selection when step count changes
-        let old_count = self.paperproof_steps.as_ref().map_or(0, Vec::len);
-        let new_count = input.paperproof_steps.as_ref().map_or(0, Vec::len);
+        let old_count = self.proof_dag.as_ref().map_or(0, ProofDag::len);
+        let new_count = input.proof_dag.as_ref().map_or(0, ProofDag::len);
 
         self.goals = input.goals;
         self.definition = input.definition;
         self.error = input.error;
-        self.current_step_index = input.current_step_index;
-        self.paperproof_steps = input.paperproof_steps;
+        self.proof_dag = input.proof_dag;
 
         if old_count != new_count {
             self.selected_idx = None;
@@ -238,10 +186,10 @@ impl InteractiveWidget for DeductionTreeMode {
             KeyMouseEvent::Mouse(mouse) => {
                 let is_click = mouse.kind == MouseEventKind::Down(MouseButton::Left);
                 let clicked_item = is_click
-                    .then(|| self.click_regions.find_at(mouse.column, mouse.row))
+                    .then(|| self.find_click_at(mouse.column, mouse.row))
                     .flatten();
                 if let Some(sel) = clicked_item {
-                    self.select_by_tree_selection(sel);
+                    self.select_by_selection(sel);
                     return true;
                 }
                 false
@@ -257,21 +205,19 @@ impl InteractiveWidget for DeductionTreeMode {
             return;
         }
 
-        // Render tree view
-        if let Some(ref steps) = self.paperproof_steps {
-            render_tree_view(
+        // Render tree view using proof_dag
+        if let Some(ref dag) = self.proof_dag {
+            render_tree_view_from_dag(
                 frame,
                 content_area,
-                steps,
-                self.current_step_index,
+                dag,
                 self.tree_top_down,
                 self.current_tree_selection(),
                 &mut self.click_regions,
             );
         } else {
             frame.render_widget(
-                Paragraph::new("Tree view requires Paperproof data")
-                    .style(Style::new().fg(Color::DarkGray)),
+                Paragraph::new("No proof steps available").style(Style::new().fg(Color::DarkGray)),
                 content_area,
             );
         }
@@ -284,10 +230,11 @@ impl Mode for DeductionTreeMode {
     const NAME: &'static str = "Deduction Tree";
     const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("r", "dir")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[];
-    const BACKENDS: &'static [Backend] = &[Backend::Paperproof];
+    const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
 
-    fn current_selection(&self) -> Option<SelectableItem> {
-        // Tree uses its own selection system (TreeSelection)
-        None
+    fn current_selection(&self) -> Option<Selection> {
+        // Return tree-specific selection directly - app.rs handles
+        // InitialHyp, StepHyp, StepGoal, Theorem by looking up in ProofDag
+        self.current_tree_selection()
     }
 }

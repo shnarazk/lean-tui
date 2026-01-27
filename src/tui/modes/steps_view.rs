@@ -10,20 +10,19 @@ use ratatui::{
 
 use super::{Backend, Mode};
 use crate::{
-    lean_rpc::{Goal, PaperproofStep},
+    lean_rpc::Goal,
     tui::widgets::{
-        goal_before::render_goal_before,
         goal_section::{GoalSection, GoalSectionState},
         hyp_section::{HypSection, HypSectionState},
         hypothesis_indices,
-        interactive_widget::InteractiveWidget,
         proof_steps_sidebar::{ProofStepsSidebar, ProofStepsSidebarState},
         render_helpers::{render_error, render_no_goals},
         selection::SelectionState,
         tactic_row::divider,
-        FilterToggle, HypothesisFilters, KeyMouseEvent, SelectableItem,
+        FilterToggle, HypothesisFilters, InteractiveComponent, InteractiveStatefulWidget,
+        KeyMouseEvent, Selection,
     },
-    tui_ipc::{DefinitionInfo, ProofStep},
+    tui_ipc::{DefinitionInfo, ProofDag, ProofDagNode, ProofState},
 };
 
 /// Input for updating the Steps mode.
@@ -31,9 +30,7 @@ pub struct StepsModeInput {
     pub goals: Vec<Goal>,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
-    pub proof_steps: Vec<ProofStep>,
-    pub current_step_index: usize,
-    pub paperproof_steps: Option<Vec<PaperproofStep>>,
+    pub proof_dag: Option<ProofDag>,
 }
 
 /// Steps display mode - sidebar + hypotheses + goals.
@@ -42,9 +39,9 @@ pub struct StepsMode {
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
-    proof_steps: Vec<ProofStep>,
-    current_step_index: usize,
-    paperproof_steps: Option<Vec<PaperproofStep>>,
+    proof_dag: Option<ProofDag>,
+    /// Current node ID in the DAG (for building selections).
+    current_node_id: Option<u32>,
     hyp_section_state: HypSectionState,
     goal_section_state: GoalSectionState,
     sidebar_state: ProofStepsSidebarState,
@@ -54,18 +51,19 @@ pub struct StepsMode {
 }
 
 impl StepsMode {
-    fn selectable_items(&self) -> Vec<SelectableItem> {
+    fn selectable_items(&self) -> Vec<Selection> {
+        let Some(node_id) = self.current_node_id else {
+            return Vec::new();
+        };
+
         self.goals
             .iter()
             .enumerate()
             .flat_map(|(goal_idx, goal)| {
                 let hyps = hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
                     .filter(|&i| self.filters.should_show(&goal.hyps[i]))
-                    .map(move |i| SelectableItem::Hypothesis {
-                        goal_idx,
-                        hyp_idx: i,
-                    });
-                hyps.chain(iter::once(SelectableItem::GoalTarget { goal_idx }))
+                    .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
+                hyps.chain(iter::once(Selection::Goal { node_id, goal_idx }))
             })
             .collect()
     }
@@ -74,10 +72,12 @@ impl StepsMode {
         self.filters
     }
 
+    fn has_steps(&self) -> bool {
+        self.proof_dag.as_ref().is_some_and(|dag| !dag.is_empty())
+    }
+
     fn layout_with_sidebar(&self, area: Rect) -> (Rect, Option<Rect>) {
-        if self.proof_steps.is_empty() {
-            (area, None)
-        } else {
+        if self.has_steps() {
             let [sidebar, main] = Layout::horizontal([
                 Constraint::Min(20), // Sidebar needs at least 20 chars
                 Constraint::Fill(1), // Main content takes remaining space
@@ -85,6 +85,8 @@ impl StepsMode {
             .flex(Flex::Start)
             .areas(area);
             (main, Some(sidebar))
+        } else {
+            (area, None)
         }
     }
 
@@ -118,6 +120,12 @@ impl StepsMode {
             }
         }
     }
+
+    fn current_node(&self) -> Option<&ProofDagNode> {
+        self.proof_dag
+            .as_ref()
+            .and_then(|dag| dag.current_node.and_then(|id| dag.get(id)))
+    }
 }
 
 struct MainLayout {
@@ -127,7 +135,7 @@ struct MainLayout {
     goals: Rect,
 }
 
-impl InteractiveWidget for StepsMode {
+impl InteractiveComponent for StepsMode {
     type Input = StepsModeInput;
     type Event = KeyMouseEvent;
 
@@ -136,9 +144,8 @@ impl InteractiveWidget for StepsMode {
         self.goals = input.goals;
         self.definition = input.definition;
         self.error = input.error;
-        self.proof_steps = input.proof_steps;
-        self.current_step_index = input.current_step_index;
-        self.paperproof_steps = input.paperproof_steps;
+        self.current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
+        self.proof_dag = input.proof_dag;
 
         if goals_changed {
             self.selection.reset(self.selectable_items().len());
@@ -201,41 +208,30 @@ impl InteractiveWidget for StepsMode {
 
         // Render sidebar if present
         if let Some(sidebar_area) = sidebar {
-            self.sidebar_state.update(
-                self.proof_steps.clone(),
-                self.paperproof_steps.clone(),
-                self.current_step_index,
-            );
+            ProofStepsSidebar::update_state(&mut self.sidebar_state, self.proof_dag.clone());
             frame.render_stateful_widget(ProofStepsSidebar, sidebar_area, &mut self.sidebar_state);
         }
 
-        // Get goal_before from current paperproof step if showing
+        // Get goal_before from current node if showing (clone to avoid borrow issues)
         let goal_before = self
             .show_goal_before
-            .then(|| {
-                self.paperproof_steps
-                    .as_ref()
-                    .and_then(|steps| steps.get(self.current_step_index))
-                    .map(|step| &step.goal_before)
-            })
+            .then(|| self.current_node().map(|n| n.state_before.clone()))
             .flatten();
 
         // Layout main area
         let layout = Self::layout_main(main, goal_before.is_some());
 
-        // Collect context data
-        let depends_on: HashSet<String> = self
-            .proof_steps
-            .get(self.current_step_index)
-            .map(|step| step.depends_on.iter().cloned().collect())
+        // Collect context data from current node
+        let current_node = self.current_node();
+
+        let depends_on: HashSet<String> = current_node
+            .map(|node| node.tactic.depends_on.iter().cloned().collect())
             .unwrap_or_default();
 
-        let spawned_goal_ids: HashSet<String> = self
-            .paperproof_steps
-            .as_ref()
-            .and_then(|steps| steps.get(self.current_step_index))
-            .map(|step| {
-                step.spawned_goals
+        let spawned_goal_ids: HashSet<String> = current_node
+            .map(|node| {
+                node.state_after
+                    .goals
                     .iter()
                     .map(|g| g.username.clone())
                     .collect()
@@ -248,18 +244,19 @@ impl InteractiveWidget for StepsMode {
             self.filters,
             depends_on,
             self.current_selection(),
+            self.current_node_id,
         );
         frame.render_stateful_widget(HypSection, layout.hyps, &mut self.hyp_section_state);
         for region in self.hyp_section_state.click_regions() {
-            self.selection.add_region(region.area, region.item);
+            self.selection.add_region(region.area, region.selection);
         }
 
         // Render divider
         frame.render_widget(divider(), layout.div);
 
         // Render goal_before if toggled
-        if let (Some(area), Some(goal_before)) = (layout.goal_before, goal_before) {
-            render_goal_before(frame, area, goal_before);
+        if let (Some(area), Some(ref state_before)) = (layout.goal_before, goal_before) {
+            render_goal_before_from_state(frame, area, state_before);
         }
 
         // Render goal section
@@ -267,12 +264,44 @@ impl InteractiveWidget for StepsMode {
             self.goals.clone(),
             self.current_selection(),
             spawned_goal_ids,
+            self.current_node_id,
         );
         frame.render_stateful_widget(GoalSection, layout.goals, &mut self.goal_section_state);
         for region in self.goal_section_state.click_regions() {
-            self.selection.add_region(region.area, region.item);
+            self.selection.add_region(region.area, region.selection);
         }
     }
+}
+
+fn render_goal_before_from_state(frame: &mut Frame, area: Rect, state: &ProofState) {
+    use ratatui::{
+        style::{Color, Style},
+        text::{Line, Span},
+        widgets::Paragraph,
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Header
+    lines.push(Line::from(Span::styled(
+        "Goal Before:",
+        Style::new().fg(Color::Yellow),
+    )));
+
+    // Goals
+    for goal in &state.goals {
+        let goal_text = if goal.username.is_empty() {
+            goal.type_.clone()
+        } else {
+            format!("{}: {}", goal.username, goal.type_)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  ⊢ {goal_text}"),
+            Style::new().fg(Color::Cyan),
+        )));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 impl Mode for StepsMode {
@@ -294,7 +323,7 @@ impl Mode for StepsMode {
     ];
     const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
 
-    fn current_selection(&self) -> Option<SelectableItem> {
+    fn current_selection(&self) -> Option<Selection> {
         self.selection
             .current_selection(&self.selectable_items())
             .copied()

@@ -1,23 +1,23 @@
 //! Status bar with keybindings and filter status.
 
 use ratatui::{
+    buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::Paragraph,
-    Frame,
+    widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use super::{FilterToggle, HypothesisFilters};
-use crate::tui::widgets::interactive_widget::InteractiveWidget;
+use super::{FilterToggle, HypothesisFilters, InteractiveStatefulWidget};
 
-/// Input for the status bar.
+/// Input for updating status bar state.
 pub struct StatusBarInput {
     pub filters: HypothesisFilters,
     pub keybindings: &'static [(&'static str, &'static str)],
     pub supported_filters: &'static [FilterToggle],
 }
 
+/// State for the status bar widget.
 #[derive(Default)]
 pub struct StatusBar {
     filters: HypothesisFilters,
@@ -25,17 +25,13 @@ pub struct StatusBar {
     supported_filters: &'static [FilterToggle],
 }
 
-impl InteractiveWidget for StatusBar {
-    type Input = StatusBarInput;
-    type Event = ();
+/// Widget for rendering the status bar.
+pub struct StatusBarWidget;
 
-    fn update(&mut self, input: Self::Input) {
-        self.filters = input.filters;
-        self.keybindings = input.keybindings;
-        self.supported_filters = input.supported_filters;
-    }
+impl StatefulWidget for StatusBarWidget {
+    type State = StatusBar;
 
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         const GLOBAL_KEYBINDINGS: &[(&str, &str)] = &[
             ("?", "help"),
             ("j/k", "nav"),
@@ -58,7 +54,7 @@ impl InteractiveWidget for StatusBar {
             });
 
         // Mode-specific keybindings
-        let mode_spans = self.keybindings.iter().flat_map(|(key, desc)| {
+        let mode_spans = state.keybindings.iter().flat_map(|(key, desc)| {
             [
                 separator.clone(),
                 Span::styled(*key, Style::new().fg(Color::Yellow)),
@@ -76,7 +72,7 @@ impl InteractiveWidget for StatusBar {
             Span::raw(": type"),
         ];
 
-        let filter_status = build_filter_status(self.filters, self.supported_filters);
+        let filter_status = build_filter_status(state.filters, state.supported_filters);
         let filter_span = (!filter_status.is_empty())
             .then(|| Span::styled(format!(" [{filter_status}]"), Style::new().fg(Color::Green)));
 
@@ -85,7 +81,18 @@ impl InteractiveWidget for StatusBar {
             .chain(nav_spans)
             .chain(filter_span)
             .collect();
-        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        Paragraph::new(Line::from(spans)).render(area, buf);
+    }
+}
+
+impl InteractiveStatefulWidget for StatusBarWidget {
+    type Input = StatusBarInput;
+    type Event = ();
+
+    fn update_state(state: &mut Self::State, input: Self::Input) {
+        state.filters = input.filters;
+        state.keybindings = input.keybindings;
+        state.supported_filters = input.supported_filters;
     }
 }
 

@@ -11,43 +11,34 @@ use ratatui::{
     },
 };
 
-use crate::{lean_rpc::PaperproofStep, tui::widgets::theme::Theme, tui_ipc::ProofStep};
+use crate::{
+    tui::widgets::{theme::Theme, InteractiveStatefulWidget},
+    tui_ipc::{ProofDag, ProofDagNode},
+};
 
 /// State for the proof steps sidebar widget.
 #[derive(Default)]
 pub struct ProofStepsSidebarState {
-    proof_steps: Vec<ProofStep>,
-    paperproof_steps: Option<Vec<PaperproofStep>>,
-    current_step_index: usize,
+    proof_dag: Option<ProofDag>,
     scroll_state: ScrollbarState,
     vertical_scroll: usize,
 }
 
 impl ProofStepsSidebarState {
-    /// Update the state with new data.
-    pub fn update(
-        &mut self,
-        proof_steps: Vec<ProofStep>,
-        paperproof_steps: Option<Vec<PaperproofStep>>,
-        current_step_index: usize,
-    ) {
-        self.proof_steps = proof_steps;
-        self.paperproof_steps = paperproof_steps;
-        self.current_step_index = current_step_index;
-    }
-
     fn build_lines(&self) -> Vec<Line<'static>> {
-        self.proof_steps
-            .iter()
-            .enumerate()
-            .flat_map(|(i, step)| {
-                let is_current = i == self.current_step_index;
-                let mut lines = vec![step_line(step, i, is_current)];
+        let Some(dag) = &self.proof_dag else {
+            return vec![];
+        };
 
-                if let Some(deps) = dependency_line(step) {
+        dag.dfs_iter()
+            .enumerate()
+            .flat_map(|(i, node)| {
+                let mut lines = vec![step_line(node, i)];
+
+                if let Some(deps) = dependency_line(node) {
                     lines.push(deps);
                 }
-                if let Some(thms) = theorem_line(self.paperproof_steps.as_deref(), i) {
+                if let Some(thms) = theorem_line(node) {
                     lines.push(thms);
                 }
 
@@ -55,10 +46,40 @@ impl ProofStepsSidebarState {
             })
             .collect()
     }
+
+    fn calculate_scroll_position(&self) -> usize {
+        let Some(dag) = &self.proof_dag else {
+            return 0;
+        };
+
+        let mut line_count = 0;
+        for node in dag.dfs_iter() {
+            if node.is_current {
+                return line_count;
+            }
+            line_count += 1; // Main step line
+            if !node.tactic.depends_on.is_empty() {
+                line_count += 1; // Dependency line
+            }
+            if !node.tactic.theorems_used.is_empty() {
+                line_count += 1; // Theorem line
+            }
+        }
+        0
+    }
 }
 
 /// Widget displaying proof steps in a sidebar.
 pub struct ProofStepsSidebar;
+
+impl InteractiveStatefulWidget for ProofStepsSidebar {
+    type Input = Option<ProofDag>;
+    type Event = ();
+
+    fn update_state(state: &mut Self::State, input: Self::Input) {
+        state.proof_dag = input;
+    }
+}
 
 impl StatefulWidget for ProofStepsSidebar {
     type State = ProofStepsSidebarState;
@@ -77,26 +98,7 @@ impl StatefulWidget for ProofStepsSidebar {
         let lines = state.build_lines();
 
         // Calculate scroll position based on current step
-        // Find the line index for the current step
-        let mut line_count = 0;
-        for (i, step) in state.proof_steps.iter().enumerate() {
-            if i == state.current_step_index {
-                state.vertical_scroll = line_count;
-                break;
-            }
-            line_count += 1; // Main step line
-            if !step.depends_on.is_empty() {
-                line_count += 1; // Dependency line
-            }
-            let has_theorems = state
-                .paperproof_steps
-                .as_ref()
-                .and_then(|pp_steps| pp_steps.get(i))
-                .is_some_and(|pp_step| !pp_step.theorems.is_empty());
-            if has_theorems {
-                line_count += 1; // Theorem line
-            }
-        }
+        state.vertical_scroll = state.calculate_scroll_position();
 
         let total_lines = lines.len();
         let viewport_height = inner.height as usize;
@@ -126,59 +128,47 @@ impl StatefulWidget for ProofStepsSidebar {
     }
 }
 
-fn step_line(step: &ProofStep, index: usize, is_current: bool) -> Line<'static> {
-    let style = if is_current {
+fn step_line(node: &ProofDagNode, index: usize) -> Line<'static> {
+    let style = if node.is_current {
         Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(Color::White)
     };
 
-    let marker = if is_current { "▶ " } else { "  " };
-    let indent = "  ".repeat(step.depth);
+    let marker = if node.is_current { "▶ " } else { "  " };
+    let indent = "  ".repeat(node.depth);
 
     Line::from(vec![
         Span::styled(format!("{:>3}.", index + 1), Theme::DIM),
         Span::styled(marker, Style::new().fg(Color::Cyan)),
         Span::styled(indent, Theme::DIM),
-        Span::styled(step.tactic.clone(), style),
+        Span::styled(node.tactic.text.clone(), style),
     ])
 }
 
-fn dependency_line(step: &ProofStep) -> Option<Line<'static>> {
-    if step.depends_on.is_empty() {
+fn dependency_line(node: &ProofDagNode) -> Option<Line<'static>> {
+    if node.tactic.depends_on.is_empty() {
         return None;
     }
 
     Some(Line::from(vec![
         Span::raw("     "),
         Span::styled(
-            format!("uses: {}", step.depends_on.join(", ")),
+            format!("uses: {}", node.tactic.depends_on.join(", ")),
             Theme::DEPENDENCY,
         ),
     ]))
 }
 
-fn theorem_line(
-    paperproof_steps: Option<&[PaperproofStep]>,
-    index: usize,
-) -> Option<Line<'static>> {
-    let pp_step = paperproof_steps?.get(index)?;
-
-    if pp_step.theorems.is_empty() {
+fn theorem_line(node: &ProofDagNode) -> Option<Line<'static>> {
+    if node.tactic.theorems_used.is_empty() {
         return None;
     }
-
-    let thm_names: String = pp_step
-        .theorems
-        .iter()
-        .map(|t| t.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
 
     Some(Line::from(vec![
         Span::raw("     "),
         Span::styled(
-            format!("thms: {thm_names}"),
+            format!("thms: {}", node.tactic.theorems_used.join(", ")),
             Style::new().fg(Color::Blue).add_modifier(Modifier::DIM),
         ),
     ]))

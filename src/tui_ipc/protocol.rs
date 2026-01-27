@@ -1,84 +1,14 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 pub use async_lsp::lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::lean_rpc::{Goal, PaperproofOutputParams, PaperproofStep};
+use crate::lean_rpc::Goal;
 // Re-export AST-derived types from proxy for IPC consumers
-pub use crate::proxy::ast::{CaseSplitInfo, DefinitionInfo, TacticInfo};
-
-/// A unified proof step that can be populated from either Paperproof RPC
-/// or local tree-sitter analysis.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProofStep {
-    /// The tactic text.
-    pub tactic: String,
-    /// Position in source file.
-    pub position: Position,
-    /// Hypotheses this tactic depends on.
-    #[serde(default)]
-    pub depends_on: Vec<String>,
-    /// Nesting depth (for have/cases scopes).
-    #[serde(default)]
-    pub depth: usize,
-    /// Source of this data (for debugging).
-    #[serde(default)]
-    pub source: ProofStepSource,
-}
-
-/// Source of proof step data.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ProofStepSource {
-    /// From Paperproof Lean library RPC.
-    Paperproof,
-    /// From local tree-sitter analysis.
-    #[default]
-    Local,
-}
-
-impl ProofStep {
-    /// Create from Paperproof step data.
-    ///
-    /// Resolves fvar IDs in `tactic_depends_on` to user-visible hypothesis
-    /// names using the hypothesis list from `goal_before`.
-    pub fn from_paperproof(step: &PaperproofStep) -> Self {
-        // Build a lookup from fvar ID to username
-        let id_to_name: HashMap<&str, &str> = step
-            .goal_before
-            .hyps
-            .iter()
-            .map(|h| (h.id.as_str(), h.username.as_str()))
-            .collect();
-
-        // Resolve IDs to names, keeping original if not found
-        let depends_on: Vec<String> = step
-            .tactic_depends_on
-            .iter()
-            .filter_map(|id| id_to_name.get(id.as_str()).map(|s| (*s).to_string()))
-            .collect();
-
-        Self {
-            tactic: step.tactic_string.clone(),
-            position: step.position.start,
-            depends_on,
-            depth: 0, // Paperproof doesn't provide depth
-            source: ProofStepSource::Paperproof,
-        }
-    }
-
-    /// Create from local tactic info.
-    pub fn from_local(tactic: &TacticInfo, depends_on: Vec<String>) -> Self {
-        Self {
-            tactic: tactic.text.clone(),
-            position: tactic.start,
-            depends_on,
-            depth: tactic.depth,
-            source: ProofStepSource::Local,
-        }
-    }
-}
+pub use crate::proxy::ast::DefinitionInfo;
+// Re-export ProofDag types
+pub use crate::proxy::dag::{HypothesisInfo, NodeId, ProofDag, ProofDagNode, ProofState};
 
 /// Returns the path to the Unix socket for IPC.
 pub fn socket_path() -> PathBuf {
@@ -149,29 +79,16 @@ pub enum Message {
         /// The enclosing definition (theorem, lemma, etc.)
         #[serde(default)]
         definition: Option<DefinitionInfo>,
-        /// Case-splitting tactics that affect the current position.
+        /// Unified proof DAG - single source of truth for all display modes.
+        /// Contains all proof steps, tree structure, and navigation info.
         #[serde(default)]
-        case_splits: Vec<CaseSplitInfo>,
-        /// Proof steps from Paperproof if available.
-        #[serde(default)]
-        paperproof_steps: Option<Vec<PaperproofStep>>,
-        /// Unified proof steps (from Paperproof or local analysis).
-        #[serde(default)]
-        proof_steps: Vec<ProofStep>,
-        /// Index of current step (closest to cursor).
-        #[serde(default)]
-        current_step_index: usize,
+        proof_dag: Option<ProofDag>,
     },
     TemporalGoals {
         uri: Url,
         cursor_position: Position,
         slot: TemporalSlot,
         result: GoalResult,
-    },
-    PaperproofData {
-        uri: Url,
-        position: Position,
-        output: PaperproofOutputParams,
     },
     Error {
         error: String,

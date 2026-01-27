@@ -16,18 +16,18 @@ use super::{
         BeforeAfterModeInput, DeductionTreeModeInput, DisplayMode, GoalTreeModeInput,
         StepsModeInput,
     },
-    widgets::{KeyMouseEvent, SelectableItem},
+    widgets::{welcome::WelcomeScreen, KeyMouseEvent, Selection},
 };
 use crate::{
-    lean_rpc::{Goal, GotoLocation, GotoLocations, PaperproofStep},
+    lean_rpc::{Goal, GotoLocation},
     tui::widgets::{
-        help_menu::HelpMenu,
-        interactive_widget::InteractiveWidget,
-        status_bar::{StatusBar, StatusBarInput},
+        help_menu::{HelpMenu, HelpMenuWidget},
+        status_bar::{StatusBar, StatusBarInput, StatusBarWidget},
+        InteractiveStatefulWidget,
     },
     tui_ipc::{
-        socket_path, CaseSplitInfo, Command, CursorInfo, DefinitionInfo, GoalResult, Message,
-        Position, ProofStep, TemporalSlot,
+        socket_path, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position, ProofDag,
+        TemporalSlot,
     },
 };
 
@@ -100,8 +100,6 @@ pub struct App {
     pub temporal_goals: TemporalGoals,
     /// Enclosing definition (theorem/lemma name).
     pub definition: Option<DefinitionInfo>,
-    /// Case-splitting tactics affecting current position.
-    pub case_splits: Vec<CaseSplitInfo>,
     /// Current error message.
     pub error: Option<String>,
     /// Whether connected to proxy.
@@ -115,12 +113,8 @@ pub struct App {
     /// Proof history for Paperproof view.
     #[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
     proof_history: ProofHistory,
-    /// Proof steps from Paperproof (if available).
-    paperproof_steps: Option<Vec<PaperproofStep>>,
-    /// Unified proof steps (from Paperproof or local tree-sitter analysis).
-    proof_steps: Vec<ProofStep>,
-    /// Index of current step (closest to cursor).
-    current_step_index: usize,
+    /// Unified proof DAG - single source of truth for all display modes.
+    proof_dag: Option<ProofDag>,
     /// Status bar component.
     status_bar: StatusBar,
     /// Help menu overlay.
@@ -188,10 +182,7 @@ impl App {
                 position,
                 goals,
                 definition,
-                case_splits,
-                paperproof_steps,
-                proof_steps,
-                current_step_index,
+                proof_dag,
             } => {
                 let line_changed = self.temporal_goals.current.position.line != position.line;
 
@@ -210,25 +201,10 @@ impl App {
                     status: LoadStatus::Ready,
                 };
                 self.definition = new_definition;
-                self.case_splits = case_splits;
-                self.paperproof_steps = paperproof_steps;
-                self.proof_steps = proof_steps;
-                self.current_step_index = current_step_index;
+                self.proof_dag = proof_dag;
                 self.connected = true;
                 self.error = None;
                 self.refresh_temporal_columns();
-            }
-            Message::PaperproofData {
-                uri: _,
-                position: _,
-                output,
-            } => {
-                self.paperproof_steps = if output.steps.is_empty() {
-                    None
-                } else {
-                    Some(output.steps)
-                };
-                self.connected = true;
             }
             Message::TemporalGoals {
                 uri: _,
@@ -262,14 +238,14 @@ impl App {
     }
 
     /// Navigate to the given selection (go to definition).
-    pub fn navigate_to_selection(&mut self, selection: Option<SelectableItem>) {
+    pub fn navigate_to_selection(&mut self, selection: Option<Selection>) {
         self.navigate_to_selection_with_kind(selection, NavigationKind::Definition);
     }
 
     /// Navigate to the given selection with a specific navigation kind.
     pub fn navigate_to_selection_with_kind(
         &mut self,
-        selection: Option<SelectableItem>,
+        selection: Option<Selection>,
         kind: NavigationKind,
     ) {
         let Some(cursor) = &self.cursor else {
@@ -283,27 +259,19 @@ impl App {
 
     fn build_navigation_command(
         &self,
-        selection: Option<SelectableItem>,
+        selection: Option<Selection>,
         uri: Url,
         position: Position,
         kind: NavigationKind,
     ) -> Command {
-        let goto_locations: Option<&GotoLocations> = match selection {
-            Some(SelectableItem::Hypothesis { goal_idx, hyp_idx }) => self
-                .goals()
-                .get(goal_idx)
-                .and_then(|g| g.hyps.get(hyp_idx))
-                .map(|h| &h.goto_locations),
-            Some(SelectableItem::GoalTarget { goal_idx }) => {
-                self.goals().get(goal_idx).map(|g| &g.goto_locations)
-            }
-            None => None,
-        };
+        let goto_location = self.resolve_goto_location(selection, kind);
 
-        let goto_location: Option<&GotoLocation> = goto_locations.and_then(|locs| match kind {
-            NavigationKind::Definition => locs.definition.as_ref(),
-            NavigationKind::TypeDefinition => locs.type_def.as_ref(),
-        });
+        tracing::debug!(
+            "Navigation: selection={:?}, kind={:?}, goto_location={:?}",
+            selection,
+            kind,
+            goto_location.map(|l| (&l.uri, l.position))
+        );
 
         goto_location.map_or(Command::Navigate { uri, position }, |loc| {
             Command::Navigate {
@@ -311,6 +279,36 @@ impl App {
                 position: loc.position,
             }
         })
+    }
+
+    fn resolve_goto_location(
+        &self,
+        selection: Option<Selection>,
+        kind: NavigationKind,
+    ) -> Option<&GotoLocation> {
+        let dag = self.proof_dag.as_ref()?;
+
+        let locations = match selection? {
+            Selection::InitialHyp { hyp_idx } => dag
+                .initial_state
+                .hypotheses
+                .get(hyp_idx)
+                .map(|h| &h.goto_locations),
+            Selection::Hyp { node_id, hyp_idx } => dag
+                .get(node_id)
+                .and_then(|node| node.state_after.hypotheses.get(hyp_idx))
+                .map(|h| &h.goto_locations),
+            Selection::Goal { node_id, goal_idx } => dag
+                .get(node_id)
+                .and_then(|node| node.state_after.goals.get(goal_idx))
+                .map(|g| &g.goto_locations),
+            Selection::Theorem => dag.initial_state.goals.first().map(|g| &g.goto_locations),
+        }?;
+
+        match kind {
+            NavigationKind::Definition => locations.definition.as_ref(),
+            NavigationKind::TypeDefinition => locations.type_def.as_ref(),
+        }
     }
 
     fn refresh_temporal_columns(&mut self) {
@@ -375,19 +373,22 @@ impl App {
         }
 
         self.update_display_mode();
-        self.status_bar.update(StatusBarInput {
-            filters: self.display_mode.filters(),
-            keybindings: self.display_mode.keybindings(),
-            supported_filters: self.display_mode.supported_filters(),
-        });
+        StatusBarWidget::update_state(
+            &mut self.status_bar,
+            StatusBarInput {
+                filters: self.display_mode.filters(),
+                keybindings: self.display_mode.keybindings(),
+                supported_filters: self.display_mode.supported_filters(),
+            },
+        );
     }
 
     fn update_display_mode(&mut self) {
         self.display_mode.update_goal_tree(GoalTreeModeInput {
             goals: self.goals().to_vec(),
             definition: self.definition.clone(),
-            case_splits: self.case_splits.clone(),
             error: self.error.clone(),
+            proof_dag: self.proof_dag.clone(),
         });
         self.display_mode.update_before_after(BeforeAfterModeInput {
             previous_goals: self
@@ -408,22 +409,20 @@ impl App {
                 .flatten(),
             definition: self.definition.clone(),
             error: self.error.clone(),
+            proof_dag: self.proof_dag.clone(),
         });
         self.display_mode.update_steps(StepsModeInput {
             goals: self.goals().to_vec(),
             definition: self.definition.clone(),
             error: self.error.clone(),
-            proof_steps: self.proof_steps.clone(),
-            current_step_index: self.current_step_index,
-            paperproof_steps: self.paperproof_steps.clone(),
+            proof_dag: self.proof_dag.clone(),
         });
         self.display_mode
             .update_deduction_tree(DeductionTreeModeInput {
                 goals: self.goals().to_vec(),
                 definition: self.definition.clone(),
                 error: self.error.clone(),
-                current_step_index: self.current_step_index,
-                paperproof_steps: self.paperproof_steps.clone(),
+                proof_dag: self.proof_dag.clone(),
             });
     }
 
@@ -433,11 +432,19 @@ impl App {
             Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
         self.render_main(frame, main_area);
-        self.status_bar.render(frame, status_area);
-        self.help_menu.render(frame, frame.area());
+        frame.render_stateful_widget(StatusBarWidget, status_area, &mut self.status_bar);
+        frame.render_stateful_widget(HelpMenuWidget, frame.area(), &mut self.help_menu);
     }
 
     fn render_main(&mut self, frame: &mut Frame, area: Rect) {
+        // Show welcome screen when connected but no cursor position yet
+        let show_welcome = self.connected && self.cursor.is_none();
+
+        if show_welcome {
+            frame.render_widget(WelcomeScreen, area);
+            return;
+        }
+
         let title = self.build_title();
         let backends = format!(" {} ", self.display_mode.backends_display());
         let position_info = self.build_position_info();
@@ -489,7 +496,7 @@ impl App {
     pub fn handle_event(&mut self, event: &Event) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                if self.help_menu.handle_event(*key) {
+                if HelpMenuWidget::handle_event(&mut self.help_menu, *key) {
                     return;
                 }
                 if !self.handle_global_key(key.code) {

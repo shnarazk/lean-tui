@@ -2,7 +2,7 @@
 
 use ratatui::layout::Rect;
 
-use super::{ClickRegion, SelectableItem};
+use super::{ClickRegion, Selection};
 
 /// Manages selection state for navigable items.
 #[derive(Debug, Default)]
@@ -18,8 +18,8 @@ impl SelectionState {
     }
 
     /// Add a click region.
-    pub fn add_region(&mut self, area: Rect, item: SelectableItem) {
-        self.click_regions.push(ClickRegion { area, item });
+    pub fn add_region(&mut self, area: Rect, selection: Selection) {
+        self.click_regions.push(ClickRegion { area, selection });
     }
 
     /// Reset selection to first item if items exist.
@@ -48,17 +48,17 @@ impl SelectionState {
     }
 
     /// Get currently selected item from a list.
-    pub fn current_selection<'a>(&self, items: &'a [SelectableItem]) -> Option<&'a SelectableItem> {
+    pub fn current_selection<'a>(&self, items: &'a [Selection]) -> Option<&'a Selection> {
         self.selected_index.and_then(|i| items.get(i))
     }
 
     /// Handle a click at (x, y). Returns true if selection changed.
-    pub fn handle_click(&mut self, x: u16, y: u16, items: &[SelectableItem]) -> bool {
+    pub fn handle_click(&mut self, x: u16, y: u16, items: &[Selection]) -> bool {
         let Some(region) = self.find_click_region(x, y) else {
             return false;
         };
 
-        if let Some(idx) = items.iter().position(|i| *i == region.item) {
+        if let Some(idx) = items.iter().position(|i| *i == region.selection) {
             self.selected_index = Some(idx);
             return true;
         }

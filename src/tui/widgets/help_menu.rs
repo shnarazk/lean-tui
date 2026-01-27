@@ -2,15 +2,14 @@
 
 use crossterm::event::KeyCode;
 use ratatui::{
+    buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph},
-    Frame,
+    widgets::{Block, Clear, Paragraph, StatefulWidget, Widget},
 };
 
-use super::KeyEvent;
-use crate::tui::widgets::interactive_widget::InteractiveWidget;
+use super::{InteractiveStatefulWidget, KeyEvent};
 
 const KEYBINDINGS: &[(&str, &str)] = &[
     // Display modes
@@ -32,6 +31,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("q", "quit"),
 ];
 
+/// State for the help menu widget.
 #[derive(Default)]
 pub struct HelpMenu {
     visible: bool,
@@ -43,28 +43,14 @@ impl HelpMenu {
     }
 }
 
-impl InteractiveWidget for HelpMenu {
-    type Input = ();
-    type Event = KeyEvent;
+/// Widget for rendering the help menu overlay.
+pub struct HelpMenuWidget;
 
-    fn update(&mut self, _input: Self::Input) {}
+impl StatefulWidget for HelpMenuWidget {
+    type State = HelpMenu;
 
-    fn handle_event(&mut self, event: Self::Event) -> bool {
-        if !self.visible {
-            return false;
-        }
-
-        match event.code {
-            KeyCode::Esc | KeyCode::Char('?') => {
-                self.visible = false;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
-        if !self.visible {
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        if !state.visible {
             return;
         }
 
@@ -75,7 +61,7 @@ impl InteractiveWidget for HelpMenu {
         let y = area.height.saturating_sub(height + 2);
         let popup_area = Rect::new(x, y, width, height);
 
-        frame.render_widget(Clear, popup_area);
+        Clear.render(popup_area, buf);
 
         let block = Block::bordered()
             .title(" Help ")
@@ -92,6 +78,29 @@ impl InteractiveWidget for HelpMenu {
             })
             .collect();
 
-        frame.render_widget(Paragraph::new(help_lines).block(block), popup_area);
+        Paragraph::new(help_lines)
+            .block(block)
+            .render(popup_area, buf);
+    }
+}
+
+impl InteractiveStatefulWidget for HelpMenuWidget {
+    type Input = ();
+    type Event = KeyEvent;
+
+    fn update_state(_state: &mut Self::State, _input: Self::Input) {}
+
+    fn handle_event(state: &mut Self::State, event: Self::Event) -> bool {
+        if !state.visible {
+            return false;
+        }
+
+        match event.code {
+            KeyCode::Esc | KeyCode::Char('?') => {
+                state.visible = false;
+                true
+            }
+            _ => false,
+        }
     }
 }

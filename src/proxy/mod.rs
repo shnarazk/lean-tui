@@ -9,6 +9,7 @@
 
 pub mod ast;
 mod commands;
+pub mod dag;
 mod goals;
 mod lake;
 mod lsp;

@@ -12,12 +12,11 @@ use ratatui::{
 
 use super::{
     goal_box::{GoalBox, GoalBoxState},
-    ClickRegion, HypothesisFilters, SelectableItem,
+    ClickRegion, HypothesisFilters, Selection,
 };
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{layout_metrics::LayoutMetrics, theme::Theme},
-    tui_ipc::CaseSplitInfo,
 };
 
 mod tree_chars {
@@ -35,9 +34,10 @@ enum TreeElement {
 /// Widget for rendering a hierarchical tree of goals.
 pub struct GoalTree<'a> {
     goals: &'a [Goal],
-    case_splits: &'a [CaseSplitInfo],
-    selection: Option<SelectableItem>,
+    selection: Option<Selection>,
     filters: HypothesisFilters,
+    /// Node ID for creating click region selections.
+    node_id: Option<u32>,
 }
 
 /// Mutable state for `GoalTree` that tracks click regions.
@@ -57,15 +57,15 @@ impl GoalTreeState {
 impl<'a> GoalTree<'a> {
     pub const fn new(
         goals: &'a [Goal],
-        case_splits: &'a [CaseSplitInfo],
-        selection: Option<SelectableItem>,
+        selection: Option<Selection>,
         filters: HypothesisFilters,
+        node_id: Option<u32>,
     ) -> Self {
         Self {
             goals,
-            case_splits,
             selection,
             filters,
+            node_id,
         }
     }
 
@@ -73,7 +73,7 @@ impl<'a> GoalTree<'a> {
     pub fn render_to_frame(&self, frame: &mut Frame, area: Rect) -> Vec<ClickRegion> {
         let mut state = GoalTreeState::default();
         frame.render_stateful_widget(
-            GoalTree::new(self.goals, self.case_splits, self.selection, self.filters),
+            GoalTree::new(self.goals, self.selection, self.filters, self.node_id),
             area,
             &mut state,
         );
@@ -83,24 +83,11 @@ impl<'a> GoalTree<'a> {
     fn build_tree_elements(&self) -> Vec<TreeElement> {
         let mut elements = Vec::new();
 
-        let has_case_splits = !self.case_splits.is_empty();
         let has_named_goals = self.goals.iter().any(|g| g.user_name.is_some());
-        let use_tree = has_case_splits || (self.goals.len() > 1 && has_named_goals);
-
-        if let Some(split) = self.case_splits.last() {
-            elements.push(TreeElement::Label(render_case_split_label(
-                split, "", false,
-            )));
-        }
-
-        let root_prefix = if has_case_splits {
-            tree_chars::EMPTY.to_string()
-        } else {
-            String::new()
-        };
+        let use_tree = self.goals.len() > 1 && has_named_goals;
 
         if use_tree {
-            self.append_goals_as_tree(&root_prefix, &mut elements);
+            self.append_goals_as_tree("", &mut elements);
         } else {
             self.append_goals_flat(&mut elements);
         }
@@ -204,8 +191,13 @@ impl StatefulWidget for GoalTree<'_> {
                 TreeElement::Goal { idx, prefix } => {
                     let content_area = layout_with_prefix(*elem_area, prefix, buf);
 
-                    let goal_box =
-                        GoalBox::new(&self.goals[*idx], *idx, self.selection, self.filters);
+                    let goal_box = GoalBox::new(
+                        &self.goals[*idx],
+                        *idx,
+                        self.selection,
+                        self.filters,
+                        self.node_id,
+                    );
 
                     goal_box.render(
                         content_area,
@@ -248,23 +240,6 @@ fn render_vertical_prefix(area: Rect, prefix: &str, buf: &mut Buffer) {
     let line = Line::from(Span::styled(prefix.to_string(), Theme::TREE_CHARS));
     let lines: Vec<Line> = iter::repeat_n(line, area.height as usize).collect();
     Paragraph::new(lines).render(area, buf);
-}
-
-fn render_case_split_label(
-    split: &CaseSplitInfo,
-    prefix: &str,
-    show_connector: bool,
-) -> Line<'static> {
-    let label = split.name.as_ref().map_or_else(
-        || format!("{}:", split.tactic),
-        |name| format!("{}[{name}]:", split.tactic),
-    );
-    let mut spans = vec![Span::styled(prefix.to_string(), Theme::TREE_CHARS)];
-    if show_connector {
-        spans.push(Span::styled(tree_chars::MIDDLE, Theme::TREE_CHARS));
-    }
-    spans.push(Span::styled(label, Theme::CASE_LABEL));
-    Line::from(spans)
 }
 
 fn render_case_label(prefix: &str, connector: &str, name: &str) -> Line<'static> {

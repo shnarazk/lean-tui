@@ -1,7 +1,6 @@
 //! Component-based UI architecture.
 
 pub mod diff_text;
-pub mod goal_before;
 pub mod goal_box;
 pub mod goal_section;
 pub mod goal_tree;
@@ -15,15 +14,17 @@ pub mod proof_steps_sidebar;
 pub mod render_helpers;
 pub mod selection;
 pub mod status_bar;
-pub mod step_box;
 pub mod tactic_row;
 pub mod theme;
-pub mod tree_builder;
 pub mod tree_colors;
-pub mod tree_hyp_bar;
+pub mod tree_given_bar;
+pub mod tree_node_box;
 pub mod tree_view;
+pub mod welcome;
 
-use crossterm::event::{KeyEvent, MouseEvent};
+pub use crossterm::event::KeyEvent;
+use crossterm::event::MouseEvent;
+pub use interactive_widget::{InteractiveComponent, InteractiveStatefulWidget};
 use ratatui::layout::Rect;
 
 use crate::lean_rpc::Hypothesis;
@@ -34,16 +35,24 @@ pub enum KeyMouseEvent {
     Mouse(MouseEvent),
 }
 
+/// Unified selection type for all display modes.
+/// All selections reference data in `ProofDag`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectableItem {
-    Hypothesis { goal_idx: usize, hyp_idx: usize },
-    GoalTarget { goal_idx: usize },
+pub enum Selection {
+    /// Initial hypothesis from theorem statement.
+    InitialHyp { hyp_idx: usize },
+    /// Hypothesis at a proof step (`node_id` indexes into `ProofDag`).
+    Hyp { node_id: u32, hyp_idx: usize },
+    /// Goal at a proof step.
+    Goal { node_id: u32, goal_idx: usize },
+    /// The theorem conclusion.
+    Theorem,
 }
 
 #[derive(Debug, Clone)]
 pub struct ClickRegion {
     pub area: Rect,
-    pub item: SelectableItem,
+    pub selection: Selection,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

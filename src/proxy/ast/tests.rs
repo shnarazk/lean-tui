@@ -53,17 +53,3 @@ fn test_find_enclosing_definition() {
     assert_eq!(info.kind, "theorem");
     assert_eq!(info.name, "foo");
 }
-
-#[test]
-fn test_find_case_splits() {
-    let code = "theorem test : P := by\n  by_cases h : A\n  · sorry\n  · sorry";
-    let tree = parse(code);
-    let pos = Position {
-        line: 2,
-        character: 4,
-    };
-    let splits = find_case_splits(&tree, code, pos);
-    assert!(!splits.is_empty());
-    assert_eq!(splits[0].tactic, "by_cases");
-    assert_eq!(splits[0].name, Some("h".to_string()));
-}
