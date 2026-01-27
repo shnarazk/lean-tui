@@ -1,7 +1,7 @@
 //! Display modes for the TUI.
 
 mod before_after;
-mod deduction_tree;
+pub mod deduction_tree;
 mod goal_tree;
 mod steps_view;
 
@@ -67,7 +67,7 @@ pub enum DisplayMode {
 
 impl Default for DisplayMode {
     fn default() -> Self {
-        Self::GoalTree(GoalTreeMode::default())
+        Self::DeductionTree(DeductionTreeMode::default())
     }
 }
 

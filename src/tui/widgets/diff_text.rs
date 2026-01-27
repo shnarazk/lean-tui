@@ -22,7 +22,7 @@ pub const fn diff_tag_style(tag: DiffTag, base_style: Style) -> Style {
 
 pub const fn item_style(is_selected: bool, fg_color: Color) -> Style {
     if is_selected {
-        Style::new().bg(Color::DarkGray).fg(fg_color)
+        Style::new().fg(fg_color).add_modifier(Modifier::UNDERLINED)
     } else {
         Style::new().fg(fg_color)
     }

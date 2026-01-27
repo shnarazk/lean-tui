@@ -15,6 +15,7 @@ pub mod proof_steps_sidebar;
 pub mod render_helpers;
 pub mod selection;
 pub mod status_bar;
+pub mod step_box;
 pub mod tactic_row;
 pub mod theme;
 pub mod tree_builder;

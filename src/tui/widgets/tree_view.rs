@@ -11,14 +11,27 @@ use ratatui::{
 };
 
 use super::{
+    step_box::{StepBox, StepBoxState},
     tree_builder::{build_proof_tree, ProofNode},
     tree_colors,
     tree_hyp_bar::render_hyp_bar,
 };
-use crate::lean_rpc::{PaperproofHypothesis, PaperproofStep};
+use crate::{
+    lean_rpc::{PaperproofHypothesis, PaperproofStep},
+    tui::modes::deduction_tree::{TreeClickRegions, TreeSelection},
+};
 
 /// Minimum width for a branch column.
 const MIN_BRANCH_WIDTH: u16 = 25;
+
+/// Context for recursive tree rendering.
+struct TreeRenderContext<'a> {
+    steps: &'a [PaperproofStep],
+    current_step_index: usize,
+    top_down: bool,
+    selection: Option<TreeSelection>,
+    click_regions: &'a mut TreeClickRegions,
+}
 
 /// Render the proof tree view.
 pub fn render_tree_view(
@@ -26,6 +39,9 @@ pub fn render_tree_view(
     area: Rect,
     steps: &[PaperproofStep],
     current_step_index: usize,
+    top_down: bool,
+    selection: Option<TreeSelection>,
+    click_regions: &mut TreeClickRegions,
 ) {
     if steps.is_empty() {
         frame.render_widget(
@@ -38,29 +54,70 @@ pub fn render_tree_view(
     let initial_hyps = &steps[0].goal_before.hyps;
     let initial_goal = &steps[0].goal_before.type_;
 
-    let [hyps_area, tree_area, conclusion_area] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Fill(1),
-        Constraint::Length(3),
-    ])
-    .areas(area);
+    // Hypotheses always at top
+    // Top-down: [hyps, tree, theorem] - parent tactics near top, leaves near bottom
+    // Bottom-up: [hyps, theorem, tree] - theorem after hyps, then leaves at top of
+    // tree area
+    let (hyps_area, tree_area, conclusion_area) = if top_down {
+        Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Fill(1),
+            Constraint::Length(3),
+        ])
+        .areas::<3>(area)
+        .into()
+    } else {
+        let [h, c, t] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Fill(1),
+        ])
+        .areas(area);
+        (h, t, c)
+    };
 
-    render_hyp_bar(frame, hyps_area, initial_hyps);
+    // Clear and populate click regions
+    click_regions.regions.clear();
+
+    render_hyp_bar(frame, hyps_area, initial_hyps, selection, click_regions);
+    render_conclusion(
+        frame,
+        conclusion_area,
+        initial_goal,
+        selection,
+        click_regions,
+    );
+
+    let mut ctx = TreeRenderContext {
+        steps,
+        current_step_index,
+        top_down,
+        selection,
+        click_regions,
+    };
 
     // Build tree structure
     if let Some(root) = build_proof_tree(steps) {
-        render_tree_recursive(frame, tree_area, steps, &root, current_step_index);
+        render_tree_recursive(frame, tree_area, &mut ctx, &root);
     } else {
         // Fallback to flat list if tree building fails
         render_steps_flat(frame, tree_area, steps, current_step_index);
     }
-
-    // Render theorem conclusion at the bottom
-    render_conclusion(frame, conclusion_area, initial_goal);
 }
 
 /// Render the theorem conclusion at the bottom.
-fn render_conclusion(frame: &mut Frame, area: Rect, goal: &str) {
+fn render_conclusion(
+    frame: &mut Frame,
+    area: Rect,
+    goal: &str,
+    selection: Option<TreeSelection>,
+    click_regions: &mut TreeClickRegions,
+) {
+    let is_selected = matches!(selection, Some(TreeSelection::Theorem));
+
+    // Register click region for theorem
+    click_regions.add(area, TreeSelection::Theorem);
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Magenta))
@@ -72,11 +129,13 @@ fn render_conclusion(frame: &mut Frame, area: Rect, goal: &str) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let goal_text = Paragraph::new(Line::from(vec![Span::styled(
-        format!("⊢ {goal}"),
-        Style::new().fg(tree_colors::GOAL_FG),
-    )]))
-    .wrap(Wrap { trim: true });
+    let mut style = Style::new().fg(tree_colors::GOAL_FG);
+    if is_selected {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+
+    let goal_text = Paragraph::new(Line::from(vec![Span::styled(format!("⊢ {goal}"), style)]))
+        .wrap(Wrap { trim: true });
 
     frame.render_widget(goal_text, inner);
 }
@@ -90,7 +149,8 @@ fn step_box_height(step: &PaperproofStep) -> u16 {
 }
 
 /// Get hypotheses that are new in this step (introduced by the tactic).
-fn get_new_hypotheses(step: &PaperproofStep) -> Vec<&PaperproofHypothesis> {
+/// Returns (`index_in_goals_after`, hypothesis) pairs.
+fn get_new_hypotheses(step: &PaperproofStep) -> Vec<(usize, &PaperproofHypothesis)> {
     let before_ids: HashSet<&str> = step
         .goal_before
         .hyps
@@ -103,71 +163,80 @@ fn get_new_hypotheses(step: &PaperproofStep) -> Vec<&PaperproofHypothesis> {
         .map(|goal| {
             goal.hyps
                 .iter()
-                .filter(|h| !before_ids.contains(h.id.as_str()))
+                .enumerate()
+                .filter(|(_, h)| !before_ids.contains(h.id.as_str()))
                 .collect()
         })
         .unwrap_or_default()
 }
 
 /// Recursively render the proof tree with horizontal branching.
-/// Uses bottom-up ordering to match Paperproof: children appear above, parent
-/// below.
 fn render_tree_recursive(
     frame: &mut Frame,
     area: Rect,
-    steps: &[PaperproofStep],
+    ctx: &mut TreeRenderContext,
     node: &ProofNode,
-    current_step_index: usize,
 ) {
-    let step = &steps[node.step_index];
+    let step = &ctx.steps[node.step_index];
     let box_height = step_box_height(step);
 
     if area.height < box_height {
         return;
     }
 
-    let is_current = node.step_index == current_step_index;
+    let is_current = node.step_index == ctx.current_step_index;
 
-    // REVERSED: children area FIRST (top), step area SECOND (bottom)
-    // This matches Paperproof's bottom-up visual flow where the conclusion
-    // appears at the bottom and leaf tactics appear at the top.
+    // Layout depends on direction:
+    // - Top-down: step above, children below (parent at top, leaves at bottom)
+    // - Bottom-up: children above, step below (leaves at top, parent at bottom)
     let (children_area, step_area) = if node.children.is_empty() {
-        // Leaf node: step at top, remaining space unused
-        let [step_area, _] =
+        // Leaf node: step positioned based on direction
+        if ctx.top_down {
+            let [step_area, _] =
+                Layout::vertical([Constraint::Length(box_height), Constraint::Fill(1)]).areas(area);
+            (None, step_area)
+        } else {
+            let [_, step_area] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(box_height)]).areas(area);
+            (None, step_area)
+        }
+    } else if ctx.top_down {
+        // Top-down: step above (fixed height), children below (Fill)
+        let [step_area, children_area] =
             Layout::vertical([Constraint::Length(box_height), Constraint::Fill(1)]).areas(area);
-        (None, step_area)
+        (Some(children_area), step_area)
     } else {
-        // Non-leaf: children above (Fill), this step below (fixed height)
+        // Bottom-up: children above (Fill), step below (fixed height)
         let [children_area, step_area] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(box_height)]).areas(area);
         (Some(children_area), step_area)
     };
 
-    // Render children FIRST (they appear above)
-    if let Some(children_area) = children_area {
-        render_children(
-            frame,
-            children_area,
-            steps,
-            &node.children,
-            current_step_index,
-        );
-    }
+    let mut state = StepBoxState {
+        step,
+        step_idx: node.step_index,
+        is_current,
+        branch_count: node.children.len(),
+        selection: ctx.selection,
+    };
+    let widget = StepBox {
+        click_regions: ctx.click_regions,
+    };
+    frame.render_stateful_widget(widget, step_area, &mut state);
 
-    // Render this step SECOND (appears below children)
-    render_step_box(frame, step_area, step, is_current, node.children.len());
+    if let Some(children_area) = children_area {
+        render_children(frame, children_area, ctx, &node.children);
+    }
 }
 
 /// Render child branches, side-by-side if multiple.
 fn render_children(
     frame: &mut Frame,
     area: Rect,
-    steps: &[PaperproofStep],
+    ctx: &mut TreeRenderContext,
     children: &[ProofNode],
-    current_step_index: usize,
 ) {
     if children.len() > 1 {
-        // Multiple branches: render side-by-side with flexible widths
         let constraints: Vec<Constraint> = children
             .iter()
             .map(|_| Constraint::Min(MIN_BRANCH_WIDTH))
@@ -176,160 +245,10 @@ fn render_children(
         let branch_areas = Layout::horizontal(constraints).split(area);
 
         for (child, &branch_area) in children.iter().zip(branch_areas.iter()) {
-            render_tree_recursive(frame, branch_area, steps, child, current_step_index);
+            render_tree_recursive(frame, branch_area, ctx, child);
         }
     } else if let Some(child) = children.first() {
-        // Single child: continue vertically
-        render_tree_recursive(frame, area, steps, child, current_step_index);
-    }
-}
-
-/// Render a step box with hypotheses and goal.
-fn render_step_box(
-    frame: &mut Frame,
-    area: Rect,
-    step: &PaperproofStep,
-    is_current: bool,
-    branch_count: usize,
-) {
-    let is_complete = step.goals_after.is_empty();
-    let is_leaf = branch_count == 0;
-
-    // Border color priority: current > incomplete leaf > complete leaf > default
-    let border_color = if is_current {
-        tree_colors::CURRENT_BORDER // Cyan - highest priority
-    } else if is_leaf && !is_complete {
-        tree_colors::INCOMPLETE_BORDER // Yellow - needs attention
-    } else if is_leaf && is_complete {
-        tree_colors::COMPLETED_BORDER // Green - done
-    } else {
-        tree_colors::TACTIC_BORDER // Dark gray - internal nodes
-    };
-
-    let border_style = if is_current {
-        Style::new().fg(border_color).add_modifier(Modifier::BOLD)
-    } else {
-        Style::new().fg(border_color)
-    };
-
-    // Add branch indicator to title if this creates branches
-    let title = if branch_count > 1 {
-        format!(" {} [{}→] ", step.tactic_string, branch_count)
-    } else {
-        format!(" {} ", step.tactic_string)
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title(Span::styled(
-            title,
-            Style::new()
-                .fg(if is_current {
-                    Color::White
-                } else {
-                    Color::Gray
-                })
-                .add_modifier(if is_current {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    if inner.height < 1 {
-        return;
-    }
-
-    // Get new hypotheses introduced by this step
-    let new_hyps = get_new_hypotheses(step);
-
-    // Build content lines
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Add hypothesis line if there are new hypotheses
-    if !new_hyps.is_empty() {
-        let hyp_spans: Vec<Span> = new_hyps
-            .iter()
-            .take(3) // Limit to 3 hypotheses per line
-            .enumerate()
-            .flat_map(|(i, h)| {
-                let mut spans = vec![];
-                if i > 0 {
-                    spans.push(Span::raw(" "));
-                }
-                // Choose colors based on hypothesis type
-                let (fg, bg) = if h.is_proof == "proof" {
-                    (tree_colors::HYPOTHESIS_FG, tree_colors::HYPOTHESIS_BG)
-                } else {
-                    (tree_colors::DATA_HYP_FG, tree_colors::DATA_HYP_BG)
-                };
-                // Render as colored pill: [name: type]
-                spans.push(Span::styled(
-                    format!(" {}: {} ", h.username, truncate(&h.type_, 15)),
-                    Style::new().fg(fg).bg(bg),
-                ));
-                spans
-            })
-            .collect();
-
-        if new_hyps.len() > 3 {
-            let mut spans = hyp_spans;
-            spans.push(Span::styled(
-                format!(" +{}", new_hyps.len() - 3),
-                Style::new().fg(Color::DarkGray),
-            ));
-            lines.push(Line::from(spans));
-        } else {
-            lines.push(Line::from(hyp_spans));
-        }
-    }
-
-    lines.push(render_goal_line(step, is_leaf));
-
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
-}
-
-/// Render the goal line for a step box.
-fn render_goal_line(step: &PaperproofStep, is_leaf: bool) -> Line<'static> {
-    if step.goals_after.is_empty() {
-        Line::from(vec![Span::styled(
-            "✓ Goal completed",
-            Style::new()
-                .fg(tree_colors::COMPLETED_FG)
-                .add_modifier(Modifier::BOLD),
-        )])
-    } else {
-        let mut goals_text: Vec<Span> = Vec::new();
-
-        // Add ellipsis indicator for incomplete leaf nodes
-        if is_leaf {
-            goals_text.push(Span::styled(
-                "⋯ ",
-                Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ));
-        }
-
-        for (i, g) in step.goals_after.iter().enumerate() {
-            if i > 0 {
-                goals_text.push(Span::styled(" │ ", Style::new().fg(Color::DarkGray)));
-            }
-            let goal_type = truncate(&g.type_, 35);
-            if let Some(name) = clean_goal_name(&g.username) {
-                goals_text.push(Span::styled(
-                    format!("{name}: "),
-                    Style::new().fg(Color::Cyan),
-                ));
-            }
-            goals_text.push(Span::styled(
-                format!("⊢ {goal_type}"),
-                Style::new().fg(tree_colors::GOAL_FG),
-            ));
-        }
-        Line::from(goals_text)
+        render_tree_recursive(frame, area, ctx, child);
     }
 }
 
@@ -378,43 +297,20 @@ fn render_steps_flat(
 
     let areas = Layout::vertical(constraints).split(area);
 
+    // Flat list fallback doesn't support click regions
+    let mut dummy_regions = TreeClickRegions::default();
     for (area_idx, (step_idx, step)) in visible_steps.into_iter().enumerate() {
         let is_current = step_idx == current_step_index;
-        render_step_box(frame, areas[area_idx], step, is_current, 0);
+        let mut state = StepBoxState {
+            step,
+            step_idx,
+            is_current,
+            branch_count: 0,
+            selection: None,
+        };
+        let widget = StepBox {
+            click_regions: &mut dummy_regions,
+        };
+        frame.render_stateful_widget(widget, areas[area_idx], &mut state);
     }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        format!(
-            "{}...",
-            s.chars().take(max.saturating_sub(3)).collect::<String>()
-        )
-    }
-}
-
-/// Clean up a goal username, returning None if it should be hidden.
-///
-/// Filters out internal Lean identifiers like:
-/// - `[anonymous]` - anonymous goals
-/// - `pos-_@.test.123._hygCtx._hyg.31` - hygiene-mangled names
-fn clean_goal_name(name: &str) -> Option<&str> {
-    if name.is_empty() || name == "[anonymous]" {
-        return None;
-    }
-
-    // Check for hygiene-mangled names (contain `_@.` or `._hyg`)
-    if name.contains("_@.") || name.contains("._hyg") {
-        // Try to extract the meaningful prefix (e.g., "pos" from "pos-_@.test...")
-        if let Some(prefix) = name.split("-_@.").next() {
-            if !prefix.is_empty() && prefix != name {
-                return Some(prefix);
-            }
-        }
-        return None;
-    }
-
-    Some(name)
 }
