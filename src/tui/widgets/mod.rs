@@ -25,7 +25,7 @@ pub mod welcome;
 pub use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 pub use interactive_widget::{InteractiveComponent, InteractiveStatefulWidget};
-use ratatui::layout::Rect;
+pub use selection::{ClickRegion, ClickRegionTracker, Selection};
 
 use crate::lean_rpc::Hypothesis;
 
@@ -33,26 +33,6 @@ use crate::lean_rpc::Hypothesis;
 pub enum KeyMouseEvent {
     Key(KeyEvent),
     Mouse(MouseEvent),
-}
-
-/// Unified selection type for all display modes.
-/// All selections reference data in `ProofDag`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Selection {
-    /// Initial hypothesis from theorem statement.
-    InitialHyp { hyp_idx: usize },
-    /// Hypothesis at a proof step (`node_id` indexes into `ProofDag`).
-    Hyp { node_id: u32, hyp_idx: usize },
-    /// Goal at a proof step.
-    Goal { node_id: u32, goal_idx: usize },
-    /// The theorem conclusion.
-    Theorem,
-}
-
-#[derive(Debug, Clone)]
-pub struct ClickRegion {
-    pub area: Rect,
-    pub selection: Selection,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

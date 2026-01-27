@@ -11,7 +11,7 @@ use ratatui::{
 use super::{
     tree_colors,
     tree_given_bar::{hyp_style_colors, truncate_str},
-    ClickRegion, Selection,
+    ClickRegion, ClickRegionTracker, Selection,
 };
 use crate::tui_ipc::{HypothesisInfo, ProofDagNode};
 
@@ -215,65 +215,79 @@ pub fn render_node_box(
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
-/// Track click regions for new hypotheses on the first line.
+/// Track click regions for new hypotheses on the first line based on actual
+/// text widths.
 fn track_hyp_click_regions(click_regions: &mut Vec<ClickRegion>, node: &ProofDagNode, inner: Rect) {
-    let hyp_count = node.new_hypotheses.len().min(3); // Only first 3 are rendered
-    if hyp_count == 0 {
+    if node.new_hypotheses.is_empty() {
         return;
     }
 
-    // Divide the line width among hypotheses
-    let hyp_width = inner.width / hyp_count as u16;
+    let mut tracker = ClickRegionTracker::new(inner.x, inner.y, inner.width);
 
     for (i, &hyp_idx) in node.new_hypotheses.iter().take(3).enumerate() {
-        let x = inner.x + (i as u16 * hyp_width);
-        let width = if i == hyp_count - 1 {
-            inner.width - (i as u16 * hyp_width) // Last hyp gets remaining
-                                                 // width
-        } else {
-            hyp_width
+        if i > 0 {
+            tracker.skip(1); // Space separator
+        }
+
+        let Some(h) = node.state_after.hypotheses.get(hyp_idx) else {
+            continue;
         };
 
-        click_regions.push(ClickRegion {
-            area: Rect::new(x, inner.y, width, 1),
-            selection: Selection::Hyp {
+        // " {name}: {type} " (with padding)
+        let type_str = truncate_str(&h.type_, 15);
+        let char_count = h.name.chars().count() + type_str.chars().count() + 4;
+
+        tracker.push(
+            click_regions,
+            char_count,
+            Selection::Hyp {
                 node_id: node.id,
                 hyp_idx,
             },
-        });
+        );
     }
 }
 
-/// Track click regions for goals on their line.
+/// Track click regions for goals on their line based on actual text widths.
 fn track_goal_click_regions(
     click_regions: &mut Vec<ClickRegion>,
     node: &ProofDagNode,
     inner: Rect,
     goals_y: u16,
 ) {
-    let goal_count = node.state_after.goals.len();
-    if goal_count == 0 {
+    let goals = &node.state_after.goals;
+    if goals.is_empty() {
         return;
     }
 
-    // Divide the line width among goals
-    let goal_width = inner.width / goal_count as u16;
+    let mut tracker = ClickRegionTracker::new(inner.x, goals_y, inner.width);
 
-    for goal_idx in 0..goal_count {
-        let x = inner.x + (goal_idx as u16 * goal_width);
-        let width = if goal_idx == goal_count - 1 {
-            inner.width - (goal_idx as u16 * goal_width) // Last goal gets
-                                                         // remaining width
+    // Account for leading marker if leaf node
+    if node.is_leaf && !node.is_complete {
+        tracker.skip(2); // "⋯ " is 2 chars wide
+    }
+
+    for (goal_idx, g) in goals.iter().enumerate() {
+        if goal_idx > 0 {
+            tracker.skip(3); // " │ " separator
+        }
+
+        // Calculate this goal's text width
+        let username_width = if !g.username.is_empty() && g.username != "[anonymous]" {
+            g.username.chars().count() + 2 // "{username}: "
         } else {
-            goal_width
+            0
         };
+        let goal_type = truncate_str(&g.type_, 35);
+        let char_count = username_width + goal_type.chars().count() + 2; // "⊢ {type}"
 
-        click_regions.push(ClickRegion {
-            area: Rect::new(x, goals_y, width, 1),
-            selection: Selection::Goal {
+        tracker.push(
+            click_regions,
+            char_count,
+            Selection::Goal {
                 node_id: node.id,
                 goal_idx,
             },
-        });
+        );
     }
 }

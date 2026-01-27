@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use super::{tree_colors, ClickRegion, Selection};
+use super::{tree_colors, ClickRegion, ClickRegionTracker, Selection};
 use crate::tui_ipc::HypothesisInfo;
 
 /// Get hypothesis style colors based on proof status.
@@ -71,6 +71,22 @@ pub fn render_given_bar(
         return;
     }
 
+    // Track click regions with actual text positions
+    let mut tracker = ClickRegionTracker::new(inner.x, inner.y, inner.width);
+    for (i, (hyp_idx, h)) in visible_hyps.iter().take(5).enumerate() {
+        if i > 0 {
+            tracker.skip(1); // Space separator
+        }
+        let truncated_type = truncate_str(&h.type_, 20);
+        let char_count = h.name.chars().count() + truncated_type.chars().count() + 4; // " {name}: {type} "
+
+        tracker.push(
+            click_regions,
+            char_count,
+            Selection::InitialHyp { hyp_idx: *hyp_idx },
+        );
+    }
+
     let hyp_spans: Vec<Span> = visible_hyps
         .iter()
         .take(5)
@@ -90,11 +106,6 @@ pub fn render_given_bar(
             if is_selected {
                 style = style.add_modifier(Modifier::UNDERLINED);
             }
-
-            click_regions.push(ClickRegion {
-                area: Rect::new(inner.x, inner.y, inner.width, 1),
-                selection: Selection::InitialHyp { hyp_idx: *hyp_idx },
-            });
 
             let truncated_type = truncate_str(&h.type_, 20);
             spans.push(Span::styled(

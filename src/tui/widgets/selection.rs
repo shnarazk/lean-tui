@@ -2,7 +2,68 @@
 
 use ratatui::layout::Rect;
 
-use super::{ClickRegion, Selection};
+/// Unified selection type for all display modes.
+/// All selections reference data in `ProofDag`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Selection {
+    /// Initial hypothesis from theorem statement.
+    InitialHyp { hyp_idx: usize },
+    /// Hypothesis at a proof step (`node_id` indexes into `ProofDag`).
+    Hyp { node_id: u32, hyp_idx: usize },
+    /// Goal at a proof step.
+    Goal { node_id: u32, goal_idx: usize },
+    /// The theorem conclusion.
+    Theorem,
+}
+
+/// A clickable region mapped to a selection.
+#[derive(Debug, Clone)]
+pub struct ClickRegion {
+    pub area: Rect,
+    pub selection: Selection,
+}
+
+/// Tracks sequential click regions along a horizontal line.
+/// Use this when rendering items left-to-right with variable widths.
+pub struct ClickRegionTracker {
+    x: u16,
+    y: u16,
+    max_x: u16,
+}
+
+impl ClickRegionTracker {
+    /// Create a tracker for a line starting at (x, y) with given max width.
+    pub const fn new(x: u16, y: u16, width: u16) -> Self {
+        Self {
+            x,
+            y,
+            max_x: x + width,
+        }
+    }
+
+    /// Advance x position by separator width (e.g., for " │ " between items).
+    pub const fn skip(&mut self, width: u16) {
+        self.x += width;
+    }
+
+    /// Add a click region for text of given character count.
+    pub fn push(
+        &mut self,
+        regions: &mut Vec<ClickRegion>,
+        char_count: usize,
+        selection: Selection,
+    ) {
+        let remaining = self.max_x.saturating_sub(self.x);
+        let width = (char_count as u16).min(remaining).max(1);
+
+        regions.push(ClickRegion {
+            area: Rect::new(self.x, self.y, width, 1),
+            selection,
+        });
+
+        self.x += width;
+    }
+}
 
 /// Manages selection state for navigable items.
 #[derive(Debug, Default)]
