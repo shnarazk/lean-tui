@@ -3,99 +3,133 @@
 use std::collections::HashSet;
 
 use ratatui::{
+    buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
-    Frame,
+    widgets::{
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+        Widget,
+    },
 };
 
 use crate::{
     lean_rpc::Goal,
     tui::components::{
         diff_text::{diff_style, DiffState, TaggedTextExt},
-        ClickRegion, Component, SelectableItem,
+        ClickRegion, LayoutMetrics, SelectableItem, Theme,
     },
 };
 
-/// Input for updating the goal section.
-pub struct GoalSectionInput {
-    pub goals: Vec<Goal>,
-    pub selection: Option<SelectableItem>,
-    pub spawned_goal_ids: HashSet<String>,
-}
-
+/// State for the goal section widget.
 #[derive(Default)]
-pub struct GoalSection {
+pub struct GoalSectionState {
     goals: Vec<Goal>,
     selection: Option<SelectableItem>,
     spawned_goal_ids: HashSet<String>,
     click_regions: Vec<ClickRegion>,
+    scroll_state: ScrollbarState,
+    vertical_scroll: usize,
 }
 
-impl GoalSection {
+impl GoalSectionState {
+    /// Update the state with new data.
+    pub fn update(
+        &mut self,
+        goals: Vec<Goal>,
+        selection: Option<SelectableItem>,
+        spawned_goal_ids: HashSet<String>,
+    ) {
+        self.goals = goals;
+        self.selection = selection;
+        self.spawned_goal_ids = spawned_goal_ids;
+    }
+
     /// Get the click regions computed during the last render.
     pub fn click_regions(&self) -> &[ClickRegion] {
         &self.click_regions
     }
 }
 
-impl Component for GoalSection {
-    type Input = GoalSectionInput;
-    type Event = ();
+/// Widget for rendering the goal section.
+pub struct GoalSection;
 
-    fn update(&mut self, input: Self::Input) {
-        self.goals = input.goals;
-        self.selection = input.selection;
-        self.spawned_goal_ids = input.spawned_goal_ids;
-    }
+impl StatefulWidget for GoalSection {
+    type State = GoalSectionState;
 
     #[allow(clippy::cast_possible_truncation)]
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.click_regions.clear();
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        state.click_regions.clear();
 
         let block = Block::default()
             .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
-            .border_style(Style::new().fg(Color::DarkGray))
+            .border_style(Theme::DIM)
             .title(" Goals ")
-            .title_style(Style::new().fg(Color::Cyan));
+            .title_style(Style::new().fg(Theme::TITLE_GOAL));
 
         let inner = block.inner(area);
-        frame.render_widget(block, area);
+        block.render(area, buf);
 
-        if self.goals.is_empty() {
-            frame.render_widget(
-                Paragraph::new("✓ All goals completed!")
-                    .style(Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                inner,
-            );
+        if state.goals.is_empty() {
+            Paragraph::new("✓ All goals completed!")
+                .style(Style::new().fg(Color::Green).add_modifier(Modifier::BOLD))
+                .render(inner, buf);
             return;
         }
 
-        let lines: Vec<Line<'static>> = self
+        // Calculate scroll position from selection
+        if let Some(SelectableItem::GoalTarget { goal_idx }) = state.selection {
+            state.vertical_scroll = LayoutMetrics::scroll_position(goal_idx);
+        }
+
+        let total_goals = state.goals.len();
+        let viewport_height = inner.height as usize;
+
+        // Update scrollbar state
+        state.scroll_state = state
+            .scroll_state
+            .content_length(total_goals)
+            .position(state.vertical_scroll);
+
+        let lines: Vec<Line<'static>> = state
             .goals
             .iter()
             .enumerate()
             .map(|(goal_idx, goal)| {
-                let is_selected = self.selection == Some(SelectableItem::GoalTarget { goal_idx });
+                let is_selected = state.selection == Some(SelectableItem::GoalTarget { goal_idx });
                 let is_spawned = goal
                     .user_name
                     .as_ref()
-                    .is_some_and(|name| self.spawned_goal_ids.contains(name));
+                    .is_some_and(|name| state.spawned_goal_ids.contains(name));
 
                 let y = inner.y + goal_idx as u16;
                 if y < inner.y + inner.height {
-                    self.click_regions.push(ClickRegion {
+                    state.click_regions.push(ClickRegion {
                         area: Rect::new(inner.x, y, inner.width, 1),
                         item: SelectableItem::GoalTarget { goal_idx },
                     });
                 }
 
-                render_goal_line(goal, is_selected, is_spawned, goal_idx, self.goals.len())
+                render_goal_line(goal, is_selected, is_spawned, goal_idx, state.goals.len())
             })
             .collect();
 
-        frame.render_widget(Paragraph::new(lines), inner);
+        Paragraph::new(lines).render(inner, buf);
+
+        // Render scrollbar if content overflows
+        if total_goals > viewport_height && inner.width > 1 {
+            let scrollbar_area = Rect {
+                x: area.x + area.width.saturating_sub(1),
+                y: area.y, // Goals section has bottom border
+                width: 1,
+                height: area.height.saturating_sub(1),
+            };
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).render(
+                scrollbar_area,
+                buf,
+                &mut state.scroll_state,
+            );
+        }
     }
 }
 
@@ -119,11 +153,11 @@ fn render_goal_line(
         goal.is_removed,
         goal.target.has_any_diff(),
     ) {
-        (true, _, _, _) => Span::styled("[⇢]", Style::new().fg(Color::Cyan)),
-        (_, true, _, _) => Span::styled("[+]", Style::new().fg(Color::Green)),
-        (_, _, true, _) => Span::styled("[-]", Style::new().fg(Color::Red)),
-        (_, _, _, true) => Span::styled("[~]", Style::new().fg(Color::Yellow)),
-        _ => Span::styled("   ", Style::new().fg(Color::DarkGray)),
+        (true, _, _, _) => Span::styled("[⇢]", Style::new().fg(Theme::TITLE_GOAL)),
+        (_, true, _, _) => Span::styled("[+]", Theme::INSERTED),
+        (_, _, true, _) => Span::styled("[-]", Theme::REMOVED),
+        (_, _, _, true) => Span::styled("[~]", Theme::MODIFIED),
+        _ => Span::styled("   ", Theme::DIM),
     };
 
     let selection = if is_selected { "▶ " } else { "  " };
@@ -140,8 +174,8 @@ fn render_goal_line(
     let mut spans = vec![
         marker,
         Span::styled(selection.to_string(), diff.style),
-        Span::styled(goal_num, Style::new().fg(Color::DarkGray)),
-        Span::styled(case_label, Style::new().fg(Color::Magenta)),
+        Span::styled(goal_num, Theme::GOAL_NUMBER),
+        Span::styled(case_label, Theme::CASE_LABEL),
         Span::styled(goal.prefix.clone(), diff.style),
     ];
     spans.extend(goal.target.to_spans(diff.style));

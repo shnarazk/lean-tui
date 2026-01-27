@@ -5,9 +5,6 @@ use std::iter;
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -15,8 +12,8 @@ use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
     tui::components::{
-        diff_style, hypothesis_indices, render_error, Component, DiffState, FilterToggle,
-        HypothesisFilters, KeyMouseEvent, SelectableItem, SelectionState, TaggedTextExt,
+        hypothesis_indices, render_error, Component, FilterToggle, GoalsColumn, GoalsColumnState,
+        HypothesisFilters, KeyMouseEvent, SelectableItem, SelectionState,
     },
     tui_ipc::DefinitionInfo,
 };
@@ -41,6 +38,9 @@ pub struct BeforeAfterMode {
     selection: SelectionState,
     show_previous: bool,
     show_next: bool,
+    previous_column_state: GoalsColumnState,
+    current_column_state: GoalsColumnState,
+    next_column_state: GoalsColumnState,
 }
 
 impl Default for BeforeAfterMode {
@@ -55,6 +55,9 @@ impl Default for BeforeAfterMode {
             selection: SelectionState::default(),
             show_previous: true, // Show previous column by default
             show_next: false,
+            previous_column_state: GoalsColumnState::default(),
+            current_column_state: GoalsColumnState::default(),
+            next_column_state: GoalsColumnState::default(),
         }
     }
 }
@@ -156,8 +159,8 @@ impl Component for BeforeAfterMode {
         let content_area = render_error(frame, area, self.error.as_deref());
 
         // Three-column layout
-        let has_prev = self.previous_goals.is_some();
-        let has_next = self.next_goals.is_some();
+        let has_prev = self.previous_goals.is_some() && self.show_previous;
+        let has_next = self.next_goals.is_some() && self.show_next;
 
         let constraints = match (has_prev, has_next) {
             (true, true) => vec![
@@ -173,211 +176,47 @@ impl Component for BeforeAfterMode {
         let columns = Layout::horizontal(constraints).split(content_area);
         let mut col_idx = 0;
 
-        // Clone goals to avoid borrow issues
-        let prev_goals = self.previous_goals.clone();
-        let current_goals = self.current_goals.clone();
-        let next_goals = self.next_goals.clone();
+        let selection = self.current_selection();
 
         // Previous column
-        if let Some(ref goals) = prev_goals {
-            self.render_column(frame, columns[col_idx], "Previous", goals, false);
-            col_idx += 1;
+        if let Some(ref goals) = self.previous_goals {
+            if self.show_previous {
+                self.previous_column_state
+                    .update(goals.clone(), self.filters, None, false);
+                frame.render_stateful_widget(
+                    GoalsColumn::new("Previous"),
+                    columns[col_idx],
+                    &mut self.previous_column_state,
+                );
+                col_idx += 1;
+            }
         }
 
         // Current column (always shown)
-        self.render_column(frame, columns[col_idx], "Current", &current_goals, true);
+        self.current_column_state
+            .update(self.current_goals.clone(), self.filters, selection, true);
+        frame.render_stateful_widget(
+            GoalsColumn::new("Current"),
+            columns[col_idx],
+            &mut self.current_column_state,
+        );
+        // Register click regions from current column
+        for region in self.current_column_state.click_regions() {
+            self.selection.add_region(region.area, region.item);
+        }
         col_idx += 1;
 
         // Next column
-        if let Some(ref goals) = next_goals {
-            self.render_column(frame, columns[col_idx], "Next", goals, false);
-        }
-    }
-}
-
-fn diff_marker(is_inserted: bool, is_removed: bool) -> Span<'static> {
-    if is_inserted {
-        Span::styled("[+]", Style::new().fg(Color::Green))
-    } else if is_removed {
-        Span::styled("[-]", Style::new().fg(Color::Red))
-    } else {
-        Span::styled("   ", Style::new())
-    }
-}
-
-const fn selection_indicator(is_selected: bool) -> &'static str {
-    if is_selected {
-        "▶ "
-    } else {
-        "  "
-    }
-}
-
-impl BeforeAfterMode {
-    #[allow(clippy::too_many_arguments)]
-    fn render_column(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        title: &str,
-        goals: &[Goal],
-        is_current: bool,
-    ) {
-        let border_color = if is_current {
-            Color::Cyan
-        } else {
-            Color::DarkGray
-        };
-        let title_style = if is_current {
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::new().fg(Color::DarkGray)
-        };
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::new().fg(border_color))
-            .title(format!(" {title} "))
-            .title_style(title_style);
-
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        if goals.is_empty() {
-            let msg = if is_current { "No goals" } else { "No data" };
-            frame.render_widget(
-                Paragraph::new(msg).style(Style::new().fg(Color::DarkGray)),
-                inner,
-            );
-            return;
-        }
-
-        let selection = self.current_selection();
-        let lines = self.build_column_lines(goals, is_current, selection, inner);
-        frame.render_widget(Paragraph::new(lines), inner);
-    }
-
-    fn build_column_lines(
-        &mut self,
-        goals: &[Goal],
-        is_current: bool,
-        selection: Option<SelectableItem>,
-        inner: Rect,
-    ) -> Vec<Line<'static>> {
-        let mut lines: Vec<Line<'static>> = Vec::new();
-
-        for (goal_idx, goal) in goals.iter().enumerate() {
-            self.render_goal_hypotheses(&mut lines, goal, goal_idx, is_current, selection, inner);
-            self.render_goal_target(&mut lines, goal, goal_idx, is_current, selection, inner);
-
-            if goal_idx < goals.len() - 1 {
-                lines.push(Line::from(""));
+        if let Some(ref goals) = self.next_goals {
+            if self.show_next {
+                self.next_column_state
+                    .update(goals.clone(), self.filters, None, false);
+                frame.render_stateful_widget(
+                    GoalsColumn::new("Next"),
+                    columns[col_idx],
+                    &mut self.next_column_state,
+                );
             }
-        }
-
-        lines
-    }
-
-    fn render_goal_hypotheses(
-        &mut self,
-        lines: &mut Vec<Line<'static>>,
-        goal: &Goal,
-        goal_idx: usize,
-        is_current: bool,
-        selection: Option<SelectableItem>,
-        inner: Rect,
-    ) {
-        for (hyp_idx, hyp) in goal.hyps.iter().enumerate() {
-            if !self.filters.should_show(hyp) {
-                continue;
-            }
-
-            let is_selected =
-                is_current && selection == Some(SelectableItem::Hypothesis { goal_idx, hyp_idx });
-            let names = hyp.names.join(", ");
-
-            // Build diff state for fine-grained coloring
-            let diff_state = DiffState {
-                is_inserted: hyp.is_inserted,
-                is_removed: hyp.is_removed,
-                has_diff: hyp.type_.has_any_diff(),
-            };
-            let diff = diff_style(&diff_state, is_selected, Color::White);
-
-            // Build line with spans
-            let mut spans = vec![
-                diff_marker(hyp.is_inserted, hyp.is_removed),
-                Span::styled(
-                    selection_indicator(is_selected),
-                    Style::new().fg(Color::Cyan),
-                ),
-                Span::styled(format!("{names}: "), diff.style),
-            ];
-            spans.extend(hyp.type_.to_spans(diff.style));
-
-            lines.push(Line::from(spans));
-
-            self.track_click_region(
-                lines,
-                inner,
-                is_current,
-                SelectableItem::Hypothesis { goal_idx, hyp_idx },
-            );
-        }
-    }
-
-    fn render_goal_target(
-        &mut self,
-        lines: &mut Vec<Line<'static>>,
-        goal: &Goal,
-        goal_idx: usize,
-        is_current: bool,
-        selection: Option<SelectableItem>,
-        inner: Rect,
-    ) {
-        let is_selected = is_current && selection == Some(SelectableItem::GoalTarget { goal_idx });
-
-        // Build diff state for fine-grained coloring
-        let diff_state = DiffState {
-            is_inserted: goal.is_inserted,
-            is_removed: goal.is_removed,
-            has_diff: goal.target.has_any_diff(),
-        };
-        let diff = diff_style(&diff_state, is_selected, Color::Cyan);
-
-        // Build line with spans
-        let mut spans = vec![
-            diff_marker(goal.is_inserted, goal.is_removed),
-            Span::styled(
-                selection_indicator(is_selected),
-                Style::new().fg(Color::Cyan),
-            ),
-            Span::styled(goal.prefix.clone(), diff.style),
-        ];
-        spans.extend(goal.target.to_spans(diff.style));
-
-        lines.push(Line::from(spans));
-
-        self.track_click_region(
-            lines,
-            inner,
-            is_current,
-            SelectableItem::GoalTarget { goal_idx },
-        );
-    }
-
-    fn track_click_region(
-        &mut self,
-        lines: &[Line<'static>],
-        inner: Rect,
-        is_current: bool,
-        item: SelectableItem,
-    ) {
-        if is_current && lines.len() <= inner.height as usize {
-            #[allow(clippy::cast_possible_truncation)]
-            let y = inner.y + (lines.len() - 1) as u16;
-            self.selection
-                .add_region(Rect::new(inner.x, y, inner.width, 1), item);
         }
     }
 }

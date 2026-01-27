@@ -13,8 +13,9 @@ use crate::{
     lean_rpc::{Goal, PaperproofStep},
     tui::components::{
         divider, hypothesis_indices, render_error, render_goal_before, render_no_goals, Component,
-        FilterToggle, GoalSection, GoalSectionInput, HypSection, HypSectionInput,
-        HypothesisFilters, KeyMouseEvent, ProofStepsSidebar, SelectableItem, SelectionState,
+        FilterToggle, GoalSection, GoalSectionState, HypSection, HypSectionState,
+        HypothesisFilters, KeyMouseEvent, ProofStepsSidebar, ProofStepsSidebarState,
+        SelectableItem, SelectionState,
     },
     tui_ipc::{DefinitionInfo, ProofStep},
 };
@@ -38,8 +39,9 @@ pub struct StepsMode {
     proof_steps: Vec<ProofStep>,
     current_step_index: usize,
     paperproof_steps: Option<Vec<PaperproofStep>>,
-    hyp_section: HypSection,
-    goal_section: GoalSection,
+    hyp_section_state: HypSectionState,
+    goal_section_state: GoalSectionState,
+    sidebar_state: ProofStepsSidebarState,
     filters: HypothesisFilters,
     selection: SelectionState,
     show_goal_before: bool,
@@ -193,14 +195,12 @@ impl Component for StepsMode {
 
         // Render sidebar if present
         if let Some(sidebar_area) = sidebar {
-            frame.render_widget(
-                ProofStepsSidebar::new(
-                    &self.proof_steps,
-                    self.paperproof_steps.as_deref(),
-                    self.current_step_index,
-                ),
-                sidebar_area,
+            self.sidebar_state.update(
+                self.proof_steps.clone(),
+                self.paperproof_steps.clone(),
+                self.current_step_index,
             );
+            frame.render_stateful_widget(ProofStepsSidebar, sidebar_area, &mut self.sidebar_state);
         }
 
         // Get goal_before from current paperproof step if showing
@@ -237,14 +237,14 @@ impl Component for StepsMode {
             .unwrap_or_default();
 
         // Render hypothesis section
-        self.hyp_section.update(HypSectionInput {
-            goals: self.goals.clone(),
-            filters: self.filters,
+        self.hyp_section_state.update(
+            &self.goals,
+            self.filters,
             depends_on,
-            selection: self.current_selection(),
-        });
-        self.hyp_section.render(frame, layout.hyps);
-        for region in self.hyp_section.click_regions() {
+            self.current_selection(),
+        );
+        frame.render_stateful_widget(HypSection, layout.hyps, &mut self.hyp_section_state);
+        for region in self.hyp_section_state.click_regions() {
             self.selection.add_region(region.area, region.item);
         }
 
@@ -257,13 +257,13 @@ impl Component for StepsMode {
         }
 
         // Render goal section
-        self.goal_section.update(GoalSectionInput {
-            goals: self.goals.clone(),
-            selection: self.current_selection(),
+        self.goal_section_state.update(
+            self.goals.clone(),
+            self.current_selection(),
             spawned_goal_ids,
-        });
-        self.goal_section.render(frame, layout.goals);
-        for region in self.goal_section.click_regions() {
+        );
+        frame.render_stateful_widget(GoalSection, layout.goals, &mut self.goal_section_state);
+        for region in self.goal_section_state.click_regions() {
             self.selection.add_region(region.area, region.item);
         }
     }

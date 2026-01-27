@@ -5,29 +5,36 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Widget},
+    widgets::{
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+        Widget,
+    },
 };
 
+use super::Theme;
 use crate::{lean_rpc::PaperproofStep, tui_ipc::ProofStep};
 
-/// Widget displaying proof steps in a sidebar.
-pub struct ProofStepsSidebar<'a> {
-    proof_steps: &'a [ProofStep],
-    paperproof_steps: Option<&'a [PaperproofStep]>,
+/// State for the proof steps sidebar widget.
+#[derive(Default)]
+pub struct ProofStepsSidebarState {
+    proof_steps: Vec<ProofStep>,
+    paperproof_steps: Option<Vec<PaperproofStep>>,
     current_step_index: usize,
+    scroll_state: ScrollbarState,
+    vertical_scroll: usize,
 }
 
-impl<'a> ProofStepsSidebar<'a> {
-    pub const fn new(
-        proof_steps: &'a [ProofStep],
-        paperproof_steps: Option<&'a [PaperproofStep]>,
+impl ProofStepsSidebarState {
+    /// Update the state with new data.
+    pub fn update(
+        &mut self,
+        proof_steps: Vec<ProofStep>,
+        paperproof_steps: Option<Vec<PaperproofStep>>,
         current_step_index: usize,
-    ) -> Self {
-        Self {
-            proof_steps,
-            paperproof_steps,
-            current_step_index,
-        }
+    ) {
+        self.proof_steps = proof_steps;
+        self.paperproof_steps = paperproof_steps;
+        self.current_step_index = current_step_index;
     }
 
     fn build_lines(&self) -> Vec<Line<'static>> {
@@ -41,7 +48,7 @@ impl<'a> ProofStepsSidebar<'a> {
                 if let Some(deps) = dependency_line(step) {
                     lines.push(deps);
                 }
-                if let Some(thms) = theorem_line(self.paperproof_steps, i) {
+                if let Some(thms) = theorem_line(self.paperproof_steps.as_deref(), i) {
                     lines.push(thms);
                 }
 
@@ -51,10 +58,72 @@ impl<'a> ProofStepsSidebar<'a> {
     }
 }
 
-impl Widget for ProofStepsSidebar<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let lines = self.build_lines();
-        Paragraph::new(lines).render(area, buf);
+/// Widget displaying proof steps in a sidebar.
+pub struct ProofStepsSidebar;
+
+impl StatefulWidget for ProofStepsSidebar {
+    type State = ProofStepsSidebarState;
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Theme::DIM)
+            .title(" Proof Steps ")
+            .title_style(Style::new().fg(Color::Yellow));
+
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        let lines = state.build_lines();
+
+        // Calculate scroll position based on current step
+        // Find the line index for the current step
+        let mut line_count = 0;
+        for (i, step) in state.proof_steps.iter().enumerate() {
+            if i == state.current_step_index {
+                state.vertical_scroll = line_count;
+                break;
+            }
+            line_count += 1; // Main step line
+            if !step.depends_on.is_empty() {
+                line_count += 1; // Dependency line
+            }
+            let has_theorems = state
+                .paperproof_steps
+                .as_ref()
+                .and_then(|pp_steps| pp_steps.get(i))
+                .is_some_and(|pp_step| !pp_step.theorems.is_empty());
+            if has_theorems {
+                line_count += 1; // Theorem line
+            }
+        }
+
+        let total_lines = lines.len();
+        let viewport_height = inner.height as usize;
+
+        // Update scrollbar state
+        state.scroll_state = state
+            .scroll_state
+            .content_length(total_lines)
+            .position(state.vertical_scroll);
+
+        Paragraph::new(lines).render(inner, buf);
+
+        // Render scrollbar if content overflows
+        if total_lines > viewport_height && inner.width > 1 {
+            let scrollbar_area = Rect {
+                x: area.x + area.width.saturating_sub(1),
+                y: area.y + 1, // Skip top border
+                width: 1,
+                height: area.height.saturating_sub(2), // Skip top and bottom borders
+            };
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).render(
+                scrollbar_area,
+                buf,
+                &mut state.scroll_state,
+            );
+        }
     }
 }
 
@@ -69,12 +138,9 @@ fn step_line(step: &ProofStep, index: usize, is_current: bool) -> Line<'static> 
     let indent = "  ".repeat(step.depth);
 
     Line::from(vec![
-        Span::styled(
-            format!("{:>3}.", index + 1),
-            Style::new().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("{:>3}.", index + 1), Theme::DIM),
         Span::styled(marker, Style::new().fg(Color::Cyan)),
-        Span::styled(indent, Style::new().fg(Color::DarkGray)),
+        Span::styled(indent, Theme::DIM),
         Span::styled(step.tactic.clone(), style),
     ])
 }
@@ -88,7 +154,7 @@ fn dependency_line(step: &ProofStep) -> Option<Line<'static>> {
         Span::raw("     "),
         Span::styled(
             format!("uses: {}", step.depends_on.join(", ")),
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::DIM),
+            Theme::DEPENDENCY,
         ),
     ]))
 }

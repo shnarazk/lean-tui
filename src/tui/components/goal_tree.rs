@@ -5,7 +5,6 @@ use std::iter;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
     text::{Line, Span},
     widgets::{Paragraph, StatefulWidget, Widget},
     Frame,
@@ -13,7 +12,7 @@ use ratatui::{
 
 use super::{
     goal_box::{GoalBox, GoalBoxState},
-    ClickRegion, HypothesisFilters, SelectableItem,
+    ClickRegion, HypothesisFilters, LayoutMetrics, SelectableItem, Theme,
 };
 use crate::{lean_rpc::Goal, tui_ipc::CaseSplitInfo};
 
@@ -148,12 +147,8 @@ impl<'a> GoalTree<'a> {
             .hyps
             .iter()
             .filter(|h| self.filters.should_show(h))
-            .count()
-            .max(1);
-        #[allow(clippy::cast_possible_truncation)]
-        let hyp_height = 1 + visible_hyps as u16; // border + content
-        let target_height = 3; // border + content + border
-        hyp_height + target_height
+            .count();
+        LayoutMetrics::goal_box_height(visible_hyps)
     }
 }
 
@@ -165,7 +160,7 @@ impl StatefulWidget for GoalTree<'_> {
 
         if self.goals.is_empty() {
             Paragraph::new("No goals")
-                .style(Style::new().fg(Color::DarkGray))
+                .style(Theme::DIM)
                 .render(area, buf);
             return;
         }
@@ -246,8 +241,7 @@ fn layout_with_prefix(area: Rect, prefix: &str, buf: &mut Buffer) -> Rect {
 }
 
 fn render_vertical_prefix(area: Rect, prefix: &str, buf: &mut Buffer) {
-    let style = Style::new().fg(Color::DarkGray);
-    let line = Line::from(Span::styled(prefix.to_string(), style));
+    let line = Line::from(Span::styled(prefix.to_string(), Theme::TREE_CHARS));
     let lines: Vec<Line> = iter::repeat_n(line, area.height as usize).collect();
     Paragraph::new(lines).render(area, buf);
 }
@@ -257,24 +251,22 @@ fn render_case_split_label(
     prefix: &str,
     show_connector: bool,
 ) -> Line<'static> {
-    let dim = Style::new().fg(Color::DarkGray);
     let label = split.name.as_ref().map_or_else(
         || format!("{}:", split.tactic),
         |name| format!("{}[{name}]:", split.tactic),
     );
-    let mut spans = vec![Span::styled(prefix.to_string(), dim)];
+    let mut spans = vec![Span::styled(prefix.to_string(), Theme::TREE_CHARS)];
     if show_connector {
-        spans.push(Span::styled(tree_chars::MIDDLE, dim));
+        spans.push(Span::styled(tree_chars::MIDDLE, Theme::TREE_CHARS));
     }
-    spans.push(Span::styled(label, Style::new().fg(Color::Magenta)));
+    spans.push(Span::styled(label, Theme::CASE_LABEL));
     Line::from(spans)
 }
 
 fn render_case_label(prefix: &str, connector: &str, name: &str) -> Line<'static> {
-    let dim = Style::new().fg(Color::DarkGray);
     Line::from(vec![
-        Span::styled(prefix.to_string(), dim),
-        Span::styled(connector.to_string(), dim),
-        Span::styled(format!("{name}:"), Style::new().fg(Color::Magenta)),
+        Span::styled(prefix.to_string(), Theme::TREE_CHARS),
+        Span::styled(connector.to_string(), Theme::TREE_CHARS),
+        Span::styled(format!("{name}:"), Theme::CASE_LABEL),
     ])
 }

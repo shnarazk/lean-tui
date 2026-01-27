@@ -11,7 +11,7 @@ use ratatui::{
 
 use super::{
     diff_text::{render_hypothesis_line, render_target_line},
-    hypothesis_indices, ClickRegion, HypothesisFilters, SelectableItem,
+    hypothesis_indices, ClickRegion, HypothesisFilters, LayoutMetrics, SelectableItem, Theme,
 };
 use crate::lean_rpc::Goal;
 
@@ -25,8 +25,6 @@ const BORDER: Set = Set {
     horizontal_top: "─",
     horizontal_bottom: "─",
 };
-
-const DIM: Color = Color::DarkGray;
 
 /// Widget for rendering a single goal with hypotheses and target.
 pub struct GoalBox<'a> {
@@ -105,10 +103,7 @@ impl<'a> GoalBox<'a> {
             .collect();
 
         let text = if lines.is_empty() {
-            Text::from(Line::from(Span::styled(
-                "(no hypotheses)",
-                Style::new().fg(DIM),
-            )))
+            Text::from(Line::from(Span::styled("(no hypotheses)", Theme::DIM)))
         } else {
             Text::from(lines.clone())
         };
@@ -149,12 +144,12 @@ impl StatefulWidget for GoalBox<'_> {
 
         let visible_indices = self.visible_hyp_indices();
 
-        // Calculate heights adaptively
+        // Calculate heights using LayoutMetrics
         let hyp_count = visible_indices.len().max(1);
         #[allow(clippy::cast_possible_truncation)]
-        let hyp_content_height = hyp_count as u16;
-        let hyp_border_height = 1; // top border
-        let target_height = 3; // content + borders
+        let hyp_content_height = hyp_count as u16 * LayoutMetrics::HYP_LINE_HEIGHT;
+        let hyp_border_height = LayoutMetrics::HYP_BORDER_HEIGHT;
+        let target_height = LayoutMetrics::TARGET_HEIGHT;
 
         // Layout: hypotheses table (flexible) | target table (fixed minimum)
         let [hyp_area, target_area] = Layout::vertical([
@@ -167,20 +162,33 @@ impl StatefulWidget for GoalBox<'_> {
         Widget::render(self.build_hyp_widget(&visible_indices), hyp_area, buf);
         Widget::render(self.build_target_widget(), target_area, buf);
 
-        // Compute click regions
+        // Compute click regions - track actual rendered positions
         let goal_idx = self.goal_idx;
+        let content_y = hyp_area.y + hyp_border_height; // Content starts after top border
+
         for (i, &hyp_idx) in visible_indices.iter().enumerate() {
             #[allow(clippy::cast_possible_truncation)]
-            let hyp_y = hyp_area.y + 1 + i as u16; // +1 for border
+            let hyp_y = content_y + (i as u16 * LayoutMetrics::HYP_LINE_HEIGHT);
             if hyp_y < hyp_area.y + hyp_area.height {
                 state.click_regions.push(ClickRegion {
-                    area: Rect::new(hyp_area.x, hyp_y, hyp_area.width, 1),
+                    area: Rect::new(
+                        hyp_area.x,
+                        hyp_y,
+                        hyp_area.width,
+                        LayoutMetrics::HYP_LINE_HEIGHT,
+                    ),
                     item: SelectableItem::Hypothesis { goal_idx, hyp_idx },
                 });
             }
         }
 
-        let target_y = target_area.y + 1; // +1 for border
+        // Validate click regions match visible rows
+        debug_assert!(
+            state.click_regions.len() <= visible_indices.len(),
+            "Click regions must not exceed visible rows"
+        );
+
+        let target_y = target_area.y + 1; // +1 for top border
         if target_y < target_area.y + target_area.height {
             state.click_regions.push(ClickRegion {
                 area: Rect::new(target_area.x, target_y, target_area.width, 1),
@@ -194,5 +202,5 @@ fn bordered_block(borders: Borders) -> Block<'static> {
     Block::default()
         .borders(borders)
         .border_set(BORDER)
-        .border_style(Style::new().fg(DIM))
+        .border_style(Style::new().fg(Theme::BORDER))
 }
