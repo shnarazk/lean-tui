@@ -108,25 +108,6 @@ impl DeductionTreeMode {
         self.selected_idx.and_then(|idx| items.get(idx).copied())
     }
 
-    fn select_next(&mut self) {
-        let count = self.tree_selectable_items().len();
-        if count == 0 {
-            return;
-        }
-        self.selected_idx = Some(self.selected_idx.map_or(0, |idx| (idx + 1) % count));
-    }
-
-    fn select_previous(&mut self) {
-        let count = self.tree_selectable_items().len();
-        if count == 0 {
-            return;
-        }
-        self.selected_idx = Some(
-            self.selected_idx
-                .map_or(count - 1, |idx| idx.checked_sub(1).unwrap_or(count - 1)),
-        );
-    }
-
     fn select_by_selection(&mut self, sel: Selection) {
         let items = self.tree_selectable_items();
         if let Some(idx) = items.iter().position(|s| *s == sel) {
@@ -145,6 +126,100 @@ impl DeductionTreeMode {
             })
             .map(|r| r.selection)
     }
+
+    /// Find the nearest selectable item in the given direction using grid-based navigation.
+    fn find_nearest_in_direction(&self, direction: Direction) -> Option<Selection> {
+        let current_sel = self.current_tree_selection()?;
+        let cur = self
+            .click_regions
+            .iter()
+            .find(|r| r.selection == current_sel)?
+            .area;
+
+        let is_horizontal = matches!(direction, Direction::Left | Direction::Right);
+
+        // Grid-aligned search: find items that overlap on the perpendicular axis
+        let aligned = self.click_regions.iter().filter(|r| {
+            let dominated = if is_horizontal {
+                ranges_overlap(cur.y, cur.height, r.area.y, r.area.height)
+            } else {
+                ranges_overlap(cur.x, cur.width, r.area.x, r.area.width)
+            };
+            dominated && direction.is_ahead(cur, r.area)
+        });
+
+        // Fallback: any item in the direction
+        let fallback = self
+            .click_regions
+            .iter()
+            .filter(|r| direction.is_ahead(cur, r.area));
+
+        aligned
+            .chain(fallback)
+            .min_by_key(|r| direction.distance(cur, r.area))
+            .map(|r| r.selection)
+    }
+
+    /// Get the active goal selection (first goal of the current node).
+    fn active_goal_selection(&self) -> Option<Selection> {
+        let dag = self.proof_dag.as_ref()?;
+        let current_node_id = dag.current_node?;
+        // Select the first goal of the current node
+        Some(Selection::Goal {
+            node_id: current_node_id,
+            goal_idx: 0,
+        })
+    }
+
+    fn move_in_direction(&mut self, direction: Direction) -> bool {
+        // If nothing is selected, start at the active goal
+        if self.selected_idx.is_none() {
+            if let Some(sel) = self.active_goal_selection() {
+                self.select_by_selection(sel);
+                return true;
+            }
+        }
+
+        self.find_nearest_in_direction(direction)
+            .map(|sel| self.select_by_selection(sel))
+            .is_some()
+    }
+}
+
+/// Direction for spatial navigation.
+#[derive(Clone, Copy)]
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    /// Check if `other` is ahead of `cur` in this direction.
+    const fn is_ahead(self, cur: Rect, other: Rect) -> bool {
+        match self {
+            Self::Left => other.x + other.width <= cur.x,
+            Self::Right => other.x >= cur.x + cur.width,
+            Self::Up => other.y + other.height <= cur.y,
+            Self::Down => other.y >= cur.y + cur.height,
+        }
+    }
+
+    /// Distance from `cur` to `other` along this direction's axis.
+    const fn distance(self, cur: Rect, other: Rect) -> u16 {
+        match self {
+            Self::Left => cur.x.saturating_sub(other.x + other.width),
+            Self::Right => other.x.saturating_sub(cur.x + cur.width),
+            Self::Up => cur.y.saturating_sub(other.y + other.height),
+            Self::Down => other.y.saturating_sub(cur.y + cur.height),
+        }
+    }
+}
+
+/// Check if two 1D ranges overlap.
+const fn ranges_overlap(a_start: u16, a_len: u16, b_start: u16, b_len: u16) -> bool {
+    a_start < b_start + b_len && b_start < a_start + a_len
 }
 
 impl InteractiveComponent for DeductionTreeMode {
@@ -169,15 +244,11 @@ impl InteractiveComponent for DeductionTreeMode {
     fn handle_event(&mut self, event: Self::Event) -> bool {
         match event {
             KeyMouseEvent::Key(key) => match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.select_next();
-                    true
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.select_previous();
-                    true
-                }
-                KeyCode::Char('r') => {
+                KeyCode::Char('j') | KeyCode::Down => self.move_in_direction(Direction::Down),
+                KeyCode::Char('k') | KeyCode::Up => self.move_in_direction(Direction::Up),
+                KeyCode::Char('h') | KeyCode::Left => self.move_in_direction(Direction::Left),
+                KeyCode::Char('l') | KeyCode::Right => self.move_in_direction(Direction::Right),
+                KeyCode::Char('t') => {
                     self.tree_top_down = !self.tree_top_down;
                     true
                 }
@@ -228,7 +299,7 @@ impl Mode for DeductionTreeMode {
     type Model = DeductionTreeModeInput;
 
     const NAME: &'static str = "Deduction Tree";
-    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("r", "dir")];
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("hjkl", "nav"), ("t", "dir")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[];
     const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
 
