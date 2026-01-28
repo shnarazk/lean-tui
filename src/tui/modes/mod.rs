@@ -11,10 +11,10 @@ use before_after::BeforeAfterMode;
 pub use before_after::BeforeAfterModeInput;
 pub use deduction_tree::DeductionTreeModeInput;
 use deduction_tree::SemanticTableau;
-use open_goal_list::OpenGoalListMode;
-pub use open_goal_list::OpenGoalListModeInput;
+use open_goal_list::PlainList;
+pub use open_goal_list::PlainListInput;
 use ratatui::{layout::Rect, Frame};
-use steps_view::StepsMode;
+use steps_view::TacticTree;
 pub use steps_view::StepsModeInput;
 
 use crate::tui::widgets::{
@@ -35,9 +35,9 @@ pub trait Mode: InteractiveComponent<Input = Self::Model, Event = KeyMouseEvent>
 /// Display mode with embedded state.
 #[allow(clippy::large_enum_variant)]
 pub enum DisplayMode {
-    OpenGoalList(OpenGoalListMode),
+    OpenGoalList(PlainList),
     BeforeAfter(BeforeAfterMode),
-    StepsView(StepsMode),
+    StepsView(TacticTree),
     DeductionTree(SemanticTableau),
 }
 
@@ -52,9 +52,9 @@ impl DisplayMode {
     pub fn next(&mut self) {
         *self = match take(self) {
             Self::OpenGoalList(_) => Self::BeforeAfter(BeforeAfterMode::default()),
-            Self::BeforeAfter(_) => Self::StepsView(StepsMode::default()),
+            Self::BeforeAfter(_) => Self::StepsView(TacticTree::default()),
             Self::StepsView(_) => Self::DeductionTree(SemanticTableau::default()),
-            Self::DeductionTree(_) => Self::OpenGoalList(OpenGoalListMode::default()),
+            Self::DeductionTree(_) => Self::OpenGoalList(PlainList::default()),
         };
     }
 
@@ -62,18 +62,18 @@ impl DisplayMode {
     pub fn prev(&mut self) {
         *self = match take(self) {
             Self::OpenGoalList(_) => Self::DeductionTree(SemanticTableau::default()),
-            Self::BeforeAfter(_) => Self::OpenGoalList(OpenGoalListMode::default()),
+            Self::BeforeAfter(_) => Self::OpenGoalList(PlainList::default()),
             Self::StepsView(_) => Self::BeforeAfter(BeforeAfterMode::default()),
-            Self::DeductionTree(_) => Self::StepsView(StepsMode::default()),
+            Self::DeductionTree(_) => Self::StepsView(TacticTree::default()),
         };
     }
 
     /// Get the display name of the current mode.
     pub const fn name(&self) -> &'static str {
         match self {
-            Self::OpenGoalList(_) => OpenGoalListMode::NAME,
+            Self::OpenGoalList(_) => PlainList::NAME,
             Self::BeforeAfter(_) => BeforeAfterMode::NAME,
-            Self::StepsView(_) => StepsMode::NAME,
+            Self::StepsView(_) => TacticTree::NAME,
             Self::DeductionTree(_) => SemanticTableau::NAME,
         }
     }
@@ -81,9 +81,9 @@ impl DisplayMode {
     /// Get mode-specific keybindings.
     pub const fn keybindings(&self) -> &'static [(&'static str, &'static str)] {
         match self {
-            Self::OpenGoalList(_) => OpenGoalListMode::KEYBINDINGS,
+            Self::OpenGoalList(_) => PlainList::KEYBINDINGS,
             Self::BeforeAfter(_) => BeforeAfterMode::KEYBINDINGS,
-            Self::StepsView(_) => StepsMode::KEYBINDINGS,
+            Self::StepsView(_) => TacticTree::KEYBINDINGS,
             Self::DeductionTree(_) => SemanticTableau::KEYBINDINGS,
         }
     }
@@ -91,9 +91,9 @@ impl DisplayMode {
     /// Get supported filter toggles.
     pub const fn supported_filters(&self) -> &'static [FilterToggle] {
         match self {
-            Self::OpenGoalList(_) => OpenGoalListMode::SUPPORTED_FILTERS,
+            Self::OpenGoalList(_) => PlainList::SUPPORTED_FILTERS,
             Self::BeforeAfter(_) => BeforeAfterMode::SUPPORTED_FILTERS,
-            Self::StepsView(_) => StepsMode::SUPPORTED_FILTERS,
+            Self::StepsView(_) => TacticTree::SUPPORTED_FILTERS,
             Self::DeductionTree(_) => SemanticTableau::SUPPORTED_FILTERS,
         }
     }
@@ -155,7 +155,7 @@ impl DisplayMode {
     }
 
     /// Update active mode with appropriate input.
-    pub fn update_open_goal_list(&mut self, input: OpenGoalListModeInput) {
+    pub fn update_open_goal_list(&mut self, input: PlainListInput) {
         if let Self::OpenGoalList(m) = self {
             m.update(input);
         }

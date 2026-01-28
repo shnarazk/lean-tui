@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Input for updating the Open Goal List mode.
-pub struct OpenGoalListModeInput {
+pub struct PlainListInput {
     pub goals: Vec<Goal>,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
@@ -25,7 +25,7 @@ pub struct OpenGoalListModeInput {
 
 /// Open Goal List display mode - navigable list of open goals with hypotheses.
 #[derive(Default)]
-pub struct OpenGoalListMode {
+pub struct PlainList {
     /// Current proof state (from DAG or converted from goals).
     state: ProofState,
     /// Current node ID in the DAG (for building selections).
@@ -40,7 +40,7 @@ pub struct OpenGoalListMode {
     selection: SelectionState,
 }
 
-impl OpenGoalListMode {
+impl PlainList {
     pub const fn filters(&self) -> HypothesisFilters {
         self.filters
     }
@@ -79,8 +79,8 @@ impl OpenGoalListMode {
     }
 }
 
-impl InteractiveComponent for OpenGoalListMode {
-    type Input = OpenGoalListModeInput;
+impl InteractiveComponent for PlainList {
+    type Input = PlainListInput;
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
@@ -177,10 +177,10 @@ impl InteractiveComponent for OpenGoalListMode {
     }
 }
 
-impl Mode for OpenGoalListMode {
-    type Model = OpenGoalListModeInput;
+impl Mode for PlainList {
+    type Model = PlainListInput;
 
-    const NAME: &'static str = "Open Goals";
+    const NAME: &'static str = "Plain list";
     const KEYBINDINGS: &'static [(&'static str, &'static str)] =
         &[("i", "inst"), ("a", "access"), ("l", "let"), ("r", "rev")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
