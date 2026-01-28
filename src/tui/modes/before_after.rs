@@ -40,6 +40,8 @@ pub struct BeforeAfterMode {
     error: Option<String>,
     /// Current node ID in the DAG (for building selections).
     current_node_id: Option<u32>,
+    /// Name of the goal the cursor's tactic is working on.
+    active_goal_name: Option<String>,
     filters: HypothesisFilters,
     selection: SelectionState,
     show_previous: bool,
@@ -58,6 +60,7 @@ impl Default for BeforeAfterMode {
             definition: None,
             error: None,
             current_node_id: None,
+            active_goal_name: None,
             filters: HypothesisFilters::default(),
             selection: SelectionState::default(),
             show_previous: true, // Show previous column by default
@@ -114,7 +117,12 @@ impl InteractiveComponent for BeforeAfterMode {
         self.next_goals = input.next_goals;
         self.definition = input.definition;
         self.error = input.error;
-        self.current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
+        let current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
+        let current_node = current_node_id.and_then(|id| input.proof_dag.as_ref()?.get(id));
+        self.current_node_id = current_node_id;
+        self.active_goal_name = current_node
+            .and_then(|node| node.state_before.goals.first())
+            .map(|g| g.username.clone());
         if goals_changed {
             self.selection.reset(self.selectable_items().len());
         }
@@ -194,7 +202,7 @@ impl InteractiveComponent for BeforeAfterMode {
         if let Some(ref goals) = self.previous_goals {
             if self.show_previous {
                 frame.render_stateful_widget(
-                    GoalsColumn::new("Previous", goals, self.filters, None, false, None),
+                    GoalsColumn::new("Previous", goals, self.filters, None, false, None, self.active_goal_name.as_deref()),
                     columns[col_idx],
                     &mut self.previous_column_state,
                 );
@@ -211,6 +219,7 @@ impl InteractiveComponent for BeforeAfterMode {
                 selection,
                 true,
                 self.current_node_id,
+                self.active_goal_name.as_deref(),
             ),
             columns[col_idx],
             &mut self.current_column_state,
@@ -225,7 +234,7 @@ impl InteractiveComponent for BeforeAfterMode {
         if let Some(ref goals) = self.next_goals {
             if self.show_next {
                 frame.render_stateful_widget(
-                    GoalsColumn::new("Next", goals, self.filters, None, false, None),
+                    GoalsColumn::new("Next", goals, self.filters, None, false, None, self.active_goal_name.as_deref()),
                     columns[col_idx],
                     &mut self.next_column_state,
                 );
