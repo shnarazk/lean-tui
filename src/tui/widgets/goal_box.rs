@@ -37,6 +37,8 @@ pub struct GoalBox<'a> {
     filters: HypothesisFilters,
     /// Node ID for creating click region selections.
     node_id: Option<u32>,
+    /// Optional border color override (e.g. from proof DAG node state).
+    border_color: Option<Color>,
 }
 
 /// Mutable state for `GoalBox` that tracks click regions.
@@ -58,6 +60,7 @@ impl<'a> GoalBox<'a> {
         selection: Option<Selection>,
         filters: HypothesisFilters,
         node_id: Option<u32>,
+        border_color: Option<Color>,
     ) -> Self {
         Self {
             goal,
@@ -65,6 +68,7 @@ impl<'a> GoalBox<'a> {
             selection,
             filters,
             node_id,
+            border_color,
         }
     }
 
@@ -119,13 +123,20 @@ impl<'a> GoalBox<'a> {
         #[allow(clippy::cast_possible_truncation)]
         let row = Row::new(vec![Cell::from(text)]).height(lines.len().max(1) as u16);
 
-        let title = Span::styled(
-            format!(" {} ", self.title()),
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        );
+        let mut title_style = Style::new().fg(Color::Yellow);
+        if self.border_color.is_some() {
+            title_style = title_style.add_modifier(Modifier::BOLD);
+        }
+        let title = Span::styled(format!(" {} ", self.title()), title_style);
 
         Table::new(vec![row], [Constraint::Fill(1)])
-            .block(bordered_block(Borders::TOP | Borders::LEFT | Borders::RIGHT).title(title))
+            .block(
+                bordered_block(
+                    Borders::TOP | Borders::LEFT | Borders::RIGHT,
+                    self.border_color,
+                )
+                .title(title),
+            )
             .column_spacing(0)
     }
 
@@ -134,7 +145,7 @@ impl<'a> GoalBox<'a> {
         let row = Row::new(vec![Cell::from(line)]).height(1);
 
         Table::new(vec![row], [Constraint::Fill(1)])
-            .block(bordered_block(Borders::ALL))
+            .block(bordered_block(Borders::ALL, self.border_color))
             .column_spacing(0)
     }
 }
@@ -229,9 +240,9 @@ fn track_goal_box_click_regions(
     }
 }
 
-fn bordered_block(borders: Borders) -> Block<'static> {
+fn bordered_block(borders: Borders, color_override: Option<Color>) -> Block<'static> {
     Block::default()
         .borders(borders)
         .border_set(BORDER)
-        .border_style(Style::new().fg(Theme::BORDER))
+        .border_style(Style::new().fg(color_override.unwrap_or(Theme::BORDER)))
 }

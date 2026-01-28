@@ -1,4 +1,5 @@
-//! Open Goal List mode - displays hypotheses and goal targets in a navigable list.
+//! Open Goal List mode - displays hypotheses and goal targets in a navigable
+//! list.
 
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{layout::Rect, Frame};
@@ -29,6 +30,8 @@ pub struct OpenGoalListMode {
     state: ProofState,
     /// Current node ID in the DAG (for building selections).
     current_node_id: Option<u32>,
+    /// Name of the goal the cursor's tactic is working on.
+    active_goal_name: Option<String>,
     /// Fallback goals (used when DAG not available).
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
@@ -83,14 +86,19 @@ impl InteractiveComponent for OpenGoalListMode {
     fn update(&mut self, input: Self::Input) {
         // Extract current node ID and state from DAG
         let current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
-        let new_state = current_node_id
-            .and_then(|id| dag_state(input.proof_dag.as_ref(), id))
-            .unwrap_or_else(|| ProofState::from_goals(&input.goals));
+        let current_node = current_node_id.and_then(|id| input.proof_dag.as_ref()?.get(id));
+        let new_state = current_node.map_or_else(
+            || ProofState::from_goals(&input.goals),
+            |node| node.state_after.clone(),
+        );
 
         let state_changed = self.state.goals.len() != new_state.goals.len()
             || self.state.hypotheses.len() != new_state.hypotheses.len();
 
         self.current_node_id = current_node_id;
+        self.active_goal_name = current_node
+            .and_then(|node| node.state_before.goals.first())
+            .map(|g| g.username.clone());
         self.state = new_state;
         self.goals = input.goals;
         self.definition = input.definition;
@@ -149,6 +157,7 @@ impl InteractiveComponent for OpenGoalListMode {
             self.current_selection(),
             self.filters,
             self.current_node_id,
+            self.active_goal_name.as_deref(),
         );
         let click_regions = goal_list.render_to_frame(frame, content_area);
 
@@ -187,9 +196,4 @@ impl Mode for OpenGoalListMode {
             .current_selection(&self.selectable_items())
             .copied()
     }
-}
-
-/// Extract state from DAG's current node.
-fn dag_state(proof_dag: Option<&ProofDag>, node_id: u32) -> Option<ProofState> {
-    proof_dag?.get(node_id).map(|node| node.state_after.clone())
 }

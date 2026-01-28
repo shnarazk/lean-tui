@@ -126,7 +126,7 @@ impl StatefulWidget for GoalTree<'_> {
             let prefix = self.goal_prefix(idx);
             let content_area = layout_with_prefix(*goal_area, &prefix, buf);
 
-            let goal_box = GoalBox::new(goal, idx, self.selection, self.filters, self.node_id);
+            let goal_box = GoalBox::new(goal, idx, self.selection, self.filters, self.node_id, None);
 
             goal_box.render(content_area, buf, &mut state.goal_box_states[idx]);
 

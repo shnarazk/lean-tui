@@ -384,12 +384,13 @@ impl App {
     }
 
     fn update_display_mode(&mut self) {
-        self.display_mode.update_open_goal_list(OpenGoalListModeInput {
-            goals: self.goals().to_vec(),
-            definition: self.definition.clone(),
-            error: self.error.clone(),
-            proof_dag: self.proof_dag.clone(),
-        });
+        self.display_mode
+            .update_open_goal_list(OpenGoalListModeInput {
+                goals: self.goals().to_vec(),
+                definition: self.definition.clone(),
+                error: self.error.clone(),
+                proof_dag: self.proof_dag.clone(),
+            });
         self.display_mode.update_before_after(BeforeAfterModeInput {
             previous_goals: self
                 .display_mode
