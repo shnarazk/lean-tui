@@ -261,7 +261,7 @@ impl Mode for SemanticTableau {
     type Model = DeductionTreeModeInput;
 
     const NAME: &'static str = "Semantic tableau";
-    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("hjkl", "nav"), ("t", "dir")];
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("hjkl", "nav")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[];
 
     fn current_selection(&self) -> Option<Selection> {

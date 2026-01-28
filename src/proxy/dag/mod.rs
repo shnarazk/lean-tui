@@ -40,6 +40,11 @@ pub struct ProofDag {
 
     /// Source of the DAG data.
     pub source: ProofDagSource,
+
+    /// Orphan nodes not connected to main tree (e.g., inline `by` blocks).
+    /// These should be rendered separately.
+    #[serde(default)]
+    pub orphans: Vec<NodeId>,
 }
 
 /// Source of proof DAG data.

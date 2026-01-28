@@ -14,18 +14,13 @@ use super::{InteractiveStatefulWidget, KeyEvent};
 const KEYBINDINGS: &[(&str, &str)] = &[
     // Display modes
     ("[/]", "cycle display mode"),
-    ("b", "toggle goal before"),
     // Navigation
     ("j/k", "navigate up/down"),
     ("Enter", "go to definition"),
-    ("p/n", "prev/next column"),
     // Filters
-    ("d", "toggle header"),
-    ("i", "toggle instances"),
-    ("t", "toggle types"),
-    ("a", "toggle inaccessible"),
-    ("l", "toggle let values"),
-    ("r", "reverse hyp order"),
+    // ("i", "toggle instances"),
+    // ("a", "toggle inaccessible"),
+    // ("l", "toggle let values"),
     // Other
     ("?", "close help"),
     ("q", "quit"),

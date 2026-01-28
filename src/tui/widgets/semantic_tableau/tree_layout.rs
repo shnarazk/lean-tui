@@ -64,6 +64,9 @@ pub fn node_content_width(node: &ProofDagNode) -> u16 {
     width.clamp(MIN_NODE_WIDTH, MAX_NODE_WIDTH)
 }
 
+/// Gap between main tree and orphan nodes.
+const ORPHAN_GAP: i32 = 4;
+
 /// Calculate tree layout with actual content dimensions.
 pub fn calculate_tree_layout(dag: &ProofDag, top_down: bool) -> TreeLayout {
     let mut layout = TreeLayout::default();
@@ -77,6 +80,32 @@ pub fn calculate_tree_layout(dag: &ProofDag, top_down: bool) -> TreeLayout {
     layout.content_height = h;
 
     position_nodes(dag, root_id, 0, 0, h, top_down, &mut layout.nodes);
+
+    // Position orphan nodes to the right of the main tree
+    if !dag.orphans.is_empty() {
+        let orphan_x = layout.content_width + ORPHAN_GAP;
+        let mut orphan_y = 0i32;
+
+        for &orphan_id in &dag.orphans {
+            if let Some(node) = dag.get(orphan_id) {
+                let node_w = node_content_width(node);
+                let node_h = node_height(node);
+
+                layout.nodes.push(NodePosition {
+                    node_id: orphan_id,
+                    x: orphan_x,
+                    y: orphan_y,
+                    width: node_w,
+                    height: node_h,
+                });
+
+                orphan_y += i32::from(node_h) + 1;
+                layout.content_width = layout.content_width.max(orphan_x + i32::from(node_w));
+                layout.content_height = layout.content_height.max(orphan_y);
+            }
+        }
+    }
+
     layout
 }
 

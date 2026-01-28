@@ -60,6 +60,9 @@ impl<'a> StateNode<'a> {
         let effective_complete = self.is_effective_complete();
         if self.is_current {
             Theme::CURRENT_NODE_BORDER
+        } else if self.node.has_unsolved_spawned_goals {
+            // Node has inline proofs (spawned goals) that were never solved
+            Theme::INCOMPLETE_NODE_BORDER
         } else if self.node.is_leaf() && !effective_complete {
             Theme::INCOMPLETE_NODE_BORDER
         } else if self.node.is_leaf() && effective_complete {

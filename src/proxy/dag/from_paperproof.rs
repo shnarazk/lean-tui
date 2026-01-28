@@ -34,6 +34,7 @@ impl ProofDag {
             source: ProofDagSource::Paperproof,
             definition_name,
             initial_state: (&steps[root_step_idx].goal_before).into(),
+            root: Some(root_step_idx as NodeId),
             nodes: steps
                 .iter()
                 .enumerate()
@@ -44,7 +45,6 @@ impl ProofDag {
 
         build_tree_structure(&mut dag, steps);
         dag.set_current_node(cursor_position);
-        dag.root = (!dag.nodes.is_empty()).then_some(root_step_idx as NodeId);
         dag
     }
 }
@@ -84,6 +84,7 @@ fn node_from_step(idx: usize, step: &PaperproofStep) -> ProofDagNode {
         children: vec![],
         parent: None,
         depth: 0,
+        has_unsolved_spawned_goals: false, // Set during tree building
     }
 }
 

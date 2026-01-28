@@ -399,6 +399,19 @@ impl RpcClient {
                     output.steps.len(),
                     output.version
                 );
+                for (i, step) in output.steps.iter().enumerate() {
+                    let spawned_ids: Vec<&str> = step.spawned_goals.iter().map(|g| g.id.as_str()).collect();
+                    let goals_after_ids: Vec<&str> = step.goals_after.iter().map(|g| g.id.as_str()).collect();
+                    tracing::debug!(
+                        step_idx = i,
+                        tactic = %step.tactic_string,
+                        line = step.position.start.line,
+                        goal_before_id = %step.goal_before.id,
+                        ?spawned_ids,
+                        ?goals_after_ids,
+                        "Paperproof step"
+                    );
+                }
                 Ok(Some(output))
             }
             Err(LspError::RpcError { message, .. })

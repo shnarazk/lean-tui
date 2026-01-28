@@ -77,6 +77,7 @@ fn node_from_tactic(idx: usize, tactic: &TacticInfo) -> ProofDagNode {
         children: vec![],
         parent: (idx > 0).then(|| (idx - 1) as NodeId),
         depth: tactic.depth,
+        has_unsolved_spawned_goals: false,
     }
 }
 

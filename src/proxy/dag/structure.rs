@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use tracing::debug;
+
 use super::{node::ProofDagNode, NodeId, ProofDag};
 use crate::lean_rpc::PaperproofStep;
 
@@ -19,9 +21,13 @@ pub fn build_tree_structure(dag: &mut ProofDag, steps: &[PaperproofStep]) {
         goal_to_steps.entry(goal_id.clone()).or_default().push(i);
     }
 
-    // Build tree recursively starting from first step's goal
-    let root_goal_id = &steps[0].goal_before.id;
+    // Build tree recursively starting from root step's goal
+    let root_idx = dag.root.unwrap_or(0) as usize;
+    let root_goal_id = &steps[root_idx].goal_before.id;
     build_branch_recursive(dag, steps, &goal_to_steps, root_goal_id, 0, None, 0);
+
+    // Connect any orphan nodes not reached by goal-ID traversal
+    connect_orphan_nodes(dag, steps);
 }
 
 /// Recursively build a branch of the tree.
@@ -55,16 +61,61 @@ fn build_branch_recursive(
         }
     }
 
-    // Determine children based on spawned goals or goals_after
-    let child_goal_ids: Vec<String> = if !step.spawned_goals.is_empty() {
-        step.spawned_goals.iter().map(|g| g.id.clone()).collect()
-    } else if step.goals_after.len() > 1 {
-        step.goals_after.iter().map(|g| g.id.clone()).collect()
-    } else if let Some(next_goal) = step.goals_after.first() {
-        vec![next_goal.id.clone()]
-    } else {
-        vec![]
-    };
+    // Determine children from BOTH spawned_goals AND goals_after
+    // spawned_goals: goals created by tactics like `have`, `obtain` (inline proofs)
+    // goals_after: goals remaining after the tactic completes
+    let mut child_goal_ids: Vec<String> = Vec::new();
+
+    // Check for unsolved spawned goals (inline proofs with no matching step)
+    let mut has_unsolved_goals = false;
+    for g in &step.spawned_goals {
+        let solver_indices = goal_to_steps.get(&g.id);
+        let has_solver = solver_indices
+            .is_some_and(|indices| indices.iter().any(|&i| i > step_idx));
+        debug!(
+            node_id,
+            spawned_goal_id = %g.id,
+            ?solver_indices,
+            has_solver,
+            "Checking spawned goal"
+        );
+        if !has_solver {
+            has_unsolved_goals = true;
+            debug!(
+                node_id,
+                spawned_goal_id = %g.id,
+                "Spawned goal has no solver - marking as unsolved"
+            );
+        }
+        if !child_goal_ids.contains(&g.id) {
+            child_goal_ids.push(g.id.clone());
+        }
+    }
+
+    // Check for unsolved goals_after (no matching step to continue the proof)
+    for g in &step.goals_after {
+        let has_solver = goal_to_steps
+            .get(&g.id)
+            .is_some_and(|indices| indices.iter().any(|&i| i > step_idx));
+        if !has_solver {
+            has_unsolved_goals = true;
+            debug!(
+                node_id,
+                goals_after_id = %g.id,
+                "Goal after has no solver - marking as unsolved"
+            );
+        }
+        if !child_goal_ids.contains(&g.id) {
+            child_goal_ids.push(g.id.clone());
+        }
+    }
+
+    // Mark node if it has any unsolved goals (spawned or goals_after)
+    if has_unsolved_goals {
+        if let Some(node) = dag.nodes.get_mut(step_idx) {
+            node.has_unsolved_spawned_goals = true;
+        }
+    }
 
     for child_goal_id in child_goal_ids {
         build_branch_recursive(
@@ -79,6 +130,82 @@ fn build_branch_recursive(
     }
 
     Some(node_id)
+}
+
+/// Connect orphan nodes that weren't reached during goal-ID-based tree building.
+/// Only connects orphans when there's a definite goal ID match - no heuristics.
+fn connect_orphan_nodes(dag: &mut ProofDag, steps: &[PaperproofStep]) {
+    let root_id = dag.root.unwrap_or(0);
+
+    // Find nodes with no parent (except root)
+    let orphan_ids: Vec<NodeId> = dag
+        .nodes
+        .iter()
+        .filter(|n| n.parent.is_none() && n.id != root_id)
+        .map(|n| n.id)
+        .collect();
+
+    debug!(
+        orphan_count = orphan_ids.len(),
+        root_id,
+        total_nodes = dag.nodes.len(),
+        "Looking for orphan nodes"
+    );
+
+    for orphan_id in orphan_ids {
+        let orphan_step = &steps[orphan_id as usize];
+        let orphan_tactic = &orphan_step.tactic_string;
+
+        debug!(
+            orphan_id,
+            orphan_tactic,
+            orphan_goal_id = %orphan_step.goal_before.id,
+            line = dag.nodes[orphan_id as usize].position.line,
+            "Processing orphan node"
+        );
+
+        // Only connect if we find a definite goal ID match
+        let parent_by_goal = dag.nodes.iter().find(|n| {
+            let step = &steps[n.id as usize];
+            step.goals_after
+                .iter()
+                .any(|g| g.id == orphan_step.goal_before.id)
+                || step
+                    .spawned_goals
+                    .iter()
+                    .any(|g| g.id == orphan_step.goal_before.id)
+        });
+
+        let Some(parent) = parent_by_goal else {
+            debug!(
+                orphan_id,
+                orphan_tactic,
+                "No goal ID match found - marking as detached orphan"
+            );
+            dag.orphans.push(orphan_id);
+            continue;
+        };
+
+        let parent_id = parent.id;
+        debug!(
+            orphan_id,
+            parent_id,
+            parent_tactic = %steps[parent_id as usize].tactic_string,
+            "Connecting orphan to parent via goal ID"
+        );
+
+        // Connect orphan to parent
+        let parent_depth = dag.nodes[parent_id as usize].depth;
+        if let Some(orphan_node) = dag.nodes.get_mut(orphan_id as usize) {
+            orphan_node.parent = Some(parent_id);
+            orphan_node.depth = parent_depth + 1;
+        }
+        if let Some(parent_node) = dag.nodes.get_mut(parent_id as usize) {
+            if !parent_node.children.contains(&orphan_id) {
+                parent_node.children.push(orphan_id);
+            }
+        }
+    }
 }
 
 /// Build tree structure for local tactics based on depth.

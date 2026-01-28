@@ -26,6 +26,10 @@ pub struct ProofDagNode {
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
     pub depth: usize,
+
+    /// True if this node has spawned goals (e.g., inline `by` blocks) that are not solved.
+    #[serde(default)]
+    pub has_unsolved_spawned_goals: bool,
 }
 
 impl ProofDagNode {
