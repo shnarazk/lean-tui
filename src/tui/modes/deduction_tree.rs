@@ -7,10 +7,9 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
-
 use tracing::debug;
 
-use super::{Backend, Mode};
+use super::Mode;
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{
@@ -172,13 +171,21 @@ impl InteractiveComponent for SemanticTableau {
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
-        // Detect changes to proof tree
+        // Detect changes to proof tree or goals
         let old_count = self.proof_dag.as_ref().map_or(0, ProofDag::len);
         let new_count = input.proof_dag.as_ref().map_or(0, ProofDag::len);
         let old_current = self.proof_dag.as_ref().and_then(|dag| dag.current_node);
         let new_current = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
+        let old_goal_count = self.goals.len();
+        let new_goal_count = input.goals.len();
 
         let tree_changed = old_count != new_count || old_current != new_current;
+        let goals_changed = old_goal_count != new_goal_count
+            || self
+                .goals
+                .iter()
+                .zip(input.goals.iter())
+                .any(|(old, new)| old.target.to_plain_text() != new.target.to_plain_text());
 
         // Update state when current node changes
         self.tableau_state.update_current_node(new_current);
@@ -188,8 +195,8 @@ impl InteractiveComponent for SemanticTableau {
         self.error = input.error;
         self.proof_dag = input.proof_dag;
 
-        // Auto-select active goal when tree changes
-        if tree_changed {
+        // Auto-select active goal when tree or goals change
+        if tree_changed || goals_changed {
             if let Some(sel) = self.active_goal_selection() {
                 self.select_by_selection(sel);
             } else {
@@ -234,7 +241,12 @@ impl InteractiveComponent for SemanticTableau {
         }
 
         if let Some(ref dag) = self.proof_dag {
-            let widget = SemanticTableauLayout::new(dag, self.tree_top_down, self.current_tree_selection());
+            let widget = SemanticTableauLayout::new(
+                dag,
+                self.tree_top_down,
+                self.current_tree_selection(),
+                &self.goals,
+            );
             frame.render_stateful_widget(widget, content_area, &mut self.tableau_state);
         } else {
             frame.render_widget(
@@ -251,7 +263,6 @@ impl Mode for SemanticTableau {
     const NAME: &'static str = "Semantic tableau";
     const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("hjkl", "nav"), ("t", "dir")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[];
-    const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
 
     fn current_selection(&self) -> Option<Selection> {
         self.current_tree_selection()

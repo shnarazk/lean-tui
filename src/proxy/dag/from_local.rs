@@ -31,10 +31,26 @@ impl ProofDag {
 
         build_local_tree_structure(&mut nodes);
 
+        // For local tactics, we don't have accurate initial hypothesis information.
+        // Only store the goal type, not hypotheses (which would be from current cursor
+        // position).
+        let initial_state = ProofState {
+            goals: goals
+                .iter()
+                .map(|g| super::state::GoalInfo {
+                    type_: g.target.to_plain_text(),
+                    username: g.user_name.clone().unwrap_or_default(),
+                    id: String::new(),
+                    goto_locations: g.goto_locations.clone(),
+                })
+                .collect(),
+            hypotheses: vec![], // No hypotheses - we don't have accurate initial state
+        };
+
         let mut dag = Self {
             source: ProofDagSource::Local,
             definition_name,
-            initial_state: ProofState::from_goals(goals),
+            initial_state,
             nodes,
             root: Some(0),
             ..Default::default()

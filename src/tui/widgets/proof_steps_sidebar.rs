@@ -17,10 +17,10 @@ use crate::{
 };
 
 // Tree drawing characters
-const BRANCH_MID: &str = "├─ ";   // Branch to non-last child
-const BRANCH_END: &str = "╰─ ";   // Branch to last child (rounded)
-const VERT_LINE: &str = "│  ";    // Vertical continuation
-const EMPTY: &str = "   ";        // Empty space after last child
+const BRANCH_MID: &str = "├─ "; // Branch to non-last child
+const BRANCH_END: &str = "╰─ "; // Branch to last child (rounded)
+const VERT_LINE: &str = "│  "; // Vertical continuation
+const EMPTY: &str = "   "; // Empty space after last child
 
 /// State for the proof steps sidebar widget.
 #[derive(Default)]
@@ -196,7 +196,11 @@ fn build_tree_prefix(active_levels: &[bool], depth: usize, is_last_child: bool) 
     }
 
     // For the current level, draw branch
-    prefix.push_str(if is_last_child { BRANCH_END } else { BRANCH_MID });
+    prefix.push_str(if is_last_child {
+        BRANCH_END
+    } else {
+        BRANCH_MID
+    });
 
     prefix
 }

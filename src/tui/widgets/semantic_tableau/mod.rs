@@ -5,8 +5,10 @@ pub mod given_pane;
 pub mod layout;
 pub mod navigation;
 pub mod proof_pane;
+pub mod state_node;
 pub mod theorem_pane;
 pub mod tree_layout;
 
 pub use layout::{SemanticTableauLayout, SemanticTableauState};
+
 pub use super::{ClickRegion, Selection};

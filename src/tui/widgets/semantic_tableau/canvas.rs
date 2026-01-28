@@ -22,7 +22,14 @@ impl VirtualCanvas {
     }
 
     /// Center the viewport on a target position.
-    pub fn scroll_to_center(&mut self, target_x: i32, target_y: i32, target_w: u16, target_h: u16, viewport: Rect) {
+    pub fn scroll_to_center(
+        &mut self,
+        target_x: i32,
+        target_y: i32,
+        target_w: u16,
+        target_h: u16,
+        viewport: Rect,
+    ) {
         let center_x = target_x + i32::from(target_w) / 2;
         let center_y = target_y + i32::from(target_h) / 2;
 
@@ -43,7 +50,14 @@ impl VirtualCanvas {
 
     /// Clip a virtual rectangle to the viewport. Returns None if not visible.
     #[allow(clippy::cast_sign_loss)]
-    pub fn clip_to_viewport(&self, x: i32, y: i32, width: u16, height: u16, viewport: Rect) -> Option<Rect> {
+    pub fn clip_to_viewport(
+        &self,
+        x: i32,
+        y: i32,
+        width: u16,
+        height: u16,
+        viewport: Rect,
+    ) -> Option<Rect> {
         let rel_x = x - self.scroll_x;
         let rel_y = y - self.scroll_y;
 

@@ -12,7 +12,7 @@ use super::{
     theorem_pane::{TheoremPane, TheoremPaneState},
     ClickRegion, Selection,
 };
-use crate::tui_ipc::ProofDag;
+use crate::{lean_rpc::Goal, tui_ipc::ProofDag};
 
 /// Combined state for the semantic tableau layout.
 #[derive(Default)]
@@ -85,14 +85,22 @@ pub struct SemanticTableauLayout<'a> {
     dag: &'a ProofDag,
     top_down: bool,
     selection: Option<Selection>,
+    /// Actual current goals from LSP (may differ from node's `state_after`).
+    current_goals: &'a [Goal],
 }
 
 impl<'a> SemanticTableauLayout<'a> {
-    pub const fn new(dag: &'a ProofDag, top_down: bool, selection: Option<Selection>) -> Self {
+    pub const fn new(
+        dag: &'a ProofDag,
+        top_down: bool,
+        selection: Option<Selection>,
+        current_goals: &'a [Goal],
+    ) -> Self {
         Self {
             dag,
             top_down,
             selection,
+            current_goals,
         }
     }
 }
@@ -107,18 +115,19 @@ impl StatefulWidget for SemanticTableauLayout<'_> {
         let given_widget = GivenPane::new(&self.dag.initial_state.hypotheses, self.selection);
         given_widget.render(given_area, buf, &mut state.given);
 
-        // Render proof pane
-        let proof_widget = ProofPane::new(self.dag, self.top_down, self.selection);
+        // Render proof pane with actual current goals
+        let proof_widget =
+            ProofPane::new(self.dag, self.top_down, self.selection, self.current_goals);
         proof_widget.render(proof_area, buf, &mut state.proof);
 
-        // Render theorem pane
-        let goal = self
+        // Render theorem pane with the top-level theorem (initial goal)
+        let theorem_goal = self
             .dag
             .initial_state
             .goals
             .first()
             .map_or("", |g| g.type_.as_str());
-        let theorem_widget = TheoremPane::new(goal, self.selection);
+        let theorem_widget = TheoremPane::new(theorem_goal, self.selection);
         theorem_widget.render(theorem_area, buf, &mut state.theorem);
     }
 }

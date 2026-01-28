@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use super::{Backend, Mode};
+use super::Mode;
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{
@@ -179,8 +179,7 @@ impl StepsMode {
     fn handle_sidebar_navigation(&mut self, code: KeyCode) -> bool {
         match code {
             KeyCode::Char('j') | KeyCode::Down => {
-                self.sidebar_state
-                    .scroll_down(self.sidebar_viewport_height);
+                self.sidebar_state.scroll_down(self.sidebar_viewport_height);
                 true
             }
             KeyCode::Char('k') | KeyCode::Up => {
@@ -350,7 +349,6 @@ impl Mode for StepsMode {
         FilterToggle::LetValues,
         FilterToggle::ReverseOrder,
     ];
-    const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::LeanRpc];
 
     fn current_selection(&self) -> Option<Selection> {
         self.selection

@@ -23,10 +23,17 @@ impl ProofDag {
             return Self::default();
         }
 
+        // Find the step with the earliest position (root of the proof)
+        let root_step_idx = steps
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, step)| (step.position.start.line, step.position.start.character))
+            .map_or(0, |(idx, _)| idx);
+
         let mut dag = Self {
             source: ProofDagSource::Paperproof,
             definition_name,
-            initial_state: (&steps[0].goal_before).into(),
+            initial_state: (&steps[root_step_idx].goal_before).into(),
             nodes: steps
                 .iter()
                 .enumerate()
@@ -37,7 +44,7 @@ impl ProofDag {
 
         build_tree_structure(&mut dag, steps);
         dag.set_current_node(cursor_position);
-        dag.root = (!dag.nodes.is_empty()).then_some(0);
+        dag.root = (!dag.nodes.is_empty()).then_some(root_step_idx as NodeId);
         dag
     }
 }

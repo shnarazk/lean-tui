@@ -2,9 +2,10 @@
 //!
 //! Handles keyboard navigation through the proof tree using spatial regions.
 
+use tracing::debug;
+
 use super::{tree_layout::TreeLayout, Selection};
 use crate::tui_ipc::ProofDag;
-use tracing::debug;
 
 /// Region for keyboard navigation - uses virtual coordinates (i32).
 #[derive(Debug, Clone, Copy)]
@@ -68,7 +69,8 @@ fn ranges_overlap(a_start: i32, a_len: u16, b_start: i32, b_len: u16) -> bool {
 ///
 /// Given bar hypotheses and Theorem are excluded from keyboard navigation
 /// (they remain mouse-clickable) to avoid coordinate system complexity
-/// between screen coordinates (Given/Theorem) and virtual coordinates (tree nodes).
+/// between screen coordinates (Given/Theorem) and virtual coordinates (tree
+/// nodes).
 #[allow(clippy::cast_possible_wrap)]
 pub fn build_navigation_regions(dag: &ProofDag, layout: &TreeLayout) -> Vec<NavigationRegion> {
     let mut regions = Vec::new();
@@ -154,7 +156,8 @@ pub fn build_navigation_regions(dag: &ProofDag, layout: &TreeLayout) -> Vec<Navi
     regions
 }
 
-/// Find the nearest selectable item in the given direction using grid-based navigation.
+/// Find the nearest selectable item in the given direction using grid-based
+/// navigation.
 pub fn find_nearest_in_direction(
     regions: &[NavigationRegion],
     current: Selection,

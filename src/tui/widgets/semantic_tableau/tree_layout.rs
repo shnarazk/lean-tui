@@ -2,7 +2,8 @@
 
 use crate::tui_ipc::{NodeId, ProofDag, ProofDagNode};
 
-pub const MIN_BRANCH_WIDTH: u16 = 25;
+pub const MIN_NODE_WIDTH: u16 = 25;
+pub const MAX_NODE_WIDTH: u16 = 60;
 
 #[derive(Debug, Clone, Copy)]
 pub struct NodePosition {
@@ -26,9 +27,41 @@ impl TreeLayout {
     }
 }
 
-/// Calculate height for a node box.
-pub fn node_height(node: &ProofDagNode) -> u16 {
-    3 + u16::from(!node.new_hypotheses.is_empty())
+/// Calculate height for a node box based on content.
+pub const fn node_height(node: &ProofDagNode) -> u16 {
+    // Border (2) + goals line (1) + optional hypotheses line (1)
+    3 + (!node.new_hypotheses.is_empty()) as u16
+}
+
+/// Calculate minimum width needed for a node's content.
+pub fn node_content_width(node: &ProofDagNode) -> u16 {
+    let mut max_width: usize = 0;
+
+    // Tactic title width (with " tactic [N→] " format)
+    let title_width = node.tactic.text.len() + 8;
+    max_width = max_width.max(title_width);
+
+    // Hypothesis widths: " name: type "
+    for &hyp_idx in &node.new_hypotheses {
+        if let Some(h) = node.state_after.hypotheses.get(hyp_idx) {
+            let hyp_width = h.name.len() + h.type_.len() + 5;
+            max_width = max_width.max(hyp_width);
+        }
+    }
+
+    // Goal widths: "⊢ type" or "✓ Goal completed"
+    if node.state_after.goals.is_empty() {
+        max_width = max_width.max(16); // "✓ Goal completed"
+    } else {
+        for g in &node.state_after.goals {
+            let goal_width = g.type_.len() + 4; // "⊢ " prefix + padding
+            max_width = max_width.max(goal_width);
+        }
+    }
+
+    // Clamp to min/max and add border padding
+    let width = (max_width + 4) as u16;
+    width.clamp(MIN_NODE_WIDTH, MAX_NODE_WIDTH)
 }
 
 /// Calculate tree layout with actual content dimensions.
@@ -54,17 +87,18 @@ fn subtree_size(dag: &ProofDag, node_id: NodeId) -> (i32, i32) {
     };
 
     let h = i32::from(node_height(node));
+    let node_w = i32::from(node_content_width(node));
 
     if node.children.is_empty() {
-        return (i32::from(MIN_BRANCH_WIDTH), h);
+        return (node_w, h);
     }
 
     let (total_w, max_child_h) = node.children.iter().fold((0, 0), |(tw, mh), &cid| {
         let (cw, ch) = subtree_size(dag, cid);
-        (tw + cw.max(i32::from(MIN_BRANCH_WIDTH)), mh.max(ch))
+        (tw + cw, mh.max(ch))
     });
 
-    (total_w.max(i32::from(MIN_BRANCH_WIDTH)), h + max_child_h)
+    (total_w.max(node_w), h + max_child_h)
 }
 
 /// Position nodes recursively.
@@ -83,6 +117,7 @@ fn position_nodes(
 
     let box_h = i32::from(node_height(node));
     let (subtree_w, _) = subtree_size(dag, node_id);
+    let node_w = node_content_width(node);
 
     let node_y = if top_down { y } else { y + available_h - box_h };
 
@@ -90,7 +125,7 @@ fn position_nodes(
         node_id,
         x,
         y: node_y,
-        width: u16::try_from(subtree_w).unwrap_or(MIN_BRANCH_WIDTH),
+        width: u16::try_from(subtree_w).unwrap_or(node_w).max(node_w),
         height: node_height(node),
     });
 
@@ -101,7 +136,6 @@ fn position_nodes(
 
         for &cid in &node.children {
             let (cw, ch) = subtree_size(dag, cid);
-            let cw = cw.max(i32::from(MIN_BRANCH_WIDTH));
             position_nodes(dag, cid, cx, child_y, child_h.min(ch), top_down, out);
             cx += cw;
         }

@@ -8,7 +8,9 @@ use crate::lean_rpc::Goal;
 // Re-export AST-derived types from proxy for IPC consumers
 pub use crate::proxy::ast::DefinitionInfo;
 // Re-export ProofDag types
-pub use crate::proxy::dag::{HypothesisInfo, NodeId, ProofDag, ProofDagNode, ProofState};
+pub use crate::proxy::dag::{
+    HypothesisInfo, NodeId, ProofDag, ProofDagNode, ProofDagSource, ProofState,
+};
 
 /// Returns the path to the Unix socket for IPC.
 pub fn socket_path() -> PathBuf {

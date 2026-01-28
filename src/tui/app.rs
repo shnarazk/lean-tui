@@ -27,7 +27,7 @@ use crate::{
     },
     tui_ipc::{
         socket_path, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position, ProofDag,
-        TemporalSlot,
+        ProofDagSource, TemporalSlot,
     },
 };
 
@@ -447,16 +447,14 @@ impl App {
         }
 
         let title = self.build_title();
-        let backends = format!(
-            " {} ({}) ",
-            self.display_mode.backends_display(),
-            self.display_mode.name()
-        );
+        let mode_name = format!(" {} ", self.display_mode.name());
+        let backend = self.build_backend_display();
         let position_info = self.build_position_info();
 
         let block = Block::bordered()
             .title(title)
-            .title_top(Line::from(backends).right_aligned())
+            .title_top(Line::from(mode_name).right_aligned())
+            .title_bottom(Line::from(backend).left_aligned())
             .title_bottom(Line::from(position_info).right_aligned())
             .border_style(Style::new().fg(Color::Cyan));
 
@@ -495,6 +493,14 @@ impl App {
                 cursor.method
             )
         })
+    }
+
+    fn build_backend_display(&self) -> String {
+        let source_name = self.proof_dag.as_ref().map(|dag| match dag.source {
+            ProofDagSource::Paperproof => "Paperproof",
+            ProofDagSource::Local => "tree-sitter",
+        });
+        source_name.map_or(String::new(), |name| format!(" {name} "))
     }
 
     /// Handle crossterm events.

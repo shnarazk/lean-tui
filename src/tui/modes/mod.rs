@@ -9,8 +9,8 @@ use std::mem::take;
 
 use before_after::BeforeAfterMode;
 pub use before_after::BeforeAfterModeInput;
-use deduction_tree::SemanticTableau;
 pub use deduction_tree::DeductionTreeModeInput;
+use deduction_tree::SemanticTableau;
 use open_goal_list::OpenGoalListMode;
 pub use open_goal_list::OpenGoalListModeInput;
 use ratatui::{layout::Rect, Frame};
@@ -21,28 +21,6 @@ use crate::tui::widgets::{
     FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
 };
 
-/// Backend data source for a display mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Backend {
-    /// Goals from Lean RPC (getInteractiveGoals).
-    LeanRpc,
-    /// Proof steps from Paperproof library.
-    Paperproof,
-    /// Proof steps from local tree-sitter analysis.
-    TreeSitter,
-}
-
-impl Backend {
-    /// Get the display name of this backend.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::LeanRpc => "Lean RPC",
-            Self::Paperproof => "Paperproof",
-            Self::TreeSitter => "tree-sitter",
-        }
-    }
-}
-
 /// Trait for display modes in the TUI.
 pub trait Mode: InteractiveComponent<Input = Self::Model, Event = KeyMouseEvent> {
     type Model;
@@ -50,7 +28,6 @@ pub trait Mode: InteractiveComponent<Input = Self::Model, Event = KeyMouseEvent>
     const NAME: &'static str;
     const KEYBINDINGS: &'static [(&'static str, &'static str)];
     const SUPPORTED_FILTERS: &'static [FilterToggle];
-    const BACKENDS: &'static [Backend];
 
     fn current_selection(&self) -> Option<Selection>;
 }
@@ -119,25 +96,6 @@ impl DisplayMode {
             Self::StepsView(_) => StepsMode::SUPPORTED_FILTERS,
             Self::DeductionTree(_) => SemanticTableau::SUPPORTED_FILTERS,
         }
-    }
-
-    /// Get backend data sources.
-    pub const fn backends(&self) -> &'static [Backend] {
-        match self {
-            Self::OpenGoalList(_) => OpenGoalListMode::BACKENDS,
-            Self::BeforeAfter(_) => BeforeAfterMode::BACKENDS,
-            Self::StepsView(_) => StepsMode::BACKENDS,
-            Self::DeductionTree(_) => SemanticTableau::BACKENDS,
-        }
-    }
-
-    /// Format backends as display string.
-    pub fn backends_display(&self) -> String {
-        self.backends()
-            .iter()
-            .map(|b| b.name())
-            .collect::<Vec<_>>()
-            .join(" | ")
     }
 
     /// Get current selection from active mode.
