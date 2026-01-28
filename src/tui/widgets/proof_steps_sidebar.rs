@@ -28,6 +28,17 @@ pub struct ProofStepsSidebarState {
     proof_dag: Option<ProofDag>,
     scroll_state: ScrollbarState,
     vertical_scroll: usize,
+    horizontal_scroll: usize,
+    /// Whether this pane is currently focused.
+    is_focused: bool,
+    /// Whether the user has taken manual control of scrolling.
+    manual_scroll: bool,
+    /// Previous current node ID, used to detect changes.
+    prev_current_node: Option<u32>,
+    /// Max content width (cached from last render).
+    max_content_width: usize,
+    /// Viewport width (cached from last render).
+    viewport_width: usize,
 }
 
 impl ProofStepsSidebarState {
@@ -70,25 +81,91 @@ impl ProofStepsSidebarState {
         lines
     }
 
-    fn calculate_scroll_position(&self) -> usize {
+    /// Calculate scroll position to center the current step in the viewport.
+    fn calculate_centered_scroll(&self, viewport_height: usize) -> usize {
         let Some(dag) = &self.proof_dag else {
             return 0;
         };
 
-        let mut line_count = 0;
+        let mut current_line: usize = 0;
         for node in dag.dfs_iter() {
             if dag.is_current(node.id) {
-                return line_count;
+                break;
             }
-            line_count += 1; // Main step line
+            current_line += 1; // Main step line
             if !node.tactic.depends_on.is_empty() {
-                line_count += 1; // Dependency line
+                current_line += 1; // Dependency line
             }
             if !node.tactic.theorems_used.is_empty() {
-                line_count += 1; // Theorem line
+                current_line += 1; // Theorem line
             }
         }
-        0
+
+        // Center the current line in the viewport
+        let half_viewport = viewport_height / 2;
+        let total = self.total_lines();
+        let max_scroll = total.saturating_sub(viewport_height);
+
+        current_line.saturating_sub(half_viewport).min(max_scroll)
+    }
+
+    /// Total number of lines in the proof steps view.
+    fn total_lines(&self) -> usize {
+        let Some(dag) = &self.proof_dag else {
+            return 0;
+        };
+
+        let mut count = 0;
+        for node in dag.dfs_iter() {
+            count += 1;
+            if !node.tactic.depends_on.is_empty() {
+                count += 1;
+            }
+            if !node.tactic.theorems_used.is_empty() {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// Set focus state.
+    pub const fn set_focused(&mut self, focused: bool) {
+        self.is_focused = focused;
+    }
+
+    /// Scroll up by one line.
+    pub const fn scroll_up(&mut self) {
+        self.manual_scroll = true;
+        self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
+    }
+
+    /// Scroll down by one line.
+    pub fn scroll_down(&mut self, viewport_height: usize) {
+        self.manual_scroll = true;
+        let max_scroll = self.total_lines().saturating_sub(viewport_height);
+        if self.vertical_scroll < max_scroll {
+            self.vertical_scroll += 1;
+        }
+    }
+
+    /// Scroll left by one column.
+    pub const fn scroll_left(&mut self) {
+        self.manual_scroll = true;
+        self.horizontal_scroll = self.horizontal_scroll.saturating_sub(1);
+    }
+
+    /// Scroll right by one column (bounded by content width).
+    pub const fn scroll_right(&mut self) {
+        self.manual_scroll = true;
+        let max_horiz = self.max_content_width.saturating_sub(self.viewport_width);
+        if self.horizontal_scroll < max_horiz {
+            self.horizontal_scroll += 1;
+        }
+    }
+
+    /// Reset to auto-scroll mode (following current step).
+    pub const fn reset_scroll(&mut self) {
+        self.manual_scroll = false;
     }
 }
 
@@ -151,6 +228,14 @@ impl InteractiveStatefulWidget for ProofStepsSidebar {
     type Event = ();
 
     fn update_state(state: &mut Self::State, input: Self::Input) {
+        let new_current = input.as_ref().and_then(|dag| dag.current_node);
+
+        // Reset manual scroll when current node changes (re-center on new step)
+        if new_current != state.prev_current_node {
+            state.manual_scroll = false;
+            state.prev_current_node = new_current;
+        }
+
         state.proof_dag = input;
     }
 }
@@ -160,22 +245,45 @@ impl StatefulWidget for ProofStepsSidebar {
 
     #[allow(clippy::cast_possible_truncation)]
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let border_style = if state.is_focused {
+            Style::new().fg(Theme::BORDER_FOCUSED)
+        } else {
+            Theme::DIM
+        };
+        let title = if state.is_focused {
+            "▶ Proof Steps "
+        } else {
+            " Proof Steps "
+        };
+
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Theme::DIM)
-            .title(" Proof Steps ")
+            .border_style(border_style)
+            .title(title)
             .title_style(Style::new().fg(Color::Yellow));
 
         let inner = block.inner(area);
         block.render(area, buf);
 
         let lines = state.build_lines();
-
-        // Calculate scroll position based on current step
-        state.vertical_scroll = state.calculate_scroll_position();
-
         let total_lines = lines.len();
         let viewport_height = inner.height as usize;
+        let viewport_width = inner.width as usize;
+
+        // Cache dimensions for scroll bounds
+        state.viewport_width = viewport_width;
+        state.max_content_width = lines.iter().map(Line::width).max().unwrap_or(0);
+
+        // Auto-scroll to center current step unless user has taken manual control
+        if !state.manual_scroll {
+            state.vertical_scroll = state.calculate_centered_scroll(viewport_height);
+        }
+
+        // Clamp scroll values to valid range
+        let max_vert_scroll = total_lines.saturating_sub(viewport_height);
+        let max_horiz_scroll = state.max_content_width.saturating_sub(viewport_width);
+        state.vertical_scroll = state.vertical_scroll.min(max_vert_scroll);
+        state.horizontal_scroll = state.horizontal_scroll.min(max_horiz_scroll);
 
         // Update scrollbar state
         state.scroll_state = state
@@ -183,7 +291,9 @@ impl StatefulWidget for ProofStepsSidebar {
             .content_length(total_lines)
             .position(state.vertical_scroll);
 
-        Paragraph::new(lines).render(inner, buf);
+        Paragraph::new(lines)
+            .scroll((state.vertical_scroll as u16, state.horizontal_scroll as u16))
+            .render(inner, buf);
 
         // Render scrollbar if content overflows
         if total_lines > viewport_height && inner.width > 1 {

@@ -35,6 +35,8 @@ pub struct HypSectionState {
     click_regions: Vec<ClickRegion>,
     scroll_state: ScrollbarState,
     vertical_scroll: usize,
+    /// Whether this pane is currently focused.
+    is_focused: bool,
 }
 
 impl HypSectionState {
@@ -72,6 +74,11 @@ impl HypSectionState {
     pub fn click_regions(&self) -> &[ClickRegion] {
         &self.click_regions
     }
+
+    /// Set focus state.
+    pub const fn set_focused(&mut self, focused: bool) {
+        self.is_focused = focused;
+    }
 }
 
 /// Widget for rendering the hypothesis section.
@@ -84,10 +91,21 @@ impl StatefulWidget for HypSection {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         state.click_regions.clear();
 
+        let border_style = if state.is_focused {
+            Style::new().fg(Theme::BORDER_FOCUSED)
+        } else {
+            Theme::DIM
+        };
+        let title = if state.is_focused {
+            "▶ Hypotheses "
+        } else {
+            " Hypotheses "
+        };
+
         let block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .border_style(Theme::DIM)
-            .title(" Hypotheses ")
+            .border_style(border_style)
+            .title(title)
             .title_style(Style::new().fg(Theme::TITLE_HYPOTHESIS));
 
         let inner = block.inner(area);

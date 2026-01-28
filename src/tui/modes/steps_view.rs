@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     Frame,
@@ -19,6 +19,7 @@ use crate::{
         render_helpers::{render_error, render_no_goals},
         selection::SelectionState,
         tactic_row::divider,
+        theme::FocusedPane,
         FilterToggle, HypothesisFilters, InteractiveComponent, InteractiveStatefulWidget,
         KeyMouseEvent, Selection,
     },
@@ -47,6 +48,10 @@ pub struct StepsMode {
     sidebar_state: ProofStepsSidebarState,
     filters: HypothesisFilters,
     selection: SelectionState,
+    /// Which pane is currently focused for keyboard navigation.
+    focused_pane: FocusedPane,
+    /// Last known sidebar viewport height (for scroll bounds).
+    sidebar_viewport_height: usize,
 }
 
 impl StepsMode {
@@ -107,6 +112,113 @@ impl StepsMode {
             .as_ref()
             .and_then(|dag| dag.current_node.and_then(|id| dag.get(id)))
     }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        if self.handle_focus_switch(&key) {
+            return true;
+        }
+        if self.handle_filter_toggle(key.code) {
+            return true;
+        }
+        self.handle_navigation(key.code)
+    }
+
+    fn handle_focus_switch(&mut self, key: &KeyEvent) -> bool {
+        let switched = match key.code {
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.focused_pane = self.focused_pane.prev();
+                true
+            }
+            KeyCode::Tab => {
+                self.focused_pane = self.focused_pane.next();
+                true
+            }
+            KeyCode::BackTab => {
+                self.focused_pane = self.focused_pane.prev();
+                true
+            }
+            _ => false,
+        };
+        if switched && self.focused_pane != FocusedPane::Sidebar {
+            self.sidebar_state.reset_scroll();
+        }
+        switched
+    }
+
+    fn handle_filter_toggle(&mut self, code: KeyCode) -> bool {
+        // Note: 'l' is only a filter toggle when NOT focused on Sidebar
+        // (where it's used for horizontal scrolling)
+        match code {
+            KeyCode::Char('i') => {
+                self.filters.toggle(FilterToggle::Instances);
+                true
+            }
+            KeyCode::Char('a') => {
+                self.filters.toggle(FilterToggle::Inaccessible);
+                true
+            }
+            KeyCode::Char('l') if self.focused_pane != FocusedPane::Sidebar => {
+                self.filters.toggle(FilterToggle::LetValues);
+                true
+            }
+            KeyCode::Char('r') => {
+                self.filters.toggle(FilterToggle::ReverseOrder);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_navigation(&mut self, code: KeyCode) -> bool {
+        match self.focused_pane {
+            FocusedPane::Sidebar => self.handle_sidebar_navigation(code),
+            FocusedPane::Hypotheses | FocusedPane::Goals => self.handle_selection_navigation(code),
+        }
+    }
+
+    fn handle_sidebar_navigation(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.sidebar_state
+                    .scroll_down(self.sidebar_viewport_height);
+                true
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.sidebar_state.scroll_up();
+                true
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.sidebar_state.scroll_left();
+                true
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.sidebar_state.scroll_right();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_selection_navigation(&mut self, code: KeyCode) -> bool {
+        let items = self.selectable_items();
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.selection.select_next(items.len());
+                true
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.selection.select_previous(items.len());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent) -> bool {
+        let items = self.selectable_items();
+        mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && self.selection.handle_click(mouse.column, mouse.row, &items)
+    }
 }
 
 struct MainLayout {
@@ -133,39 +245,9 @@ impl InteractiveComponent for StepsMode {
     }
 
     fn handle_event(&mut self, event: Self::Event) -> bool {
-        let items = self.selectable_items();
         match event {
-            KeyMouseEvent::Key(key) => match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.selection.select_next(items.len());
-                    true
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.selection.select_previous(items.len());
-                    true
-                }
-                KeyCode::Char('i') => {
-                    self.filters.toggle(FilterToggle::Instances);
-                    true
-                }
-                KeyCode::Char('a') => {
-                    self.filters.toggle(FilterToggle::Inaccessible);
-                    true
-                }
-                KeyCode::Char('l') => {
-                    self.filters.toggle(FilterToggle::LetValues);
-                    true
-                }
-                KeyCode::Char('r') => {
-                    self.filters.toggle(FilterToggle::ReverseOrder);
-                    true
-                }
-                _ => false,
-            },
-            KeyMouseEvent::Mouse(mouse) => {
-                mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                    && self.selection.handle_click(mouse.column, mouse.row, &items)
-            }
+            KeyMouseEvent::Key(key) => self.handle_key(key),
+            KeyMouseEvent::Mouse(mouse) => self.handle_mouse(mouse),
         }
     }
 
@@ -185,6 +267,10 @@ impl InteractiveComponent for StepsMode {
         // Render sidebar if present
         if let Some(sidebar_area) = sidebar {
             ProofStepsSidebar::update_state(&mut self.sidebar_state, self.proof_dag.clone());
+            self.sidebar_state
+                .set_focused(self.focused_pane == FocusedPane::Sidebar);
+            // Store viewport height for scroll bounds
+            self.sidebar_viewport_height = sidebar_area.height.saturating_sub(2) as usize;
             frame.render_stateful_widget(ProofStepsSidebar, sidebar_area, &mut self.sidebar_state);
         }
 
@@ -220,6 +306,8 @@ impl InteractiveComponent for StepsMode {
             self.current_selection(),
             self.current_node_id,
         );
+        self.hyp_section_state
+            .set_focused(self.focused_pane == FocusedPane::Hypotheses);
         frame.render_stateful_widget(HypSection, layout.hyps, &mut self.hyp_section_state);
         for region in self.hyp_section_state.click_regions() {
             self.selection.add_region(region.area, region.selection);
@@ -236,6 +324,8 @@ impl InteractiveComponent for StepsMode {
             self.current_node_id,
             active_goal_name,
         );
+        self.goal_section_state
+            .set_focused(self.focused_pane == FocusedPane::Goals);
         frame.render_stateful_widget(GoalSection, layout.goals, &mut self.goal_section_state);
         for region in self.goal_section_state.click_regions() {
             self.selection.add_region(region.area, region.selection);
@@ -247,8 +337,13 @@ impl Mode for StepsMode {
     type Model = StepsModeInput;
 
     const NAME: &'static str = "Steps";
-    const KEYBINDINGS: &'static [(&'static str, &'static str)] =
-        &[("i", "inst"), ("a", "access"), ("l", "let"), ("r", "rev")];
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
+        ("Tab", "pane"),
+        ("i", "inst"),
+        ("a", "access"),
+        ("l", "let"),
+        ("r", "rev"),
+    ];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
         FilterToggle::Instances,
         FilterToggle::Inaccessible,
