@@ -122,7 +122,7 @@ impl InteractiveComponent for BeforeAfterMode {
         self.current_node_id = current_node_id;
         self.active_goal_name = current_node
             .and_then(|node| node.state_before.goals.first())
-            .map(|g| g.username.clone());
+            .and_then(|g| g.username.as_str().map(String::from));
         if goals_changed {
             self.selection.reset(self.selectable_items().len());
         }

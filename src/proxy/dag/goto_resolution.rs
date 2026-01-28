@@ -126,9 +126,11 @@ fn apply_locations(
         }
     }
     for g in &mut state.goals {
-        if let Some(l) = goal_locs.get(&g.username) {
-            tracing::trace!("Resolved goto for goal '{}': {:?}", g.username, l);
-            g.goto_locations = l.clone();
+        if let Some(name) = g.username.as_str() {
+            if let Some(l) = goal_locs.get(name) {
+                tracing::trace!("Resolved goto for goal '{}': {:?}", name, l);
+                g.goto_locations = l.clone();
+            }
         }
     }
 }

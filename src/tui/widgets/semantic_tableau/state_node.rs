@@ -204,9 +204,9 @@ impl<'a> StateNode<'a> {
             };
             let goal_type = truncate_str(&g.type_, 35);
 
-            if !g.username.is_empty() && g.username != "[anonymous]" {
+            if let Some(name) = g.username.as_str() {
                 spans.push(Span::styled(
-                    format!("{}: ", g.username),
+                    format!("{name}: "),
                     Style::new().fg(Color::Cyan).add_modifier(underline),
                 ));
             }

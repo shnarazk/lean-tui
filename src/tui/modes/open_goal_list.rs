@@ -98,7 +98,7 @@ impl InteractiveComponent for OpenGoalListMode {
         self.current_node_id = current_node_id;
         self.active_goal_name = current_node
             .and_then(|node| node.state_before.goals.first())
-            .map(|g| g.username.clone());
+            .and_then(|g| g.username.as_str().map(String::from));
         self.state = new_state;
         self.goals = input.goals;
         self.definition = input.definition;

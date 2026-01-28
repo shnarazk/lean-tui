@@ -39,7 +39,7 @@ impl ProofDag {
                 .iter()
                 .map(|g| super::state::GoalInfo {
                     type_: g.target.to_plain_text(),
-                    username: g.user_name.clone().unwrap_or_default(),
+                    username: super::state::UserName::from_optional(g.user_name.as_deref()),
                     id: String::new(),
                     goto_locations: g.goto_locations.clone(),
                 })

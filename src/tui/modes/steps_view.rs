@@ -288,14 +288,14 @@ impl InteractiveComponent for StepsMode {
                 node.state_after
                     .goals
                     .iter()
-                    .map(|g| g.username.clone())
+                    .filter_map(|g| g.username.as_str().map(String::from))
                     .collect()
             })
             .unwrap_or_default();
 
         let active_goal_name = current_node
             .and_then(|node| node.state_before.goals.first())
-            .map(|g| g.username.clone());
+            .and_then(|g| g.username.as_str().map(String::from));
 
         // Render hypothesis section
         self.hyp_section_state.update(
