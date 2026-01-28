@@ -61,7 +61,6 @@ impl<'a> GoalsColumn<'a> {
             active_goal_name,
         }
     }
-
 }
 
 fn goal_border_color(goal: &Goal, active_goal_name: Option<&str>) -> Option<Color> {
@@ -94,7 +93,11 @@ impl StatefulWidget for GoalsColumn<'_> {
             .goals
             .iter()
             .map(|goal| {
-                let visible_hyps = goal.hyps.iter().filter(|h| self.filters.should_show(h)).count();
+                let visible_hyps = goal
+                    .hyps
+                    .iter()
+                    .filter(|h| self.filters.should_show(h))
+                    .count();
                 Constraint::Length(LayoutMetrics::goal_box_height(visible_hyps))
             })
             .collect();
@@ -116,14 +119,7 @@ impl StatefulWidget for GoalsColumn<'_> {
 
         for (idx, (goal, goal_area)) in self.goals.iter().zip(areas.iter()).enumerate() {
             let border_color = goal_border_color(goal, self.active_goal_name);
-            let goal_box = GoalBox::new(
-                goal,
-                idx,
-                selection,
-                self.filters,
-                node_id,
-                border_color,
-            );
+            let goal_box = GoalBox::new(goal, idx, selection, self.filters, node_id, border_color);
 
             goal_box.render(*goal_area, buf, &mut state.goal_box_states[idx]);
 

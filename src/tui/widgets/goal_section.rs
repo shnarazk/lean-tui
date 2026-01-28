@@ -4,22 +4,22 @@ use std::collections::HashSet;
 
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{
-        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
-        Widget,
+        Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        StatefulWidget, Table, Widget,
     },
 };
 
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{
-        diff_text::{diff_style, DiffState, TaggedTextExt},
+        diff_text::{item_style, TaggedTextExt},
         layout_metrics::LayoutMetrics,
         theme::Theme,
-        ClickRegion, Selection,
+        tree_colors, ClickRegion, Selection,
     },
 };
 
@@ -31,6 +31,8 @@ pub struct GoalSectionState {
     spawned_goal_ids: HashSet<String>,
     /// Node ID for creating click region selections.
     node_id: Option<u32>,
+    /// Name of the goal the cursor's tactic is working on.
+    active_goal_name: Option<String>,
     click_regions: Vec<ClickRegion>,
     scroll_state: ScrollbarState,
     vertical_scroll: usize,
@@ -44,11 +46,13 @@ impl GoalSectionState {
         selection: Option<Selection>,
         spawned_goal_ids: HashSet<String>,
         node_id: Option<u32>,
+        active_goal_name: Option<String>,
     ) {
         self.goals = goals;
         self.selection = selection;
         self.spawned_goal_ids = spawned_goal_ids;
         self.node_id = node_id;
+        self.active_goal_name = active_goal_name;
     }
 
     /// Get the click regions computed during the last render.
@@ -68,10 +72,10 @@ impl StatefulWidget for GoalSection {
         state.click_regions.clear();
 
         let block = Block::default()
-            .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
+            .borders(Borders::ALL)
             .border_style(Theme::DIM)
             .title(" Goals ")
-            .title_style(Style::new().fg(Theme::TITLE_GOAL));
+            .title_style(Style::new().fg(Color::Red));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -102,7 +106,7 @@ impl StatefulWidget for GoalSection {
             track_goal_click_regions(&mut state.click_regions, inner, node_id, state.goals.len());
         }
 
-        let lines: Vec<Line<'static>> = state
+        let rows: Vec<Row<'static>> = state
             .goals
             .iter()
             .enumerate()
@@ -115,12 +119,26 @@ impl StatefulWidget for GoalSection {
                     .user_name
                     .as_ref()
                     .is_some_and(|name| state.spawned_goal_ids.contains(name));
-
-                render_goal_line(goal, is_selected, is_spawned, goal_idx, state.goals.len())
+                let is_active = goal
+                    .user_name
+                    .as_ref()
+                    .is_some_and(|name| state.active_goal_name.as_ref() == Some(name));
+                goal_row(goal, is_selected, is_spawned, is_active)
             })
             .collect();
 
-        Paragraph::new(lines).render(inner, buf);
+        Widget::render(
+            Table::new(
+                rows,
+                [
+                    Constraint::Length(12), // case label
+                    Constraint::Fill(1),    // goal type
+                ],
+            )
+            .column_spacing(1),
+            inner,
+            buf,
+        );
 
         // Render scrollbar if content overflows
         if total_goals > viewport_height && inner.width > 1 {
@@ -157,51 +175,25 @@ fn track_goal_click_regions(
     }
 }
 
-fn render_goal_line(
-    goal: &Goal,
-    is_selected: bool,
-    is_spawned: bool,
-    idx: usize,
-    total: usize,
-) -> Line<'static> {
-    let state = DiffState {
-        is_inserted: goal.is_inserted,
-        is_removed: goal.is_removed,
-        has_diff: goal.target.has_any_diff(),
-    };
-    let diff = diff_style(&state, is_selected, Color::Cyan);
-
-    let marker = match (
-        is_spawned,
-        goal.is_inserted,
-        goal.is_removed,
-        goal.target.has_any_diff(),
-    ) {
-        (true, _, _, _) => Span::styled("[⇢]", Style::new().fg(Theme::TITLE_GOAL)),
-        (_, true, _, _) => Span::styled("[+]", Theme::INSERTED),
-        (_, _, true, _) => Span::styled("[-]", Theme::REMOVED),
-        (_, _, _, true) => Span::styled("[~]", Theme::MODIFIED),
-        _ => Span::styled("   ", Theme::DIM),
-    };
-
-    let selection = if is_selected { "▶ " } else { "  " };
-    let goal_num = if total > 1 {
-        format!("[{}/{}] ", idx + 1, total)
+fn goal_row(goal: &Goal, is_selected: bool, _is_spawned: bool, is_active: bool) -> Row<'static> {
+    let base_color = if is_active {
+        tree_colors::CURRENT_BORDER
     } else {
-        String::new()
+        tree_colors::INCOMPLETE_BORDER
     };
+    let style = item_style(is_selected, base_color);
+
+    // Column 1: case label (e.g. "Expected:" or "h.mpr:")
     let case_label = goal
         .user_name
         .as_ref()
         .map_or(String::new(), |n| format!("{n}: "));
+    let col1 = Cell::from(Line::from(vec![Span::styled(case_label, style)]));
 
-    let mut spans = vec![
-        marker,
-        Span::styled(selection.to_string(), diff.style),
-        Span::styled(goal_num, Theme::GOAL_NUMBER),
-        Span::styled(case_label, Theme::CASE_LABEL),
-        Span::styled(goal.prefix.clone(), diff.style),
-    ];
-    spans.extend(goal.target.to_spans(diff.style));
-    Line::from(spans)
+    // Column 2: goal type (prefix + target text), underlined when selected
+    let mut spans = vec![Span::styled(goal.prefix.clone(), style)];
+    spans.extend(goal.target.to_spans(style));
+    let col2 = Cell::from(Text::from(Line::from(spans)));
+
+    Row::new(vec![col1, col2])
 }

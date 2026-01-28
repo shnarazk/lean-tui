@@ -202,7 +202,15 @@ impl InteractiveComponent for BeforeAfterMode {
         if let Some(ref goals) = self.previous_goals {
             if self.show_previous {
                 frame.render_stateful_widget(
-                    GoalsColumn::new("Previous", goals, self.filters, None, false, None, self.active_goal_name.as_deref()),
+                    GoalsColumn::new(
+                        "Previous",
+                        goals,
+                        self.filters,
+                        None,
+                        false,
+                        None,
+                        self.active_goal_name.as_deref(),
+                    ),
                     columns[col_idx],
                     &mut self.previous_column_state,
                 );
@@ -234,7 +242,15 @@ impl InteractiveComponent for BeforeAfterMode {
         if let Some(ref goals) = self.next_goals {
             if self.show_next {
                 frame.render_stateful_widget(
-                    GoalsColumn::new("Next", goals, self.filters, None, false, None, self.active_goal_name.as_deref()),
+                    GoalsColumn::new(
+                        "Next",
+                        goals,
+                        self.filters,
+                        None,
+                        false,
+                        None,
+                        self.active_goal_name.as_deref(),
+                    ),
                     columns[col_idx],
                     &mut self.next_column_state,
                 );

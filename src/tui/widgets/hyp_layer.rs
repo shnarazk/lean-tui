@@ -95,6 +95,8 @@ impl HypLayer {
     }
 }
 
+const DIM_GRAY: Style = Style::new().fg(Color::DarkGray);
+
 fn render_hyp_line(hyp: &Hypothesis, is_selected: bool, is_dependency: bool) -> Line<'static> {
     let state = DiffState {
         is_inserted: hyp.is_inserted,
@@ -103,38 +105,36 @@ fn render_hyp_line(hyp: &Hypothesis, is_selected: bool, is_dependency: bool) -> 
     };
     let diff = diff_style(&state, is_selected, Color::White);
 
+    // Simple dimmed markers like before_after mode
     let marker = match (
         is_dependency,
         hyp.is_inserted,
         hyp.is_removed,
         hyp.type_.has_any_diff(),
     ) {
-        (true, _, _, _) => Span::styled(
-            "[*]",
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ),
-        (_, true, _, _) => Span::styled("[+]", Style::new().fg(Color::Green)),
-        (_, _, true, _) => Span::styled("[-]", Style::new().fg(Color::Red)),
-        (_, _, _, true) => Span::styled("[~]", Style::new().fg(Color::Yellow)),
-        _ => Span::styled("   ", Style::new().fg(Color::DarkGray)),
+        (true, _, _, _) => Span::styled("*", DIM_GRAY),
+        (_, true, _, _) => Span::styled("+", DIM_GRAY),
+        (_, _, true, _) => Span::styled("-", DIM_GRAY),
+        (_, _, _, true) => Span::styled("~", DIM_GRAY),
+        _ => Span::styled(" ", DIM_GRAY),
     };
 
-    let selection = if is_selected { "▶ " } else { "  " };
     let names = hyp.names.join(", ");
 
-    // Apply bold styling to dependency hypotheses
+    // Only underline when selected (not for dependencies)
+    // Dependencies get bold name only
     let name_style = if is_dependency {
-        diff.style
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        diff.style.add_modifier(Modifier::BOLD)
     } else {
         diff.style
     };
 
     let mut spans = vec![
         marker,
-        Span::styled(selection.to_string(), diff.style),
+        Span::raw(" "),
         Span::styled(format!("{names} : "), name_style),
     ];
+    // Type spans use diff.style which applies underline only when selected
     spans.extend(hyp.type_.to_spans(diff.style));
     Line::from(spans)
 }

@@ -1,10 +1,10 @@
 //! Steps mode - sidebar with proof steps plus hypotheses and goals sections.
 
-use std::{collections::HashSet, iter};
+use std::collections::HashSet;
 
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     Frame,
 };
 
@@ -22,7 +22,7 @@ use crate::{
         FilterToggle, HypothesisFilters, InteractiveComponent, InteractiveStatefulWidget,
         KeyMouseEvent, Selection,
     },
-    tui_ipc::{DefinitionInfo, ProofDag, ProofDagNode, ProofState},
+    tui_ipc::{DefinitionInfo, ProofDag, ProofDagNode},
 };
 
 /// Input for updating the Steps mode.
@@ -47,7 +47,6 @@ pub struct StepsMode {
     sidebar_state: ProofStepsSidebarState,
     filters: HypothesisFilters,
     selection: SelectionState,
-    show_goal_before: bool,
 }
 
 impl StepsMode {
@@ -56,16 +55,20 @@ impl StepsMode {
             return Vec::new();
         };
 
-        self.goals
+        // All hypotheses first (matching the Hypotheses pane order),
+        // then all goals (matching the Goals pane order).
+        let hyps = self.goals.iter().flat_map(|goal| {
+            hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
+                .filter(|&i| self.filters.should_show(&goal.hyps[i]))
+                .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx })
+        });
+        let goals = self
+            .goals
             .iter()
             .enumerate()
-            .flat_map(|(goal_idx, goal)| {
-                let hyps = hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
-                    .filter(|&i| self.filters.should_show(&goal.hyps[i]))
-                    .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
-                hyps.chain(iter::once(Selection::Goal { node_id, goal_idx }))
-            })
-            .collect()
+            .map(move |(goal_idx, _)| Selection::Goal { node_id, goal_idx });
+
+        hyps.chain(goals).collect()
     }
 
     pub const fn filters(&self) -> HypothesisFilters {
@@ -79,10 +82,9 @@ impl StepsMode {
     fn layout_with_sidebar(&self, area: Rect) -> (Rect, Option<Rect>) {
         if self.has_steps() {
             let [sidebar, main] = Layout::horizontal([
-                Constraint::Min(20), // Sidebar needs at least 20 chars
-                Constraint::Fill(1), // Main content takes remaining space
+                Constraint::Ratio(3, 8), // Sidebar takes 3/8 of width
+                Constraint::Ratio(5, 8), // Main content takes 5/8
             ])
-            .flex(Flex::Start)
             .areas(area);
             (main, Some(sidebar))
         } else {
@@ -90,35 +92,14 @@ impl StepsMode {
         }
     }
 
-    fn layout_main(area: Rect, has_goal_before: bool) -> MainLayout {
-        if has_goal_before {
-            let [hyps, div, goal_before, goals] = Layout::vertical([
-                Constraint::Fill(1),   // Hypotheses expand
-                Constraint::Length(1), // Divider is always 1 line
-                Constraint::Min(2),    // Goal before needs at least 2 lines
-                Constraint::Fill(1),   // Goals expand equally
-            ])
-            .areas(area);
-            MainLayout {
-                hyps,
-                div,
-                goal_before: Some(goal_before),
-                goals,
-            }
-        } else {
-            let [hyps, div, goals] = Layout::vertical([
-                Constraint::Fill(1),   // Hypotheses expand
-                Constraint::Length(1), // Divider is always 1 line
-                Constraint::Fill(1),   // Goals expand equally
-            ])
-            .areas(area);
-            MainLayout {
-                hyps,
-                div,
-                goal_before: None,
-                goals,
-            }
-        }
+    fn layout_main(area: Rect) -> MainLayout {
+        let [hyps, div, goals] = Layout::vertical([
+            Constraint::Fill(1),   // Hypotheses expand
+            Constraint::Length(1), // Divider is always 1 line
+            Constraint::Fill(1),   // Goals expand equally
+        ])
+        .areas(area);
+        MainLayout { hyps, div, goals }
     }
 
     fn current_node(&self) -> Option<&ProofDagNode> {
@@ -131,7 +112,6 @@ impl StepsMode {
 struct MainLayout {
     hyps: Rect,
     div: Rect,
-    goal_before: Option<Rect>,
     goals: Rect,
 }
 
@@ -180,10 +160,6 @@ impl InteractiveComponent for StepsMode {
                     self.filters.toggle(FilterToggle::ReverseOrder);
                     true
                 }
-                KeyCode::Char('b') => {
-                    self.show_goal_before = !self.show_goal_before;
-                    true
-                }
                 _ => false,
             },
             KeyMouseEvent::Mouse(mouse) => {
@@ -212,14 +188,8 @@ impl InteractiveComponent for StepsMode {
             frame.render_stateful_widget(ProofStepsSidebar, sidebar_area, &mut self.sidebar_state);
         }
 
-        // Get goal_before from current node if showing (clone to avoid borrow issues)
-        let goal_before = self
-            .show_goal_before
-            .then(|| self.current_node().map(|n| n.state_before.clone()))
-            .flatten();
-
         // Layout main area
-        let layout = Self::layout_main(main, goal_before.is_some());
+        let layout = Self::layout_main(main);
 
         // Collect context data from current node
         let current_node = self.current_node();
@@ -238,6 +208,10 @@ impl InteractiveComponent for StepsMode {
             })
             .unwrap_or_default();
 
+        let active_goal_name = current_node
+            .and_then(|node| node.state_before.goals.first())
+            .map(|g| g.username.clone());
+
         // Render hypothesis section
         self.hyp_section_state.update(
             &self.goals,
@@ -254,17 +228,13 @@ impl InteractiveComponent for StepsMode {
         // Render divider
         frame.render_widget(divider(), layout.div);
 
-        // Render goal_before if toggled
-        if let (Some(area), Some(ref state_before)) = (layout.goal_before, goal_before) {
-            render_goal_before_from_state(frame, area, state_before);
-        }
-
         // Render goal section
         self.goal_section_state.update(
             self.goals.clone(),
             self.current_selection(),
             spawned_goal_ids,
             self.current_node_id,
+            active_goal_name,
         );
         frame.render_stateful_widget(GoalSection, layout.goals, &mut self.goal_section_state);
         for region in self.goal_section_state.click_regions() {
@@ -273,43 +243,11 @@ impl InteractiveComponent for StepsMode {
     }
 }
 
-fn render_goal_before_from_state(frame: &mut Frame, area: Rect, state: &ProofState) {
-    use ratatui::{
-        style::{Color, Style},
-        text::{Line, Span},
-        widgets::Paragraph,
-    };
-
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Header
-    lines.push(Line::from(Span::styled(
-        "Goal Before:",
-        Style::new().fg(Color::Yellow),
-    )));
-
-    // Goals
-    for goal in &state.goals {
-        let goal_text = if goal.username.is_empty() {
-            goal.type_.clone()
-        } else {
-            format!("{}: {}", goal.username, goal.type_)
-        };
-        lines.push(Line::from(Span::styled(
-            format!("  ⊢ {goal_text}"),
-            Style::new().fg(Color::Cyan),
-        )));
-    }
-
-    frame.render_widget(Paragraph::new(lines), area);
-}
-
 impl Mode for StepsMode {
     type Model = StepsModeInput;
 
     const NAME: &'static str = "Steps";
     const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
-        ("b", "before"),
         ("i", "inst"),
         ("a", "access"),
         ("l", "let"),
