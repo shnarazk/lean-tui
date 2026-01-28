@@ -247,19 +247,15 @@ impl Mode for StepsMode {
     type Model = StepsModeInput;
 
     const NAME: &'static str = "Steps";
-    const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
-        ("i", "inst"),
-        ("a", "access"),
-        ("l", "let"),
-        ("r", "rev"),
-    ];
+    const KEYBINDINGS: &'static [(&'static str, &'static str)] =
+        &[("i", "inst"), ("a", "access"), ("l", "let"), ("r", "rev")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[
         FilterToggle::Instances,
         FilterToggle::Inaccessible,
         FilterToggle::LetValues,
         FilterToggle::ReverseOrder,
     ];
-    const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
+    const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::LeanRpc];
 
     fn current_selection(&self) -> Option<Selection> {
         self.selection
