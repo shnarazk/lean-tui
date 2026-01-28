@@ -74,16 +74,9 @@ fn node_from_step(idx: usize, step: &PaperproofStep) -> ProofDagNode {
         state_before,
         state_after,
         new_hypotheses,
-        changed_hypotheses: vec![],
-        removed_hypotheses: vec![],
         children: vec![],
         parent: None,
-        sibling_index: 0,
-        sibling_count: 1,
         depth: 0,
-        is_complete: step.goals_after.is_empty(),
-        is_leaf: true,
-        is_current: false,
     }
 }
 

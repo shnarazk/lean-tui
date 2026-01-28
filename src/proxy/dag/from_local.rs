@@ -23,11 +23,10 @@ impl ProofDag {
             return Self::default();
         }
 
-        let last_idx = tactics.len() - 1;
         let mut nodes: Vec<ProofDagNode> = tactics
             .iter()
             .enumerate()
-            .map(|(idx, tactic)| node_from_tactic(idx, tactic, idx == last_idx))
+            .map(|(idx, tactic)| node_from_tactic(idx, tactic))
             .collect();
 
         build_local_tree_structure(&mut nodes);
@@ -47,7 +46,7 @@ impl ProofDag {
 }
 
 /// Build a single node from a local tactic (minimal info).
-fn node_from_tactic(idx: usize, tactic: &TacticInfo, is_last: bool) -> ProofDagNode {
+fn node_from_tactic(idx: usize, tactic: &TacticInfo) -> ProofDagNode {
     ProofDagNode {
         id: idx as NodeId,
         tactic: DagTacticInfo {
@@ -59,16 +58,9 @@ fn node_from_tactic(idx: usize, tactic: &TacticInfo, is_last: bool) -> ProofDagN
         state_before: ProofState::default(),
         state_after: ProofState::default(),
         new_hypotheses: vec![],
-        changed_hypotheses: vec![],
-        removed_hypotheses: vec![],
         children: vec![],
         parent: (idx > 0).then(|| (idx - 1) as NodeId),
-        sibling_index: 0,
-        sibling_count: 1,
         depth: tactic.depth,
-        is_complete: false,
-        is_leaf: is_last,
-        is_current: false,
     }
 }
 

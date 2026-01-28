@@ -37,7 +37,6 @@ pub struct ProofDag {
 
     /// Metadata about the proof.
     pub definition_name: Option<String>,
-    pub definition_type: Option<String>,
 
     /// Source of the DAG data.
     pub source: ProofDagSource,
@@ -62,40 +61,6 @@ impl ProofDag {
     /// Get a node by ID.
     pub fn get(&self, id: NodeId) -> Option<&ProofDagNode> {
         self.nodes.get(id as usize)
-    }
-
-    /// Get the parent of a node.
-    #[allow(dead_code)]
-    pub fn parent(&self, id: NodeId) -> Option<NodeId> {
-        self.get(id).and_then(|n| n.parent)
-    }
-
-    /// Get the first child of a node.
-    #[allow(dead_code)]
-    pub fn first_child(&self, id: NodeId) -> Option<NodeId> {
-        self.get(id).and_then(|n| n.children.first().copied())
-    }
-
-    /// Get the previous sibling (for 'h' key navigation).
-    #[allow(dead_code)]
-    pub fn prev_sibling(&self, id: NodeId) -> Option<NodeId> {
-        let node = self.get(id)?;
-        if node.sibling_index == 0 {
-            return None;
-        }
-        let parent = self.get(node.parent?)?;
-        parent.children.get(node.sibling_index - 1).copied()
-    }
-
-    /// Get the next sibling (for 'l' key navigation).
-    #[allow(dead_code)]
-    pub fn next_sibling(&self, id: NodeId) -> Option<NodeId> {
-        let node = self.get(id)?;
-        if node.sibling_index + 1 >= node.sibling_count {
-            return None;
-        }
-        let parent = self.get(node.parent?)?;
-        parent.children.get(node.sibling_index + 1).copied()
     }
 
     /// Iterate nodes in depth-first order (for `StepsView`).
@@ -134,12 +99,11 @@ impl ProofDag {
             })
             .min_by_key(|(_, dist)| *dist)
             .map(|(id, _)| id);
+    }
 
-        if let Some(current_id) = self.current_node {
-            if let Some(node) = self.nodes.get_mut(current_id as usize) {
-                node.is_current = true;
-            }
-        }
+    /// Check if a node is the current node (closest to cursor).
+    pub fn is_current(&self, node_id: NodeId) -> bool {
+        self.current_node == Some(node_id)
     }
 }
 

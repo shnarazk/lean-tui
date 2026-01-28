@@ -33,7 +33,8 @@ impl ProofStepsSidebarState {
         dag.dfs_iter()
             .enumerate()
             .flat_map(|(i, node)| {
-                let mut lines = vec![step_line(node, i)];
+                let is_current = dag.is_current(node.id);
+                let mut lines = vec![step_line(node, i, is_current)];
 
                 if let Some(deps) = dependency_line(node) {
                     lines.push(deps);
@@ -54,7 +55,7 @@ impl ProofStepsSidebarState {
 
         let mut line_count = 0;
         for node in dag.dfs_iter() {
-            if node.is_current {
+            if dag.is_current(node.id) {
                 return line_count;
             }
             line_count += 1; // Main step line
@@ -128,14 +129,14 @@ impl StatefulWidget for ProofStepsSidebar {
     }
 }
 
-fn step_line(node: &ProofDagNode, index: usize) -> Line<'static> {
-    let style = if node.is_current {
+fn step_line(node: &ProofDagNode, index: usize, is_current: bool) -> Line<'static> {
+    let style = if is_current {
         Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(Color::White)
     };
 
-    let marker = if node.is_current { "▶ " } else { "  " };
+    let marker = if is_current { "▶ " } else { "  " };
     let indent = "  ".repeat(node.depth);
 
     Line::from(vec![

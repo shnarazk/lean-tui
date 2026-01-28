@@ -22,12 +22,12 @@ pub fn node_height(node: &ProofDagNode) -> u16 {
 }
 
 /// Get border color for a DAG node.
-pub const fn node_border_color(node: &ProofDagNode) -> Color {
-    if node.is_current {
+pub const fn node_border_color(node: &ProofDagNode, is_current: bool) -> Color {
+    if is_current {
         tree_colors::CURRENT_BORDER
-    } else if node.is_leaf && !node.is_complete {
+    } else if node.is_leaf() && !node.is_complete() {
         tree_colors::INCOMPLETE_BORDER
-    } else if node.is_leaf && node.is_complete {
+    } else if node.is_leaf() && node.is_complete() {
         tree_colors::COMPLETED_BORDER
     } else {
         tree_colors::TACTIC_BORDER
@@ -88,7 +88,7 @@ fn render_new_hyps_line(
 
 /// Render goals line for a DAG node.
 fn render_goals_line(node: &ProofDagNode, selection: Option<Selection>) -> Line<'static> {
-    if node.is_complete {
+    if node.is_complete() {
         return Line::from(vec![Span::styled(
             "✓ Goal completed",
             Style::new()
@@ -99,7 +99,7 @@ fn render_goals_line(node: &ProofDagNode, selection: Option<Selection>) -> Line<
 
     let mut spans: Vec<Span> = Vec::new();
 
-    if node.is_leaf {
+    if node.is_leaf() {
         spans.push(Span::styled(
             "⋯ ",
             Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
@@ -140,7 +140,7 @@ fn render_goals_line(node: &ProofDagNode, selection: Option<Selection>) -> Line<
         ));
     }
 
-    if spans.is_empty() && !node.is_complete {
+    if spans.is_empty() && !node.is_complete() {
         spans.push(Span::styled("⊢ ...", Style::new().fg(tree_colors::GOAL_FG)));
     }
 
@@ -152,12 +152,13 @@ pub fn render_node_box(
     frame: &mut Frame,
     area: Rect,
     node: &ProofDagNode,
+    is_current: bool,
     selection: Option<Selection>,
     click_regions: &mut Vec<ClickRegion>,
     top_down: bool,
 ) {
-    let border_color = node_border_color(node);
-    let border_style = if node.is_current {
+    let border_color = node_border_color(node, is_current);
+    let border_style = if is_current {
         Style::new().fg(border_color).add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(border_color)
@@ -169,12 +170,12 @@ pub fn render_node_box(
         format!(" {} ", node.tactic.text)
     };
 
-    let title_fg = if node.is_current {
+    let title_fg = if is_current {
         Color::White
     } else {
         Color::Gray
     };
-    let title_mod = if node.is_current {
+    let title_mod = if is_current {
         Modifier::BOLD
     } else {
         Modifier::empty()
@@ -284,7 +285,7 @@ fn track_goal_click_regions(
     let mut tracker = ClickRegionTracker::new(inner.x, goals_y, inner.width);
 
     // Account for leading marker if leaf node
-    if node.is_leaf && !node.is_complete {
+    if node.is_leaf() && !node.is_complete() {
         tracker.skip(2); // "⋯ " is 2 chars wide
     }
 

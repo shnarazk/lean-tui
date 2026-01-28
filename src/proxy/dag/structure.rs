@@ -21,16 +21,10 @@ pub fn build_tree_structure(dag: &mut ProofDag, steps: &[PaperproofStep]) {
 
     // Build tree recursively starting from first step's goal
     let root_goal_id = &steps[0].goal_before.id;
-    build_branch_recursive(dag, steps, &goal_to_steps, root_goal_id, 0, None, 0, 1, 0);
-
-    // Update is_leaf flags
-    for node in &mut dag.nodes {
-        node.is_leaf = node.children.is_empty();
-    }
+    build_branch_recursive(dag, steps, &goal_to_steps, root_goal_id, 0, None, 0);
 }
 
 /// Recursively build a branch of the tree.
-#[allow(clippy::too_many_arguments)]
 fn build_branch_recursive(
     dag: &mut ProofDag,
     steps: &[PaperproofStep],
@@ -38,8 +32,6 @@ fn build_branch_recursive(
     goal_id: &str,
     start_from: usize,
     parent_id: Option<NodeId>,
-    sibling_index: usize,
-    sibling_count: usize,
     depth: usize,
 ) -> Option<NodeId> {
     let step_indices = goal_to_steps.get(goal_id)?;
@@ -51,8 +43,6 @@ fn build_branch_recursive(
     // Update node with tree structure info
     if let Some(node) = dag.nodes.get_mut(step_idx) {
         node.parent = parent_id;
-        node.sibling_index = sibling_index;
-        node.sibling_count = sibling_count;
         node.depth = depth;
     }
 
@@ -76,8 +66,7 @@ fn build_branch_recursive(
         vec![]
     };
 
-    let child_count = child_goal_ids.len();
-    for (i, child_goal_id) in child_goal_ids.into_iter().enumerate() {
+    for child_goal_id in child_goal_ids {
         build_branch_recursive(
             dag,
             steps,
@@ -85,8 +74,6 @@ fn build_branch_recursive(
             &child_goal_id,
             step_idx + 1,
             Some(node_id),
-            i,
-            child_count,
             depth + 1,
         );
     }
@@ -125,22 +112,5 @@ pub fn build_local_tree_structure(nodes: &mut [ProofDagNode]) {
             let child_id = i as NodeId;
             nodes[parent_id as usize].children.push(child_id);
         }
-    }
-
-    // Update sibling info
-    for i in 0..nodes.len() {
-        let children = nodes[i].children.clone();
-        let count = children.len();
-        for (idx, &child_id) in children.iter().enumerate() {
-            if let Some(child) = nodes.get_mut(child_id as usize) {
-                child.sibling_index = idx;
-                child.sibling_count = count;
-            }
-        }
-    }
-
-    // Update is_leaf flags
-    for node in nodes.iter_mut() {
-        node.is_leaf = node.children.is_empty();
     }
 }
