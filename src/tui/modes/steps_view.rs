@@ -36,7 +36,7 @@ pub struct StepsModeInput {
 
 /// Steps display mode - sidebar + hypotheses + goals.
 #[derive(Default)]
-pub struct StepsMode {
+pub struct TacticTree {
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
@@ -54,7 +54,7 @@ pub struct StepsMode {
     sidebar_viewport_height: usize,
 }
 
-impl StepsMode {
+impl TacticTree {
     fn selectable_items(&self) -> Vec<Selection> {
         let Some(node_id) = self.current_node_id else {
             return Vec::new();
@@ -226,7 +226,7 @@ struct MainLayout {
     goals: Rect,
 }
 
-impl InteractiveComponent for StepsMode {
+impl InteractiveComponent for TacticTree {
     type Input = StepsModeInput;
     type Event = KeyMouseEvent;
 
@@ -332,10 +332,9 @@ impl InteractiveComponent for StepsMode {
     }
 }
 
-impl Mode for StepsMode {
+impl Mode for TacticTree {
     type Model = StepsModeInput;
-
-    const NAME: &'static str = "Steps";
+    const NAME: &'static str = "Tactic tree";
     const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[
         ("Tab", "pane"),
         ("i", "inst"),

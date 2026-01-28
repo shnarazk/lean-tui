@@ -30,6 +30,54 @@ pub fn build_tree_structure(dag: &mut ProofDag, steps: &[PaperproofStep]) {
     connect_orphan_nodes(dag, steps);
 }
 
+/// Check if a goal has a solver step after the given step index.
+fn goal_has_solver(
+    goal_id: &str,
+    after_step: usize,
+    goal_to_steps: &HashMap<String, Vec<usize>>,
+) -> bool {
+    goal_to_steps
+        .get(goal_id)
+        .is_some_and(|indices| indices.iter().any(|&i| i > after_step))
+}
+
+/// Analyze goals and return child goal IDs and whether any goals are unsolved.
+fn analyze_step_goals(
+    step: &PaperproofStep,
+    step_idx: usize,
+    node_id: NodeId,
+    goal_to_steps: &HashMap<String, Vec<usize>>,
+) -> (Vec<String>, bool) {
+    let mut child_goal_ids: Vec<String> = Vec::new();
+    let mut has_unsolved = false;
+
+    // Check spawned_goals (inline proofs like `by` blocks in `have`, `obtain`)
+    for g in &step.spawned_goals {
+        let solved = goal_has_solver(&g.id, step_idx, goal_to_steps);
+        debug!(node_id, goal_id = %g.id, solved, "spawned_goal");
+        if !solved {
+            has_unsolved = true;
+        }
+        if !child_goal_ids.contains(&g.id) {
+            child_goal_ids.push(g.id.clone());
+        }
+    }
+
+    // Check goals_after (continuation goals after tactic completes)
+    for g in &step.goals_after {
+        let solved = goal_has_solver(&g.id, step_idx, goal_to_steps);
+        debug!(node_id, goal_id = %g.id, solved, "goal_after");
+        if !solved {
+            has_unsolved = true;
+        }
+        if !child_goal_ids.contains(&g.id) {
+            child_goal_ids.push(g.id.clone());
+        }
+    }
+
+    (child_goal_ids, has_unsolved)
+}
+
 /// Recursively build a branch of the tree.
 fn build_branch_recursive(
     dag: &mut ProofDag,
@@ -46,10 +94,15 @@ fn build_branch_recursive(
     let node_id = step_idx as NodeId;
     let step = &steps[step_idx];
 
-    // Update node with tree structure info
+    // Analyze goals first (before mutating dag)
+    let (child_goal_ids, has_unsolved) =
+        analyze_step_goals(step, step_idx, node_id, goal_to_steps);
+
+    // Update node with tree structure and unsolved status
     if let Some(node) = dag.nodes.get_mut(step_idx) {
         node.parent = parent_id;
         node.depth = depth;
+        node.has_unsolved_spawned_goals = has_unsolved;
     }
 
     // Add this node as child of parent
@@ -61,62 +114,7 @@ fn build_branch_recursive(
         }
     }
 
-    // Determine children from BOTH spawned_goals AND goals_after
-    // spawned_goals: goals created by tactics like `have`, `obtain` (inline proofs)
-    // goals_after: goals remaining after the tactic completes
-    let mut child_goal_ids: Vec<String> = Vec::new();
-
-    // Check for unsolved spawned goals (inline proofs with no matching step)
-    let mut has_unsolved_goals = false;
-    for g in &step.spawned_goals {
-        let solver_indices = goal_to_steps.get(&g.id);
-        let has_solver = solver_indices
-            .is_some_and(|indices| indices.iter().any(|&i| i > step_idx));
-        debug!(
-            node_id,
-            spawned_goal_id = %g.id,
-            ?solver_indices,
-            has_solver,
-            "Checking spawned goal"
-        );
-        if !has_solver {
-            has_unsolved_goals = true;
-            debug!(
-                node_id,
-                spawned_goal_id = %g.id,
-                "Spawned goal has no solver - marking as unsolved"
-            );
-        }
-        if !child_goal_ids.contains(&g.id) {
-            child_goal_ids.push(g.id.clone());
-        }
-    }
-
-    // Check for unsolved goals_after (no matching step to continue the proof)
-    for g in &step.goals_after {
-        let has_solver = goal_to_steps
-            .get(&g.id)
-            .is_some_and(|indices| indices.iter().any(|&i| i > step_idx));
-        if !has_solver {
-            has_unsolved_goals = true;
-            debug!(
-                node_id,
-                goals_after_id = %g.id,
-                "Goal after has no solver - marking as unsolved"
-            );
-        }
-        if !child_goal_ids.contains(&g.id) {
-            child_goal_ids.push(g.id.clone());
-        }
-    }
-
-    // Mark node if it has any unsolved goals (spawned or goals_after)
-    if has_unsolved_goals {
-        if let Some(node) = dag.nodes.get_mut(step_idx) {
-            node.has_unsolved_spawned_goals = true;
-        }
-    }
-
+    // Recursively process children
     for child_goal_id in child_goal_ids {
         build_branch_recursive(
             dag,

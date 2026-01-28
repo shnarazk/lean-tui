@@ -1,3 +1,4 @@
+import Paperproof
  /-- A prime is a number larger than 1 with no trivial divisors -/
 def IsPrime (n : Nat) := 1 < n ∧ ∀ k, 1 < k → k < n → ¬ k ∣ n
 
@@ -12,9 +13,15 @@ theorem exists_prime_factor :
   · grind [Nat.dvd_refl]
   -- ... or it has a non-trivial divisor with a prime factor
   · obtain ⟨k, _⟩ : ∃ k, 1 < k ∧ k < n ∧ k ∣ n := by
-      simp_all [IsPrime]
-    obtain ⟨p, _, _⟩ := exists_prime_factor k (by grind);
-    grind [Nat.dvd_trans]
+       -- simp_all [IsPrime]
+
+
+
+
+
+
+     obtain ⟨p, _, _⟩ := exists_prime_factor k (by grind);
+    -- grind [Nat.dvd_trans]
 
 /-- The factorial, defined recursively, with custom notation -/
 def factorial : Nat → Nat
@@ -50,4 +57,4 @@ theorem InfinitudeOfPrimes : ∀ n, ∃ p > n, IsPrime p := by
   have : 1 < p := hp.1
   have : p ∣ n ! := dvd_factorial n p ‹p ≤ n› (by grind)
   have := Nat.dvd_sub ‹p ∣ n ! + 1› ‹p ∣ n !›
-  grind [Nat.add_sub_cancel_left, Nat.dvd_one]
+  -- grind [Nat.add_sub_cancel_left, Nat.dvd_one]
