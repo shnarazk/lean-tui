@@ -9,7 +9,7 @@ use ratatui::{
 
 use super::{
     goal_box::{GoalBox, GoalBoxState},
-    tree_colors, ClickRegion, HypothesisFilters, Selection,
+    ClickRegion, HypothesisFilters, Selection,
 };
 use crate::{
     lean_rpc::Goal,
@@ -67,9 +67,9 @@ fn goal_border_color(goal: &Goal, active_goal_name: Option<&str>) -> Option<Colo
     let active = active_goal_name?;
     let is_active = goal.user_name.as_deref() == Some(active);
     Some(if is_active {
-        tree_colors::CURRENT_BORDER
+        Theme::CURRENT_NODE_BORDER
     } else {
-        tree_colors::INCOMPLETE_BORDER
+        Theme::INCOMPLETE_NODE_BORDER
     })
 }
 

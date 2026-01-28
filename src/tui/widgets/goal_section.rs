@@ -19,7 +19,7 @@ use crate::{
         diff_text::{item_style, TaggedTextExt},
         layout_metrics::LayoutMetrics,
         theme::Theme,
-        tree_colors, ClickRegion, Selection,
+        ClickRegion, Selection,
     },
 };
 
@@ -195,9 +195,9 @@ fn track_goal_click_regions(
 
 fn goal_row(goal: &Goal, is_selected: bool, _is_spawned: bool, is_active: bool) -> Row<'static> {
     let base_color = if is_active {
-        tree_colors::CURRENT_BORDER
+        Theme::CURRENT_NODE_BORDER
     } else {
-        tree_colors::INCOMPLETE_BORDER
+        Theme::INCOMPLETE_NODE_BORDER
     };
     let style = item_style(is_selected, base_color);
 

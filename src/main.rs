@@ -28,10 +28,15 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
 
-    // Init tracing to log file (both commands write to same file)
+    // Init tracing to log file (separate files for proxy and TUI)
+    let log_filename = match cli.command {
+        Commands::Proxy => "proxy.log",
+        Commands::View => "tui.log",
+    };
     let log_path = dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("lean-tui/proxy.log");
+        .join("lean-tui")
+        .join(log_filename);
 
     if let Some(parent) = log_path.parent() {
         let _ = fs::create_dir_all(parent);

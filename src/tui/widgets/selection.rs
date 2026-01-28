@@ -25,12 +25,14 @@ pub struct ClickRegion {
 
 /// Tracks sequential click regions along a horizontal line.
 /// Use this when rendering items left-to-right with variable widths.
+#[allow(dead_code)]
 pub struct ClickRegionTracker {
     x: u16,
     y: u16,
     max_x: u16,
 }
 
+#[allow(dead_code)]
 impl ClickRegionTracker {
     /// Create a tracker for a line starting at (x, y) with given max width.
     pub const fn new(x: u16, y: u16, width: u16) -> Self {

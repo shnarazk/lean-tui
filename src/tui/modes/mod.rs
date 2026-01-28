@@ -9,7 +9,7 @@ use std::mem::take;
 
 use before_after::BeforeAfterMode;
 pub use before_after::BeforeAfterModeInput;
-use deduction_tree::DeductionTreeMode;
+use deduction_tree::SemanticTableau;
 pub use deduction_tree::DeductionTreeModeInput;
 use open_goal_list::OpenGoalListMode;
 pub use open_goal_list::OpenGoalListModeInput;
@@ -61,12 +61,12 @@ pub enum DisplayMode {
     OpenGoalList(OpenGoalListMode),
     BeforeAfter(BeforeAfterMode),
     StepsView(StepsMode),
-    DeductionTree(DeductionTreeMode),
+    DeductionTree(SemanticTableau),
 }
 
 impl Default for DisplayMode {
     fn default() -> Self {
-        Self::DeductionTree(DeductionTreeMode::default())
+        Self::DeductionTree(SemanticTableau::default())
     }
 }
 
@@ -76,7 +76,7 @@ impl DisplayMode {
         *self = match take(self) {
             Self::OpenGoalList(_) => Self::BeforeAfter(BeforeAfterMode::default()),
             Self::BeforeAfter(_) => Self::StepsView(StepsMode::default()),
-            Self::StepsView(_) => Self::DeductionTree(DeductionTreeMode::default()),
+            Self::StepsView(_) => Self::DeductionTree(SemanticTableau::default()),
             Self::DeductionTree(_) => Self::OpenGoalList(OpenGoalListMode::default()),
         };
     }
@@ -84,7 +84,7 @@ impl DisplayMode {
     /// Cycle to the previous display mode, preserving state.
     pub fn prev(&mut self) {
         *self = match take(self) {
-            Self::OpenGoalList(_) => Self::DeductionTree(DeductionTreeMode::default()),
+            Self::OpenGoalList(_) => Self::DeductionTree(SemanticTableau::default()),
             Self::BeforeAfter(_) => Self::OpenGoalList(OpenGoalListMode::default()),
             Self::StepsView(_) => Self::BeforeAfter(BeforeAfterMode::default()),
             Self::DeductionTree(_) => Self::StepsView(StepsMode::default()),
@@ -97,7 +97,7 @@ impl DisplayMode {
             Self::OpenGoalList(_) => OpenGoalListMode::NAME,
             Self::BeforeAfter(_) => BeforeAfterMode::NAME,
             Self::StepsView(_) => StepsMode::NAME,
-            Self::DeductionTree(_) => DeductionTreeMode::NAME,
+            Self::DeductionTree(_) => SemanticTableau::NAME,
         }
     }
 
@@ -107,7 +107,7 @@ impl DisplayMode {
             Self::OpenGoalList(_) => OpenGoalListMode::KEYBINDINGS,
             Self::BeforeAfter(_) => BeforeAfterMode::KEYBINDINGS,
             Self::StepsView(_) => StepsMode::KEYBINDINGS,
-            Self::DeductionTree(_) => DeductionTreeMode::KEYBINDINGS,
+            Self::DeductionTree(_) => SemanticTableau::KEYBINDINGS,
         }
     }
 
@@ -117,7 +117,7 @@ impl DisplayMode {
             Self::OpenGoalList(_) => OpenGoalListMode::SUPPORTED_FILTERS,
             Self::BeforeAfter(_) => BeforeAfterMode::SUPPORTED_FILTERS,
             Self::StepsView(_) => StepsMode::SUPPORTED_FILTERS,
-            Self::DeductionTree(_) => DeductionTreeMode::SUPPORTED_FILTERS,
+            Self::DeductionTree(_) => SemanticTableau::SUPPORTED_FILTERS,
         }
     }
 
@@ -127,7 +127,7 @@ impl DisplayMode {
             Self::OpenGoalList(_) => OpenGoalListMode::BACKENDS,
             Self::BeforeAfter(_) => BeforeAfterMode::BACKENDS,
             Self::StepsView(_) => StepsMode::BACKENDS,
-            Self::DeductionTree(_) => DeductionTreeMode::BACKENDS,
+            Self::DeductionTree(_) => SemanticTableau::BACKENDS,
         }
     }
 

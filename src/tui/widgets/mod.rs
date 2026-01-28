@@ -13,19 +13,16 @@ pub mod open_goal_list;
 pub mod proof_steps_sidebar;
 pub mod render_helpers;
 pub mod selection;
+pub mod semantic_tableau;
 pub mod status_bar;
 pub mod tactic_row;
 pub mod theme;
-pub mod tree_colors;
-pub mod tree_given_bar;
-pub mod tree_node_box;
-pub mod tree_view;
 pub mod welcome;
 
 pub use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 pub use interactive_widget::{InteractiveComponent, InteractiveStatefulWidget};
-pub use selection::{ClickRegion, ClickRegionTracker, Selection};
+pub use selection::{ClickRegion, Selection};
 
 use crate::lean_rpc::Hypothesis;
 

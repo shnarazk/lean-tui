@@ -8,14 +8,18 @@ use ratatui::{
     Frame,
 };
 
+use tracing::debug;
+
 use super::{Backend, Mode};
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{
         render_helpers::{render_error, render_no_goals},
-        tree_view::render_tree_view_from_dag,
-        ClickRegion, FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent,
-        Selection,
+        semantic_tableau::{
+            navigation::{find_nearest_in_direction, Direction},
+            SemanticTableauLayout, SemanticTableauState,
+        },
+        FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
     },
     tui_ipc::{DefinitionInfo, ProofDag},
 };
@@ -29,7 +33,7 @@ pub struct DeductionTreeModeInput {
 }
 
 /// Deduction Tree display mode - Paperproof tree visualization.
-pub struct DeductionTreeMode {
+pub struct SemanticTableau {
     goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
@@ -38,13 +42,12 @@ pub struct DeductionTreeMode {
     /// Flat index into `tree_selectable_items()`.
     selected_idx: Option<usize>,
     /// When true, tree renders top-down (parent above children).
-    /// When false, renders bottom-up (children above parent).
     tree_top_down: bool,
-    /// Click regions from last render.
-    click_regions: Vec<ClickRegion>,
+    /// State for the semantic tableau widget.
+    tableau_state: SemanticTableauState,
 }
 
-impl Default for DeductionTreeMode {
+impl Default for SemanticTableau {
     fn default() -> Self {
         Self {
             goals: Vec::new(),
@@ -54,12 +57,12 @@ impl Default for DeductionTreeMode {
             filters: HypothesisFilters::default(),
             selected_idx: None,
             tree_top_down: true,
-            click_regions: Vec::new(),
+            tableau_state: SemanticTableauState::default(),
         }
     }
 }
 
-impl DeductionTreeMode {
+impl SemanticTableau {
     pub const fn filters(&self) -> HypothesisFilters {
         self.filters
     }
@@ -115,56 +118,10 @@ impl DeductionTreeMode {
         }
     }
 
-    fn find_click_at(&self, x: u16, y: u16) -> Option<Selection> {
-        self.click_regions
-            .iter()
-            .find(|r| {
-                x >= r.area.x
-                    && x < r.area.x + r.area.width
-                    && y >= r.area.y
-                    && y < r.area.y + r.area.height
-            })
-            .map(|r| r.selection)
-    }
-
-    /// Find the nearest selectable item in the given direction using grid-based navigation.
-    fn find_nearest_in_direction(&self, direction: Direction) -> Option<Selection> {
-        let current_sel = self.current_tree_selection()?;
-        let cur = self
-            .click_regions
-            .iter()
-            .find(|r| r.selection == current_sel)?
-            .area;
-
-        let is_horizontal = matches!(direction, Direction::Left | Direction::Right);
-
-        // Grid-aligned search: find items that overlap on the perpendicular axis
-        let aligned = self.click_regions.iter().filter(|r| {
-            let dominated = if is_horizontal {
-                ranges_overlap(cur.y, cur.height, r.area.y, r.area.height)
-            } else {
-                ranges_overlap(cur.x, cur.width, r.area.x, r.area.width)
-            };
-            dominated && direction.is_ahead(cur, r.area)
-        });
-
-        // Fallback: any item in the direction
-        let fallback = self
-            .click_regions
-            .iter()
-            .filter(|r| direction.is_ahead(cur, r.area));
-
-        aligned
-            .chain(fallback)
-            .min_by_key(|r| direction.distance(cur, r.area))
-            .map(|r| r.selection)
-    }
-
     /// Get the active goal selection (first goal of the current node).
     fn active_goal_selection(&self) -> Option<Selection> {
         let dag = self.proof_dag.as_ref()?;
         let current_node_id = dag.current_node?;
-        // Select the first goal of the current node
         Some(Selection::Goal {
             node_id: current_node_id,
             goal_idx: 0,
@@ -174,70 +131,70 @@ impl DeductionTreeMode {
     fn move_in_direction(&mut self, direction: Direction) -> bool {
         // If nothing is selected, start at the active goal
         if self.selected_idx.is_none() {
+            debug!("No selection, starting at active goal");
             if let Some(sel) = self.active_goal_selection() {
                 self.select_by_selection(sel);
                 return true;
             }
         }
 
-        self.find_nearest_in_direction(direction)
-            .map(|sel| self.select_by_selection(sel))
-            .is_some()
+        let current = self.current_tree_selection();
+        let Some(current_sel) = current else {
+            debug!("No current selection found");
+            return false;
+        };
+
+        let navigation_regions = self.tableau_state.proof.navigation_regions();
+        let items = self.tree_selectable_items();
+
+        debug!(
+            ?current_sel,
+            ?direction,
+            nav_regions = navigation_regions.len(),
+            selectable_items = items.len(),
+            "move_in_direction called"
+        );
+
+        let result = find_nearest_in_direction(navigation_regions, current_sel, direction);
+        debug!(?result, "Navigation result in move_in_direction");
+
+        result.is_some_and(|sel| {
+            let found_in_items = items.contains(&sel);
+            debug!(?sel, found_in_items, "Attempting to select");
+            self.select_by_selection(sel);
+            true
+        })
     }
 }
 
-/// Direction for spatial navigation.
-#[derive(Clone, Copy)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-impl Direction {
-    /// Check if `other` is ahead of `cur` in this direction.
-    const fn is_ahead(self, cur: Rect, other: Rect) -> bool {
-        match self {
-            Self::Left => other.x + other.width <= cur.x,
-            Self::Right => other.x >= cur.x + cur.width,
-            Self::Up => other.y + other.height <= cur.y,
-            Self::Down => other.y >= cur.y + cur.height,
-        }
-    }
-
-    /// Distance from `cur` to `other` along this direction's axis.
-    const fn distance(self, cur: Rect, other: Rect) -> u16 {
-        match self {
-            Self::Left => cur.x.saturating_sub(other.x + other.width),
-            Self::Right => other.x.saturating_sub(cur.x + cur.width),
-            Self::Up => cur.y.saturating_sub(other.y + other.height),
-            Self::Down => other.y.saturating_sub(cur.y + cur.height),
-        }
-    }
-}
-
-/// Check if two 1D ranges overlap.
-const fn ranges_overlap(a_start: u16, a_len: u16, b_start: u16, b_len: u16) -> bool {
-    a_start < b_start + b_len && b_start < a_start + a_len
-}
-
-impl InteractiveComponent for DeductionTreeMode {
+impl InteractiveComponent for SemanticTableau {
     type Input = DeductionTreeModeInput;
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
-        // Reset selection when step count changes
+        // Detect changes to proof tree
         let old_count = self.proof_dag.as_ref().map_or(0, ProofDag::len);
         let new_count = input.proof_dag.as_ref().map_or(0, ProofDag::len);
+        let old_current = self.proof_dag.as_ref().and_then(|dag| dag.current_node);
+        let new_current = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
+
+        let tree_changed = old_count != new_count || old_current != new_current;
+
+        // Update state when current node changes
+        self.tableau_state.update_current_node(new_current);
 
         self.goals = input.goals;
         self.definition = input.definition;
         self.error = input.error;
         self.proof_dag = input.proof_dag;
 
-        if old_count != new_count {
-            self.selected_idx = None;
+        // Auto-select active goal when tree changes
+        if tree_changed {
+            if let Some(sel) = self.active_goal_selection() {
+                self.select_by_selection(sel);
+            } else {
+                self.selected_idx = None;
+            }
         }
     }
 
@@ -256,10 +213,10 @@ impl InteractiveComponent for DeductionTreeMode {
             },
             KeyMouseEvent::Mouse(mouse) => {
                 let is_click = mouse.kind == MouseEventKind::Down(MouseButton::Left);
-                let clicked_item = is_click
-                    .then(|| self.find_click_at(mouse.column, mouse.row))
+                let clicked = is_click
+                    .then(|| self.tableau_state.find_click_at(mouse.column, mouse.row))
                     .flatten();
-                if let Some(sel) = clicked_item {
+                if let Some(sel) = clicked {
                     self.select_by_selection(sel);
                     return true;
                 }
@@ -276,16 +233,9 @@ impl InteractiveComponent for DeductionTreeMode {
             return;
         }
 
-        // Render tree view using proof_dag
         if let Some(ref dag) = self.proof_dag {
-            render_tree_view_from_dag(
-                frame,
-                content_area,
-                dag,
-                self.tree_top_down,
-                self.current_tree_selection(),
-                &mut self.click_regions,
-            );
+            let widget = SemanticTableauLayout::new(dag, self.tree_top_down, self.current_tree_selection());
+            frame.render_stateful_widget(widget, content_area, &mut self.tableau_state);
         } else {
             frame.render_widget(
                 Paragraph::new("No proof steps available").style(Style::new().fg(Color::DarkGray)),
@@ -295,17 +245,15 @@ impl InteractiveComponent for DeductionTreeMode {
     }
 }
 
-impl Mode for DeductionTreeMode {
+impl Mode for SemanticTableau {
     type Model = DeductionTreeModeInput;
 
-    const NAME: &'static str = "Deduction Tree";
+    const NAME: &'static str = "Semantic tableau";
     const KEYBINDINGS: &'static [(&'static str, &'static str)] = &[("hjkl", "nav"), ("t", "dir")];
     const SUPPORTED_FILTERS: &'static [FilterToggle] = &[];
     const BACKENDS: &'static [Backend] = &[Backend::Paperproof, Backend::TreeSitter];
 
     fn current_selection(&self) -> Option<Selection> {
-        // Return tree-specific selection directly - app.rs handles
-        // InitialHyp, StepHyp, StepGoal, Theorem by looking up in ProofDag
         self.current_tree_selection()
     }
 }
