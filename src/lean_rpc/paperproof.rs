@@ -1,12 +1,16 @@
 //! Paperproof RPC types and integration.
 //!
 //! Calls Paperproof's `getSnapshotData` RPC method when the Paperproof library
-//! is available in the user's Lean project.
+//! is available in the user's Lean project. Falls back to CLI when RPC is
+//! unavailable.
 //!
 //! See: <https://github.com/Paper-Proof/paperproof>
 
+use std::process::Stdio;
+
 use async_lsp::lsp_types::Position;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
 
 /// Input parameters for Paperproof's `getSnapshotData` RPC method.
 #[derive(Debug, Clone, Serialize)]
@@ -111,3 +115,87 @@ pub struct PaperproofTheoremSignature {
 
 /// RPC method name for Paperproof.
 pub const PAPERPROOF_GET_SNAPSHOT_DATA: &str = "Paperproof.getSnapshotData";
+
+/// Find the Lake project root by walking up from a file path.
+fn find_lake_root(file_path: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(file_path);
+    let mut dir = path.parent()?;
+
+    loop {
+        if dir.join("lakefile.lean").exists() || dir.join("lakefile.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// Call paperproof-cli to get proof steps when RPC is unavailable.
+///
+/// This is a fallback for when the user has `require Paperproof` in their lakefile
+/// but hasn't added `import Paperproof` to their source file.
+pub async fn fetch_paperproof_via_cli(
+    file_path: &str,
+    line: u32,
+    column: u32,
+    mode: PaperproofMode,
+) -> Option<PaperproofOutputParams> {
+    let project_root = find_lake_root(file_path)?;
+    tracing::debug!("paperproof-cli: project root = {}", project_root.display());
+
+    let mode_str = match mode {
+        PaperproofMode::SingleTactic => "single_tactic",
+        PaperproofMode::Tree => "tree",
+    };
+
+    let output = Command::new("lake")
+        .current_dir(&project_root)
+        .args([
+            "exe",
+            "paperproof-cli",
+            "--by-position",
+            file_path,
+            &line.to_string(),
+            &column.to_string(),
+            mode_str,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // If paperproof-cli isn't available, that's expected - not an error
+        if stderr.contains("unknown executable")
+            || stderr.contains("no such file")
+            || stderr.contains("not found")
+        {
+            tracing::debug!("paperproof-cli not available: {stderr}");
+            return None;
+        }
+        tracing::warn!("paperproof-cli failed: {stderr}");
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Check for error response from CLI
+    if let Ok(error_response) = serde_json::from_str::<serde_json::Value>(&stdout) {
+        if let Some(error) = error_response.get("error") {
+            tracing::debug!("paperproof-cli returned error: {error}");
+            return None;
+        }
+    }
+
+    // Parse the output as PaperproofOutputParams
+    match serde_json::from_str::<PaperproofOutputParams>(&stdout) {
+        Ok(params) => Some(params),
+        Err(e) => {
+            tracing::warn!("Failed to parse paperproof-cli output: {e}");
+            tracing::debug!("Raw output: {stdout}");
+            None
+        }
+    }
+}

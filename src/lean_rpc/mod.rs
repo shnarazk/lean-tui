@@ -5,7 +5,10 @@ pub mod paperproof;
 
 use async_lsp::lsp_types::{Position, Range, Url};
 pub use client::{GoToKind, RpcClient};
-pub use paperproof::{PaperproofGoalInfo, PaperproofHypothesis, PaperproofMode, PaperproofStep};
+pub use paperproof::{
+    fetch_paperproof_via_cli, PaperproofGoalInfo, PaperproofHypothesis, PaperproofMode,
+    PaperproofStep,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

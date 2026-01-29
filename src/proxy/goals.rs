@@ -6,7 +6,7 @@ use async_lsp::lsp_types::{Position, TextDocumentIdentifier};
 
 use crate::{
     error::LspError,
-    lean_rpc::{Goal, PaperproofMode, PaperproofStep, RpcClient},
+    lean_rpc::{fetch_paperproof_via_cli, Goal, PaperproofMode, PaperproofStep, RpcClient},
     proxy::{
         ast::{find_all_tactics_in_proof, find_enclosing_definition, DefinitionInfo, TacticInfo},
         dag::{ProofDag, ProofDagSource},
@@ -99,25 +99,56 @@ pub fn spawn_goal_fetch(
 }
 
 /// Fetch Paperproof proof steps if available.
+///
+/// Tries RPC first (fast path when `import Paperproof` is present),
+/// falls back to CLI when RPC is unavailable (slower, but works with just lakefile dep).
 async fn fetch_paperproof_steps(
     rpc_client: &RpcClient,
     text_document: &TextDocumentIdentifier,
     position: Position,
 ) -> Option<Vec<PaperproofStep>> {
+    // Try RPC first (fast path)
     match rpc_client
         .get_paperproof_snapshot(text_document, position, PaperproofMode::Tree)
         .await
     {
-        Ok(Some(output)) => {
-            if output.steps.is_empty() {
-                None
-            } else {
-                Some(output.steps)
-            }
+        Ok(Some(output)) if !output.steps.is_empty() => {
+            return Some(output.steps);
         }
-        Ok(None) => None,
+        Ok(Some(_)) => {
+            // RPC returned empty steps, try CLI fallback
+            tracing::debug!("Paperproof RPC returned empty steps, trying CLI fallback");
+        }
+        Ok(None) => {
+            // RPC returned None - method not available, try CLI fallback
+            tracing::debug!("Paperproof RPC unavailable, trying CLI fallback");
+        }
         Err(e) => {
-            tracing::debug!("Paperproof fetch failed: {e}");
+            tracing::debug!("Paperproof RPC failed: {e}, trying CLI fallback");
+        }
+    }
+
+    // CLI fallback: extract file path from URI
+    let file_path = text_document.uri.path().to_string();
+
+    match fetch_paperproof_via_cli(
+        &file_path,
+        position.line,
+        position.character,
+        PaperproofMode::Tree,
+    )
+    .await
+    {
+        Some(output) if !output.steps.is_empty() => {
+            tracing::debug!("Paperproof CLI returned {} steps", output.steps.len());
+            Some(output.steps)
+        }
+        Some(_) => {
+            tracing::debug!("Paperproof CLI returned empty steps");
+            None
+        }
+        None => {
+            tracing::debug!("Paperproof CLI not available");
             None
         }
     }
