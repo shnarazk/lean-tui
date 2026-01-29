@@ -40,6 +40,12 @@ pub struct GoalSectionState {
     is_focused: bool,
 }
 
+/// Layout information for tracking click regions in the goal section.
+struct GoalClickLayout {
+    area: Rect,
+    goal_count: usize,
+}
+
 impl GoalSectionState {
     /// Update the state with new data.
     pub fn update(
@@ -121,7 +127,11 @@ impl StatefulWidget for GoalSection {
 
         // Track click regions for goals
         if let Some(node_id) = state.node_id {
-            track_goal_click_regions(&mut state.click_regions, inner, node_id, state.goals.len());
+            let layout = GoalClickLayout {
+                area: inner,
+                goal_count: state.goals.len(),
+            };
+            track_goal_click_regions(&mut state.click_regions, node_id, &layout);
         }
 
         let rows: Vec<Row<'static>> = state
@@ -177,17 +187,16 @@ impl StatefulWidget for GoalSection {
 
 fn track_goal_click_regions(
     click_regions: &mut Vec<ClickRegion>,
-    inner: Rect,
     node_id: u32,
-    goal_count: usize,
+    layout: &GoalClickLayout,
 ) {
-    for goal_idx in 0..goal_count {
-        let y = inner.y + goal_idx as u16;
-        if y >= inner.y + inner.height {
+    for goal_idx in 0..layout.goal_count {
+        let y = layout.area.y + goal_idx as u16;
+        if y >= layout.area.y + layout.area.height {
             break;
         }
         click_regions.push(ClickRegion {
-            area: Rect::new(inner.x, y, inner.width, 1),
+            area: Rect::new(layout.area.x, y, layout.area.width, 1),
             selection: Selection::Goal { node_id, goal_idx },
         });
     }

@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::lean_rpc::{Goal, GotoLocations, PaperproofGoalInfo, PaperproofHypothesis, TaggedText};
 
 /// Check if a name is a Lean 4 hygienic macro identifier.
-/// These contain `._hyg.` or `._@.` patterns and are internal implementation details.
+/// These contain `._hyg.` or `._@.` patterns and are internal implementation
+/// details.
 fn is_hygienic_name(name: &str) -> bool {
     name.contains("._hyg.") || name.contains("._@.")
 }

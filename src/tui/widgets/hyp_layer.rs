@@ -16,6 +16,14 @@ use crate::{
     },
 };
 
+/// Context for rendering a hypothesis layer.
+pub struct HypLayerRenderContext<'a> {
+    pub selected: Option<Selection>,
+    pub base_y: u16,
+    pub area: Rect,
+    pub depends_on: &'a HashSet<String>,
+}
+
 /// A layer of hypotheses.
 #[derive(Debug, Clone)]
 pub struct HypLayer {
@@ -47,25 +55,22 @@ impl HypLayer {
     #[allow(clippy::cast_possible_truncation)]
     pub fn render(
         &self,
-        selected: Option<Selection>,
-        base_y: u16,
-        area: Rect,
+        ctx: &HypLayerRenderContext<'_>,
         click_regions: &mut Vec<ClickRegion>,
-        depends_on: &HashSet<String>,
     ) -> Vec<Line<'static>> {
         // Track click regions
         if let Some(node_id) = self.node_id {
-            self.track_click_regions(click_regions, node_id, base_y, area);
+            self.track_click_regions(click_regions, node_id, ctx);
         }
 
         self.hypotheses
             .iter()
             .map(|(hyp_idx, hyp)| {
                 let is_selected = matches!(
-                    selected,
+                    ctx.selected,
                     Some(Selection::Hyp { hyp_idx: hi, .. }) if hi == *hyp_idx
                 );
-                let is_dependency = hyp.names.iter().any(|n| depends_on.contains(n));
+                let is_dependency = hyp.names.iter().any(|n| ctx.depends_on.contains(n));
                 render_hyp_line(hyp, is_selected, is_dependency)
             })
             .collect()
@@ -76,16 +81,15 @@ impl HypLayer {
         &self,
         click_regions: &mut Vec<ClickRegion>,
         node_id: u32,
-        base_y: u16,
-        area: Rect,
+        ctx: &HypLayerRenderContext<'_>,
     ) {
         for (i, (hyp_idx, _)) in self.hypotheses.iter().enumerate() {
-            let y = base_y + i as u16;
-            if y >= area.y + area.height {
+            let y = ctx.base_y + i as u16;
+            if y >= ctx.area.y + ctx.area.height {
                 break;
             }
             click_regions.push(ClickRegion {
-                area: Rect::new(area.x, y, area.width, 1),
+                area: Rect::new(ctx.area.x, y, ctx.area.width, 1),
                 selection: Selection::Hyp {
                     node_id,
                     hyp_idx: *hyp_idx,

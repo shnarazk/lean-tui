@@ -12,7 +12,7 @@ use ratatui::{
     },
 };
 
-use super::hyp_layer::HypLayer;
+use super::hyp_layer::{HypLayer, HypLayerRenderContext};
 use crate::{
     lean_rpc::Goal,
     tui::widgets::{
@@ -132,13 +132,13 @@ impl StatefulWidget for HypSection {
             .content_length(total_hyps)
             .position(state.vertical_scroll);
 
-        let lines = state.layer.render(
-            state.selection,
-            inner.y,
-            inner,
-            &mut state.click_regions,
-            &state.depends_on,
-        );
+        let render_ctx = HypLayerRenderContext {
+            selected: state.selection,
+            base_y: inner.y,
+            area: inner,
+            depends_on: &state.depends_on,
+        };
+        let lines = state.layer.render(&render_ctx, &mut state.click_regions);
         Paragraph::new(lines).render(inner, buf);
 
         // Render scrollbar if content overflows

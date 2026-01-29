@@ -27,6 +27,21 @@ impl TreeLayout {
     }
 }
 
+/// Configuration for tree layout direction and data source.
+struct TreeLayoutConfig<'a> {
+    dag: &'a ProofDag,
+    top_down: bool,
+}
+
+/// Placement target for a node in the layout grid.
+#[derive(Clone, Copy)]
+struct NodePlacement {
+    node_id: NodeId,
+    x: i32,
+    y: i32,
+    available_h: i32,
+}
+
 /// Calculate height for a node box based on content.
 pub const fn node_height(node: &ProofDagNode) -> u16 {
     // Border (2) + goals line (1) + optional hypotheses line (1)
@@ -79,7 +94,14 @@ pub fn calculate_tree_layout(dag: &ProofDag, top_down: bool) -> TreeLayout {
     layout.content_width = w;
     layout.content_height = h;
 
-    position_nodes(dag, root_id, 0, 0, h, top_down, &mut layout.nodes);
+    let config = TreeLayoutConfig { dag, top_down };
+    let root_placement = NodePlacement {
+        node_id: root_id,
+        x: 0,
+        y: 0,
+        available_h: h,
+    };
+    position_nodes(&config, root_placement, &mut layout.nodes);
 
     // Position orphan nodes to the right of the main tree
     if !dag.orphans.is_empty() {
@@ -132,40 +154,50 @@ fn subtree_size(dag: &ProofDag, node_id: NodeId) -> (i32, i32) {
 
 /// Position nodes recursively.
 fn position_nodes(
-    dag: &ProofDag,
-    node_id: NodeId,
-    x: i32,
-    y: i32,
-    available_h: i32,
-    top_down: bool,
+    config: &TreeLayoutConfig<'_>,
+    placement: NodePlacement,
     out: &mut Vec<NodePosition>,
 ) {
-    let Some(node) = dag.get(node_id) else {
+    let Some(node) = config.dag.get(placement.node_id) else {
         return;
     };
 
     let box_h = i32::from(node_height(node));
-    let (subtree_w, _) = subtree_size(dag, node_id);
+    let (subtree_w, _) = subtree_size(config.dag, placement.node_id);
     let node_w = node_content_width(node);
 
-    let node_y = if top_down { y } else { y + available_h - box_h };
+    let node_y = if config.top_down {
+        placement.y
+    } else {
+        placement.y + placement.available_h - box_h
+    };
 
     out.push(NodePosition {
-        node_id,
-        x,
+        node_id: placement.node_id,
+        x: placement.x,
         y: node_y,
         width: u16::try_from(subtree_w).unwrap_or(node_w).max(node_w),
         height: node_height(node),
     });
 
     if !node.children.is_empty() {
-        let child_h = available_h - box_h;
-        let child_y = if top_down { y + box_h } else { y };
-        let mut cx = x;
+        let child_h = placement.available_h - box_h;
+        let child_y = if config.top_down {
+            placement.y + box_h
+        } else {
+            placement.y
+        };
+        let mut cx = placement.x;
 
         for &cid in &node.children {
-            let (cw, ch) = subtree_size(dag, cid);
-            position_nodes(dag, cid, cx, child_y, child_h.min(ch), top_down, out);
+            let (cw, ch) = subtree_size(config.dag, cid);
+            let child_placement = NodePlacement {
+                node_id: cid,
+                x: cx,
+                y: child_y,
+                available_h: child_h.min(ch),
+            };
+            position_nodes(config, child_placement, out);
             cx += cw;
         }
     }

@@ -53,6 +53,16 @@ impl GoalBoxState {
     }
 }
 
+/// Layout information for tracking click regions in a goal box.
+struct GoalBoxLayout<'a> {
+    node_id: u32,
+    goal_idx: usize,
+    visible_indices: &'a [usize],
+    hyp_area: Rect,
+    hyp_border_height: u16,
+    target_area: Rect,
+}
+
 impl<'a> GoalBox<'a> {
     pub const fn new(
         goal: &'a Goal,
@@ -183,59 +193,56 @@ impl StatefulWidget for GoalBox<'_> {
 
         // Compute click regions - track actual rendered positions
         if let Some(node_id) = self.node_id {
-            track_goal_box_click_regions(
-                &mut state.click_regions,
+            let layout = GoalBoxLayout {
                 node_id,
-                self.goal_idx,
-                &visible_indices,
+                goal_idx: self.goal_idx,
+                visible_indices: &visible_indices,
                 hyp_area,
                 hyp_border_height,
                 target_area,
-            );
+            };
+            track_goal_box_click_regions(&mut state.click_regions, &layout);
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn track_goal_box_click_regions(
-    click_regions: &mut Vec<ClickRegion>,
-    node_id: u32,
-    goal_idx: usize,
-    visible_indices: &[usize],
-    hyp_area: Rect,
-    hyp_border_height: u16,
-    target_area: Rect,
-) {
-    let content_y = hyp_area.y + hyp_border_height;
+fn track_goal_box_click_regions(click_regions: &mut Vec<ClickRegion>, layout: &GoalBoxLayout<'_>) {
+    let content_y = layout.hyp_area.y + layout.hyp_border_height;
 
-    for (i, &hyp_idx) in visible_indices.iter().enumerate() {
+    for (i, &hyp_idx) in layout.visible_indices.iter().enumerate() {
         #[allow(clippy::cast_possible_truncation)]
         let hyp_y = content_y + (i as u16 * LayoutMetrics::HYP_LINE_HEIGHT);
-        if hyp_y >= hyp_area.y + hyp_area.height {
+        if hyp_y >= layout.hyp_area.y + layout.hyp_area.height {
             continue;
         }
         click_regions.push(ClickRegion {
             area: Rect::new(
-                hyp_area.x,
+                layout.hyp_area.x,
                 hyp_y,
-                hyp_area.width,
+                layout.hyp_area.width,
                 LayoutMetrics::HYP_LINE_HEIGHT,
             ),
-            selection: Selection::Hyp { node_id, hyp_idx },
+            selection: Selection::Hyp {
+                node_id: layout.node_id,
+                hyp_idx,
+            },
         });
     }
 
     // Validate click regions match visible rows
     debug_assert!(
-        click_regions.len() <= visible_indices.len(),
+        click_regions.len() <= layout.visible_indices.len(),
         "Click regions must not exceed visible rows"
     );
 
-    let target_y = target_area.y + 1; // +1 for top border
-    if target_y < target_area.y + target_area.height {
+    let target_y = layout.target_area.y + 1; // +1 for top border
+    if target_y < layout.target_area.y + layout.target_area.height {
         click_regions.push(ClickRegion {
-            area: Rect::new(target_area.x, target_y, target_area.width, 1),
-            selection: Selection::Goal { node_id, goal_idx },
+            area: Rect::new(layout.target_area.x, target_y, layout.target_area.width, 1),
+            selection: Selection::Goal {
+                node_id: layout.node_id,
+                goal_idx: layout.goal_idx,
+            },
         });
     }
 }

@@ -14,8 +14,8 @@ use deduction_tree::SemanticTableau;
 use open_goal_list::PlainList;
 pub use open_goal_list::PlainListInput;
 use ratatui::{layout::Rect, Frame};
-use steps_view::TacticTree;
 pub use steps_view::StepsModeInput;
+use steps_view::TacticTree;
 
 use crate::tui::widgets::{
     FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,

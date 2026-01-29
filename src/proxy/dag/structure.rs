@@ -7,106 +7,122 @@ use tracing::debug;
 use super::{node::ProofDagNode, NodeId, ProofDag};
 use crate::lean_rpc::PaperproofStep;
 
+/// Index mapping goal IDs to the steps that work on them.
+struct GoalStepIndex<'a> {
+    steps: &'a [PaperproofStep],
+    goal_to_steps: HashMap<String, Vec<usize>>,
+}
+
+impl<'a> GoalStepIndex<'a> {
+    fn new(steps: &'a [PaperproofStep]) -> Self {
+        let mut goal_to_steps: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, step) in steps.iter().enumerate() {
+            let goal_id = &step.goal_before.id;
+            goal_to_steps.entry(goal_id.clone()).or_default().push(i);
+        }
+        Self {
+            steps,
+            goal_to_steps,
+        }
+    }
+
+    /// Check if a goal has a solver step after the given step index.
+    fn goal_has_solver(&self, goal_id: &str, after_step: usize) -> bool {
+        self.goal_to_steps
+            .get(goal_id)
+            .is_some_and(|indices| indices.iter().any(|&i| i > after_step))
+    }
+
+    /// Analyze goals and return child goal IDs and whether any goals are
+    /// unsolved.
+    fn analyze_step_goals(&self, step_idx: usize, node_id: NodeId) -> (Vec<String>, bool) {
+        let step = &self.steps[step_idx];
+        let mut child_goal_ids: Vec<String> = Vec::new();
+        let mut has_unsolved = false;
+
+        // Check spawned_goals (inline proofs like `by` blocks in `have`, `obtain`)
+        for g in &step.spawned_goals {
+            let solved = self.goal_has_solver(&g.id, step_idx);
+            debug!(node_id, goal_id = %g.id, solved, "spawned_goal");
+            if !solved {
+                has_unsolved = true;
+            }
+            if !child_goal_ids.contains(&g.id) {
+                child_goal_ids.push(g.id.clone());
+            }
+        }
+
+        // Check goals_after (continuation goals after tactic completes)
+        for g in &step.goals_after {
+            let solved = self.goal_has_solver(&g.id, step_idx);
+            debug!(node_id, goal_id = %g.id, solved, "goal_after");
+            if !solved {
+                has_unsolved = true;
+            }
+            if !child_goal_ids.contains(&g.id) {
+                child_goal_ids.push(g.id.clone());
+            }
+        }
+
+        (child_goal_ids, has_unsolved)
+    }
+}
+
+/// Parameters for a branch being built in the tree.
+#[derive(Clone, Copy)]
+struct BranchParams<'a> {
+    goal_id: &'a str,
+    start_from: usize,
+    parent_id: Option<NodeId>,
+    depth: usize,
+}
+
 /// Build tree structure from Paperproof steps using goal IDs.
 pub fn build_tree_structure(dag: &mut ProofDag, steps: &[PaperproofStep]) {
     if steps.is_empty() {
         return;
     }
 
-    // Build a map from goal_id to the steps that work on that goal
-    let mut goal_to_steps: HashMap<String, Vec<usize>> = HashMap::new();
-
-    for (i, step) in steps.iter().enumerate() {
-        let goal_id = &step.goal_before.id;
-        goal_to_steps.entry(goal_id.clone()).or_default().push(i);
-    }
+    let goal_index = GoalStepIndex::new(steps);
 
     // Build tree recursively starting from root step's goal
     let root_idx = dag.root.unwrap_or(0) as usize;
     let root_goal_id = &steps[root_idx].goal_before.id;
-    build_branch_recursive(dag, steps, &goal_to_steps, root_goal_id, 0, None, 0);
+    let root_params = BranchParams {
+        goal_id: root_goal_id,
+        start_from: 0,
+        parent_id: None,
+        depth: 0,
+    };
+    build_branch_recursive(dag, &goal_index, root_params);
 
     // Connect any orphan nodes not reached by goal-ID traversal
     connect_orphan_nodes(dag, steps);
 }
 
-/// Check if a goal has a solver step after the given step index.
-fn goal_has_solver(
-    goal_id: &str,
-    after_step: usize,
-    goal_to_steps: &HashMap<String, Vec<usize>>,
-) -> bool {
-    goal_to_steps
-        .get(goal_id)
-        .is_some_and(|indices| indices.iter().any(|&i| i > after_step))
-}
-
-/// Analyze goals and return child goal IDs and whether any goals are unsolved.
-fn analyze_step_goals(
-    step: &PaperproofStep,
-    step_idx: usize,
-    node_id: NodeId,
-    goal_to_steps: &HashMap<String, Vec<usize>>,
-) -> (Vec<String>, bool) {
-    let mut child_goal_ids: Vec<String> = Vec::new();
-    let mut has_unsolved = false;
-
-    // Check spawned_goals (inline proofs like `by` blocks in `have`, `obtain`)
-    for g in &step.spawned_goals {
-        let solved = goal_has_solver(&g.id, step_idx, goal_to_steps);
-        debug!(node_id, goal_id = %g.id, solved, "spawned_goal");
-        if !solved {
-            has_unsolved = true;
-        }
-        if !child_goal_ids.contains(&g.id) {
-            child_goal_ids.push(g.id.clone());
-        }
-    }
-
-    // Check goals_after (continuation goals after tactic completes)
-    for g in &step.goals_after {
-        let solved = goal_has_solver(&g.id, step_idx, goal_to_steps);
-        debug!(node_id, goal_id = %g.id, solved, "goal_after");
-        if !solved {
-            has_unsolved = true;
-        }
-        if !child_goal_ids.contains(&g.id) {
-            child_goal_ids.push(g.id.clone());
-        }
-    }
-
-    (child_goal_ids, has_unsolved)
-}
-
 /// Recursively build a branch of the tree.
 fn build_branch_recursive(
     dag: &mut ProofDag,
-    steps: &[PaperproofStep],
-    goal_to_steps: &HashMap<String, Vec<usize>>,
-    goal_id: &str,
-    start_from: usize,
-    parent_id: Option<NodeId>,
-    depth: usize,
+    goal_index: &GoalStepIndex<'_>,
+    params: BranchParams<'_>,
 ) -> Option<NodeId> {
-    let step_indices = goal_to_steps.get(goal_id)?;
-    let &step_idx = step_indices.iter().find(|&&i| i >= start_from)?;
+    let step_indices = goal_index.goal_to_steps.get(params.goal_id)?;
+    let &step_idx = step_indices.iter().find(|&&i| i >= params.start_from)?;
 
     let node_id = step_idx as NodeId;
-    let step = &steps[step_idx];
 
     // Analyze goals first (before mutating dag)
-    let (child_goal_ids, has_unsolved) =
-        analyze_step_goals(step, step_idx, node_id, goal_to_steps);
+    let (child_goal_ids, has_unsolved) = goal_index.analyze_step_goals(step_idx, node_id);
 
     // Update node with tree structure and unsolved status
     if let Some(node) = dag.nodes.get_mut(step_idx) {
-        node.parent = parent_id;
-        node.depth = depth;
+        node.parent = params.parent_id;
+        node.depth = params.depth;
         node.has_unsolved_spawned_goals = has_unsolved;
     }
 
     // Add this node as child of parent
-    if let Some(pid) = parent_id {
+    if let Some(pid) = params.parent_id {
         if let Some(parent_node) = dag.nodes.get_mut(pid as usize) {
             if !parent_node.children.contains(&node_id) {
                 parent_node.children.push(node_id);
@@ -116,22 +132,21 @@ fn build_branch_recursive(
 
     // Recursively process children
     for child_goal_id in child_goal_ids {
-        build_branch_recursive(
-            dag,
-            steps,
-            goal_to_steps,
-            &child_goal_id,
-            step_idx + 1,
-            Some(node_id),
-            depth + 1,
-        );
+        let child_params = BranchParams {
+            goal_id: &child_goal_id,
+            start_from: step_idx + 1,
+            parent_id: Some(node_id),
+            depth: params.depth + 1,
+        };
+        build_branch_recursive(dag, goal_index, child_params);
     }
 
     Some(node_id)
 }
 
-/// Connect orphan nodes that weren't reached during goal-ID-based tree building.
-/// Only connects orphans when there's a definite goal ID match - no heuristics.
+/// Connect orphan nodes that weren't reached during goal-ID-based tree
+/// building. Only connects orphans when there's a definite goal ID match - no
+/// heuristics.
 fn connect_orphan_nodes(dag: &mut ProofDag, steps: &[PaperproofStep]) {
     let root_id = dag.root.unwrap_or(0);
 
@@ -177,8 +192,7 @@ fn connect_orphan_nodes(dag: &mut ProofDag, steps: &[PaperproofStep]) {
         let Some(parent) = parent_by_goal else {
             debug!(
                 orphan_id,
-                orphan_tactic,
-                "No goal ID match found - marking as detached orphan"
+                orphan_tactic, "No goal ID match found - marking as detached orphan"
             );
             dag.orphans.push(orphan_id);
             continue;
