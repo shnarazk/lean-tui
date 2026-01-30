@@ -30,12 +30,12 @@ use serde::Serialize;
 use serde_json::json;
 use tokio::{
     process::Command,
-    sync::{mpsc, Mutex, RwLock},
+    sync::{Mutex, RwLock},
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tower_service::Service;
 
-use super::{dag::ProofDag, RpcConnectResponse, GET_PROOF_DAG, RPC_CALL, RPC_CONNECT};
+use super::{ProofDag, RpcConnectResponse, GET_PROOF_DAG, RPC_CALL, RPC_CONNECT};
 use crate::error::LspError;
 
 /// Lean pretty-printer options for the server.
@@ -47,16 +47,10 @@ const RPC_SESSION_OUTDATED: i32 = -32900;
 /// Document state tracked by the client.
 struct DocumentState {
     version: u32,
-    #[allow(dead_code)]
-    content: String,
 }
 
 /// A simple service that receives notifications from the server.
-struct LeanDagService {
-    /// Sender to notify when files become ready.
-    #[allow(dead_code)]
-    ready_tx: mpsc::Sender<String>,
-}
+struct LeanDagService;
 
 impl tower_service::Service<AnyRequest> for LeanDagService {
     type Response = serde_json::Value;
@@ -130,8 +124,6 @@ struct GetProofDagParams {
 #[serde(rename_all = "camelCase")]
 struct GetProofDagResult {
     proof_dag: ProofDag,
-    #[allow(dead_code)]
-    version: u32,
 }
 
 #[derive(Serialize)]
@@ -159,11 +151,8 @@ impl LeanDagClient {
 
         let (stdin, stdout) = spawn_lean_dag_server(&server_path)?;
 
-        // Channel to receive ready notifications (for future use)
-        let (ready_tx, _ready_rx) = mpsc::channel(32);
-
         // Create main loop with our service
-        let (mainloop, socket) = MainLoop::new_client(|_| LeanDagService { ready_tx });
+        let (mainloop, socket) = MainLoop::new_client(|_| LeanDagService);
 
         // Run the mainloop in a background task
         tokio::spawn(async move {
@@ -267,7 +256,6 @@ impl LeanDagClient {
     pub async fn did_open(&self, params: DidOpenTextDocumentParams) -> Result<(), LspError> {
         let uri = params.text_document.uri.to_string();
         let version = params.text_document.version as u32;
-        let content = params.text_document.text.clone();
 
         tracing::debug!("[LeanDag] didOpen {} v{}", uri, version);
 
@@ -281,7 +269,7 @@ impl LeanDagClient {
         self.documents
             .write()
             .await
-            .insert(uri, DocumentState { version, content });
+            .insert(uri, DocumentState { version });
 
         Ok(())
     }

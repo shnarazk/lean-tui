@@ -1,4 +1,4 @@
-//! Document content cache with tree-sitter parsing.
+//! Document content cache for tracking open documents.
 
 use std::{collections::HashMap, sync::Mutex};
 
@@ -12,28 +12,15 @@ use async_lsp::{
     },
     AnyNotification,
 };
-use tree_sitter::{Parser, Tree};
-
-struct Document {
-    content: String,
-    tree: Option<Tree>,
-}
 
 pub struct DocumentCache {
-    documents: Mutex<HashMap<String, Document>>,
-    parser: Mutex<Parser>,
+    documents: Mutex<HashMap<String, String>>,
 }
 
 impl DocumentCache {
     pub fn new() -> Self {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_lean4::language())
-            .expect("Error loading Lean grammar");
-
         Self {
             documents: Mutex::new(HashMap::new()),
-            parser: Mutex::new(parser),
         }
     }
 
@@ -76,10 +63,10 @@ impl DocumentCache {
     }
 
     fn update(&self, uri: &str, content: String) {
-        let mut docs = self.documents.lock().expect("lock poisoned");
-        let old_tree = docs.get(uri).and_then(|d| d.tree.as_ref());
-        let tree = self.parse(&content, old_tree);
-        docs.insert(uri.to_string(), Document { content, tree });
+        self.documents
+            .lock()
+            .expect("lock poisoned")
+            .insert(uri.to_string(), content);
     }
 
     fn apply_changes(
@@ -88,7 +75,7 @@ impl DocumentCache {
         changes: &[TextDocumentContentChangeEvent],
     ) -> Option<String> {
         let docs = self.documents.lock().expect("lock poisoned");
-        let mut content = docs.get(uri)?.content.clone();
+        let mut content = docs.get(uri)?.clone();
         drop(docs);
 
         for change in changes {
@@ -103,21 +90,6 @@ impl DocumentCache {
             }
         }
         Some(content)
-    }
-
-    fn parse(&self, content: &str, old_tree: Option<&Tree>) -> Option<Tree> {
-        self.parser
-            .lock()
-            .expect("lock poisoned")
-            .parse(content, old_tree)
-    }
-
-    pub fn get_tree(&self, uri: &str) -> Option<Tree> {
-        self.documents
-            .lock()
-            .expect("lock poisoned")
-            .get(uri)
-            .and_then(|d| d.tree.clone())
     }
 }
 

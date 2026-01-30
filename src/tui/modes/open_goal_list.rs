@@ -7,12 +7,14 @@ use ratatui::{layout::Rect, Frame};
 use super::Mode;
 use crate::{
     lean_rpc::{ProofDag, ProofState},
-    tui::widgets::{
-        hypothesis_indices, open_goal_list::OpenGoalList, render_helpers::render_error,
-        selection::SelectionState, FilterToggle, HypothesisFilters, InteractiveComponent,
-        KeyMouseEvent, Selection,
+    tui::{
+        app::DefinitionInfo,
+        widgets::{
+            hypothesis_indices, open_goal_list::OpenGoalList, render_helpers::render_error,
+            selection::SelectionState, FilterToggle, HypothesisFilters, InteractiveComponent,
+            KeyMouseEvent, Selection,
+        },
     },
-    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Open Goal List mode.

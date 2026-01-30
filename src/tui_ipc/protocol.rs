@@ -2,44 +2,14 @@ use std::path::PathBuf;
 
 pub use async_lsp::lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use crate::lean_rpc::{ProofDag, ProofState};
-// Re-export AST-derived types from proxy for IPC consumers
-pub use crate::proxy::ast::DefinitionInfo;
+use crate::lean_rpc::ProofDag;
 
 /// Returns the path to the Unix socket for IPC.
 pub fn socket_path() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("lean-tui/lean-tui.sock")
-}
-
-/// Which temporal slot a goal state belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TemporalSlot {
-    /// Goals before the last tactic (at previous line)
-    Previous,
-    /// Goals at current cursor position
-    Current,
-    /// Goals after the next tactic (at next line)
-    Next,
-}
-
-/// Result of fetching goals for a temporal slot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "lowercase")]
-pub enum GoalResult {
-    /// Successfully fetched goals at the position.
-    Ready {
-        position: Position,
-        state: ProofState,
-    },
-    /// No goals available (at proof boundary or outside proof).
-    NotAvailable,
-    /// Error fetching goals.
-    Error { error: String },
 }
 
 /// Cursor location with document URI and trigger method.
@@ -78,12 +48,6 @@ pub enum Message {
         #[serde(default)]
         proof_dag: Option<ProofDag>,
     },
-    TemporalGoals {
-        uri: Url,
-        cursor_position: Position,
-        slot: TemporalSlot,
-        result: GoalResult,
-    },
     Error {
         error: String,
     },
@@ -93,18 +57,5 @@ pub enum Message {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Command {
-    Navigate {
-        uri: Url,
-        position: Position,
-    },
-    GetHypothesisLocation {
-        uri: Url,
-        position: Position,
-        info: Value,
-    },
-    FetchTemporalGoals {
-        uri: Url,
-        cursor_position: Position,
-        slot: TemporalSlot,
-    },
+    Navigate { uri: Url, position: Position },
 }

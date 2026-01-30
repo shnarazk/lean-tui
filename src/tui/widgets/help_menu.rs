@@ -16,11 +16,9 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("[/]", "cycle display mode"),
     // Navigation
     ("j/k", "navigate up/down"),
-    ("Enter", "go to definition"),
-    // Filters
-    // ("i", "toggle instances"),
-    // ("a", "toggle inaccessible"),
-    // ("l", "toggle let values"),
+    ("d", "go to definition"),
+    ("t", "go to type definition"),
+    ("y", "copy to clipboard"),
     // Other
     ("?", "close help"),
     ("q", "quit"),

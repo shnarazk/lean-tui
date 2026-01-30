@@ -12,15 +12,17 @@ use tracing::debug;
 use super::Mode;
 use crate::{
     lean_rpc::{ProofDag, ProofState},
-    tui::widgets::{
-        render_helpers::{render_error, render_no_goals},
-        semantic_tableau::{
-            navigation::{find_nearest_in_direction, Direction},
-            SemanticTableauLayout, SemanticTableauState,
+    tui::{
+        app::DefinitionInfo,
+        widgets::{
+            render_helpers::{render_error, render_no_goals},
+            semantic_tableau::{
+                navigation::{find_nearest_in_direction, Direction},
+                SemanticTableauLayout, SemanticTableauState,
+            },
+            FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
         },
-        FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
     },
-    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Deduction Tree mode.

@@ -10,7 +10,7 @@ use super::{
     given_pane::{GivenPane, GivenPaneState},
     proof_pane::{ProofPane, ProofPaneState},
     theorem_pane::{TheoremPane, TheoremPaneState},
-    ClickRegion, Selection,
+    Selection,
 };
 use crate::lean_rpc::{ProofDag, ProofState};
 
@@ -32,46 +32,6 @@ impl SemanticTableauState {
             .find_click_at(x, y)
             .or_else(|| self.proof.find_click_at(x, y))
             .or_else(|| self.theorem.find_click_at(x, y))
-    }
-
-    /// Get all click regions from all panes.
-    #[allow(dead_code)]
-    pub fn click_regions(&self) -> impl Iterator<Item = &ClickRegion> {
-        self.given
-            .click_regions
-            .iter()
-            .chain(self.proof.click_regions.iter())
-            .chain(self.theorem.click_regions.iter())
-    }
-
-    /// Scroll up in the proof pane.
-    #[allow(dead_code)]
-    pub fn scroll_up(&mut self) {
-        self.proof.scroll_up();
-    }
-
-    /// Scroll down in the proof pane.
-    #[allow(dead_code)]
-    pub fn scroll_down(&mut self, viewport_height: u16) {
-        self.proof.scroll_down(viewport_height);
-    }
-
-    /// Scroll left in the proof pane.
-    #[allow(dead_code)]
-    pub fn scroll_left(&mut self) {
-        self.proof.scroll_left();
-    }
-
-    /// Scroll right in the proof pane.
-    #[allow(dead_code)]
-    pub fn scroll_right(&mut self, viewport_width: u16) {
-        self.proof.scroll_right(viewport_width);
-    }
-
-    /// Reset scroll to auto-follow mode.
-    #[allow(dead_code)]
-    pub const fn reset_scroll(&mut self) {
-        self.proof.reset_scroll();
     }
 
     /// Update state when current node changes.

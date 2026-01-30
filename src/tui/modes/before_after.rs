@@ -9,14 +9,16 @@ use ratatui::{
 use super::Mode;
 use crate::{
     lean_rpc::{ProofDag, ProofState},
-    tui::widgets::{
-        goals_column::{GoalsColumn, GoalsColumnState},
-        hypothesis_indices,
-        render_helpers::render_error,
-        selection::SelectionState,
-        FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
+    tui::{
+        app::DefinitionInfo,
+        widgets::{
+            goals_column::{GoalsColumn, GoalsColumnState},
+            hypothesis_indices,
+            render_helpers::render_error,
+            selection::SelectionState,
+            FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
+        },
     },
-    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Before/After mode.

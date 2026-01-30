@@ -23,50 +23,6 @@ pub struct ClickRegion {
     pub selection: Selection,
 }
 
-/// Tracks sequential click regions along a horizontal line.
-/// Use this when rendering items left-to-right with variable widths.
-#[allow(dead_code)]
-pub struct ClickRegionTracker {
-    x: u16,
-    y: u16,
-    max_x: u16,
-}
-
-#[allow(dead_code)]
-impl ClickRegionTracker {
-    /// Create a tracker for a line starting at (x, y) with given max width.
-    pub const fn new(x: u16, y: u16, width: u16) -> Self {
-        Self {
-            x,
-            y,
-            max_x: x + width,
-        }
-    }
-
-    /// Advance x position by separator width (e.g., for " │ " between items).
-    pub const fn skip(&mut self, width: u16) {
-        self.x += width;
-    }
-
-    /// Add a click region for text of given character count.
-    pub fn push(
-        &mut self,
-        regions: &mut Vec<ClickRegion>,
-        char_count: usize,
-        selection: Selection,
-    ) {
-        let remaining = self.max_x.saturating_sub(self.x);
-        let width = (char_count as u16).min(remaining).max(1);
-
-        regions.push(ClickRegion {
-            area: Rect::new(self.x, self.y, width, 1),
-            selection,
-        });
-
-        self.x += width;
-    }
-}
-
 /// Manages selection state for navigable items.
 #[derive(Debug, Default)]
 pub struct SelectionState {

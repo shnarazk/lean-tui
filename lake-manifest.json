@@ -15,7 +15,7 @@
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "f432023e7cdf9920841ec7e52fe71c36708834db",
+   "rev": "0ad83d4ba42f5cd79e92f675a0142e86cb8458e2",
    "name": "LeanDag",
    "manifestFile": "lake-manifest.json",
    "inputRev": "main",

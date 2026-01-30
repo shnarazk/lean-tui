@@ -1,9 +1,13 @@
 //! Application state for the TUI.
 
-use std::mem;
+use std::{io::stdout, mem};
 
 use async_lsp::lsp_types::Url;
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::{
+    clipboard::CopyToClipboard,
+    event::{Event, KeyCode, KeyEventKind},
+    ExecutableCommand,
+};
 use ratatui::{
     layout::{Constraint, Layout},
     prelude::*,
@@ -24,10 +28,7 @@ use crate::{
         status_bar::{StatusBar, StatusBarInput, StatusBarWidget},
         InteractiveStatefulWidget,
     },
-    tui_ipc::{
-        socket_path, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
-        TemporalSlot,
-    },
+    tui_ipc::{socket_path, Command, CursorInfo, Message, Position},
 };
 
 /// Kind of navigation (definition or type definition).
@@ -38,56 +39,15 @@ pub enum NavigationKind {
     TypeDefinition,
 }
 
-/// A step in the local proof history (includes state, used for navigation).
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
-pub struct LocalProofStep {
-    /// Position in the source file where this step occurs.
-    pub position: Position,
-    /// The tactic text (if extractable).
-    pub tactic: Option<String>,
-    /// Proof state at this step.
-    pub state: ProofState,
-    /// Nesting depth (for have/cases scopes).
-    pub scope_depth: usize,
-}
-
-/// Proof history tracking all steps in the current proof.
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
-pub struct ProofHistory {
-    /// All proof steps, ordered by position.
-    pub steps: Vec<LocalProofStep>,
-    /// Index of the currently selected step.
-    pub current_step_index: usize,
-}
-
-/// Loading status for goal state (used for temporal goals feature).
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
-pub enum LoadStatus {
-    #[default]
-    Ready,
-    Loading,
-    NotAvailable,
-    Error(String),
-}
-
-/// Goal state at a specific position.
-#[derive(Debug, Clone, Default)]
-pub struct GoalState {
-    pub state: ProofState,
-    pub position: Position,
-    #[allow(dead_code)]
-    pub status: LoadStatus,
-}
-
-/// Goals at three temporal positions (previous, current, next tactic).
-#[derive(Debug, Clone, Default)]
-pub struct TemporalGoals {
-    pub previous: Option<GoalState>,
-    pub current: GoalState,
-    pub next: Option<GoalState>,
+/// Information about the enclosing definition (theorem, lemma, def, etc.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionInfo {
+    /// Kind of definition (theorem, lemma, def, example)
+    pub kind: Option<String>,
+    /// Name of the definition
+    pub name: String,
+    /// Line where the definition starts
+    pub line: Option<u32>,
 }
 
 /// Application state.
@@ -95,8 +55,6 @@ pub struct TemporalGoals {
 pub struct App {
     /// Current cursor position from editor.
     pub cursor: Option<CursorInfo>,
-    /// Goals at three temporal positions.
-    pub temporal_goals: TemporalGoals,
     /// Enclosing definition (theorem/lemma name).
     pub definition: Option<DefinitionInfo>,
     /// Current error message.
@@ -109,9 +67,6 @@ pub struct App {
     outgoing_commands: Vec<Command>,
     /// Current display mode.
     display_mode: DisplayMode,
-    /// Proof history for tree visualization views.
-    #[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
-    proof_history: ProofHistory,
     /// Unified proof DAG - single source of truth for all display modes.
     proof_dag: Option<ProofDag>,
     /// Status bar component.
@@ -120,39 +75,24 @@ pub struct App {
     help_menu: HelpMenu,
 }
 
-fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> GoalState {
-    match result {
-        GoalResult::Ready { position, state } => GoalState {
-            state,
-            position,
-            status: LoadStatus::Ready,
-        },
-        GoalResult::NotAvailable => GoalState {
-            state: ProofState::default(),
-            position: cursor_position,
-            status: LoadStatus::NotAvailable,
-        },
-        GoalResult::Error { error } => GoalState {
-            state: ProofState::default(),
-            position: cursor_position,
-            status: LoadStatus::Error(error),
-        },
-    }
-}
-
 impl App {
-    /// Get current proof state.
-    pub fn proof_state(&self) -> &ProofState {
-        &self.temporal_goals.current.state
+    /// Get current proof state from the DAG.
+    pub fn proof_state(&self) -> ProofState {
+        self.proof_dag
+            .as_ref()
+            .and_then(|dag| dag.current_node)
+            .and_then(|id| self.proof_dag.as_ref()?.get(id))
+            .map(|node| node.state_after.clone())
+            .unwrap_or_default()
     }
 
     /// Get position where current goals were fetched.
-    pub const fn goals_position(&self) -> Option<Position> {
-        if self.temporal_goals.current.state.goals.is_empty() {
-            None
-        } else {
-            Some(self.temporal_goals.current.position)
-        }
+    pub fn goals_position(&self) -> Option<Position> {
+        self.proof_dag
+            .as_ref()
+            .and_then(|dag| dag.current_node)
+            .and_then(|id| self.proof_dag.as_ref()?.get(id))
+            .map(|node| node.position)
     }
 
     /// Queue a command to be sent to the proxy.
@@ -178,27 +118,14 @@ impl App {
             }
             Message::ProofDag {
                 uri: _,
-                position,
+                position: _,
                 proof_dag,
             } => {
-                // Extract proof state directly from current node (no conversion needed)
-                let state = proof_dag
-                    .as_ref()
-                    .and_then(|dag| dag.current_node)
-                    .and_then(|id| proof_dag.as_ref()?.get(id))
-                    .map(|node| node.state_after.clone())
-                    .unwrap_or_default();
-
                 // Extract definition name from the ProofDag
                 let definition_name = proof_dag
                     .as_ref()
                     .and_then(|dag| dag.definition_name.clone());
 
-                self.temporal_goals.current = GoalState {
-                    state,
-                    position,
-                    status: LoadStatus::Ready,
-                };
                 self.definition = definition_name.map(|name| DefinitionInfo {
                     name,
                     kind: None,
@@ -207,21 +134,6 @@ impl App {
                 self.proof_dag = proof_dag;
                 self.connected = true;
                 self.error = None;
-                self.refresh_temporal_columns();
-            }
-            Message::TemporalGoals {
-                uri: _,
-                cursor_position,
-                slot,
-                result,
-            } => {
-                self.connected = true;
-                let dominated_position = self.cursor.as_ref().map(|c| c.position);
-                if Some(cursor_position) != dominated_position {
-                    return;
-                }
-                let goal_state = goal_state_from_result(result, cursor_position);
-                self.apply_temporal_goal(slot, goal_state);
             }
             Message::Error { error } => {
                 self.error = Some(error);
@@ -314,67 +226,42 @@ impl App {
         }
     }
 
-    fn refresh_temporal_columns(&mut self) {
-        if self.display_mode.show_previous() {
-            self.request_temporal_goals(TemporalSlot::Previous);
-        }
-        if self.display_mode.show_next() {
-            self.request_temporal_goals(TemporalSlot::Next);
+    /// Get the text of the currently selected item (hypothesis or goal).
+    fn get_selection_text(&self, selection: Option<Selection>) -> Option<String> {
+        let dag = self.proof_dag.as_ref()?;
+
+        match selection? {
+            Selection::InitialHyp { hyp_idx } => dag
+                .initial_state
+                .hypotheses
+                .get(hyp_idx)
+                .map(|h| format!("{} : {}", h.name, h.type_.to_plain_text())),
+            Selection::Hyp { node_id, hyp_idx } => dag
+                .get(node_id)
+                .and_then(|node| node.state_after.hypotheses.get(hyp_idx))
+                .map(|h| format!("{} : {}", h.name, h.type_.to_plain_text())),
+            Selection::Goal { node_id, goal_idx } => dag
+                .get(node_id)
+                .and_then(|node| node.state_after.goals.get(goal_idx))
+                .map(|g| g.type_.to_plain_text()),
+            Selection::Theorem => dag
+                .initial_state
+                .goals
+                .first()
+                .map(|g| g.type_.to_plain_text()),
         }
     }
 
-    fn request_temporal_goals(&mut self, slot: TemporalSlot) {
-        let Some(cursor) = &self.cursor else {
-            return;
-        };
-
-        match slot {
-            TemporalSlot::Previous => {
-                if self.temporal_goals.previous.is_none() {
-                    self.temporal_goals.previous = Some(GoalState {
-                        state: ProofState::default(),
-                        position: cursor.position,
-                        status: LoadStatus::Loading,
-                    });
-                }
-            }
-            TemporalSlot::Next => {
-                if self.temporal_goals.next.is_none() {
-                    self.temporal_goals.next = Some(GoalState {
-                        state: ProofState::default(),
-                        position: cursor.position,
-                        status: LoadStatus::Loading,
-                    });
-                }
-            }
-            TemporalSlot::Current => {}
-        }
-
-        self.queue_command(Command::FetchTemporalGoals {
-            uri: cursor.uri.clone(),
-            cursor_position: cursor.position,
-            slot,
-        });
-    }
-
-    fn apply_temporal_goal(&mut self, slot: TemporalSlot, goal_state: GoalState) {
-        match slot {
-            TemporalSlot::Previous => self.temporal_goals.previous = Some(goal_state),
-            TemporalSlot::Current => self.temporal_goals.current = goal_state,
-            TemporalSlot::Next => self.temporal_goals.next = Some(goal_state),
+    /// Copy the selected item's text to the clipboard.
+    fn copy_selection_to_clipboard(&self) {
+        let selection = self.display_mode.current_selection();
+        if let Some(text) = self.get_selection_text(selection) {
+            let _ = stdout().execute(CopyToClipboard::to_clipboard_from(text));
         }
     }
 
     /// Update all components with current state.
     pub fn update(&mut self) {
-        // Fetch temporal goals if needed
-        if self.display_mode.show_previous() && self.temporal_goals.previous.is_none() {
-            self.request_temporal_goals(TemporalSlot::Previous);
-        }
-        if self.display_mode.show_next() && self.temporal_goals.next.is_none() {
-            self.request_temporal_goals(TemporalSlot::Next);
-        }
-
         self.update_display_mode();
         StatusBarWidget::update_state(
             &mut self.status_bar,
@@ -388,7 +275,7 @@ impl App {
 
     fn update_display_mode(&mut self) {
         self.display_mode.update_open_goal_list(PlainListInput {
-            state: self.proof_state().clone(),
+            state: self.proof_state(),
             definition: self.definition.clone(),
             error: self.error.clone(),
             proof_dag: self.proof_dag.clone(),
@@ -428,14 +315,14 @@ impl App {
             proof_dag: self.proof_dag.clone(),
         });
         self.display_mode.update_steps(StepsModeInput {
-            state: self.proof_state().clone(),
+            state: self.proof_state(),
             definition: self.definition.clone(),
             error: self.error.clone(),
             proof_dag: self.proof_dag.clone(),
         });
         self.display_mode
             .update_deduction_tree(DeductionTreeModeInput {
-                state: self.proof_state().clone(),
+                state: self.proof_state(),
                 definition: self.definition.clone(),
                 error: self.error.clone(),
                 proof_dag: self.proof_dag.clone(),
@@ -563,6 +450,10 @@ impl App {
             KeyCode::Char('t') => {
                 let selection = self.display_mode.current_selection();
                 self.navigate_to_selection_with_kind(selection, NavigationKind::TypeDefinition);
+                true
+            }
+            KeyCode::Char('y') => {
+                self.copy_selection_to_clipboard();
                 true
             }
             _ => false,

@@ -7,8 +7,8 @@
 //!        SocketServer → TUI clients
 //! ```
 
-pub mod ast;
-mod commands;
+mod cursor;
+mod documents;
 mod goals;
 mod lake;
 mod lsp;
@@ -16,15 +16,15 @@ mod lsp;
 use std::sync::{Arc, OnceLock};
 
 use async_lsp::MainLoop;
-use commands::process_command;
+use documents::DocumentCache;
 use lake::spawn_lake_serve;
-use lsp::{DeferredService, DocumentCache, InterceptService};
+use lsp::{DeferredService, InterceptService};
 use tokio::io::{stdin, stdout};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
     error::{Error, LspError, Result},
-    lean_rpc::{LeanDagClient, RpcClient},
+    lean_rpc::LeanDagClient,
     tui_ipc::{CommandHandler, SocketServer},
 };
 
@@ -54,9 +54,6 @@ pub async fn run() -> Result<()> {
 
     let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
-    // Shared slot for RPC client - set after LSP connection is established
-    let rpc_client_slot: Arc<OnceLock<Arc<RpcClient>>> = Arc::new(OnceLock::new());
-
     // Client-side: lean-tui → lake serve
     let doc_cache_client = document_cache.clone();
     let socket_server_client = socket_server.clone();
@@ -69,10 +66,6 @@ pub async fn run() -> Result<()> {
             lean_dag_slot_client,
         )
     });
-
-    // Create RPC client from server socket and store in slot
-    let rpc_client = Arc::new(RpcClient::new(server_socket.clone()));
-    let _ = rpc_client_slot.set(rpc_client.clone());
 
     // Server-side: editor → lean-tui
     let doc_cache_server = document_cache.clone();
@@ -93,24 +86,10 @@ pub async fn run() -> Result<()> {
     // Create command handler to process TUI commands
     let (cmd_handler, cmd_tx) = CommandHandler::new(client_socket.clone());
 
-    // Forward commands from socket server to command handler,
-    // intercepting GetHypothesisLocation for RPC lookup and FetchTemporalGoals
-    let rpc_for_commands = rpc_client.clone();
-    let doc_cache_for_commands = document_cache.clone();
-    let socket_server_for_commands = socket_server.clone();
+    // Forward commands from socket server to command handler
     tokio::spawn(async move {
         let mut cmd_rx = cmd_rx;
         while let Some(cmd) = cmd_rx.recv().await {
-            let Some(cmd) = process_command(
-                cmd,
-                &rpc_for_commands,
-                &doc_cache_for_commands,
-                &socket_server_for_commands,
-            )
-            .await
-            else {
-                continue;
-            };
             if cmd_tx.send(cmd).await.is_err() {
                 break;
             }

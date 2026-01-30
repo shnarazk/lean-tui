@@ -31,17 +31,17 @@ theorem commutativityOfIntersections
 
 Screenshots of different display modes
 
-| Tree-Sitter                  | Paper-proof                      |
+| Linear                       | Graph                            |
 | ---------------------------- | -------------------------------- |
 | ![](./imgs/flat_list.png)    | ![](./imgs/tactic_tree.png)      |
 | ![](./imgs/before_after.png) | ![](./imgs/semantic_tableau.png) |
 
-There are different display modes. The modes that work best with 'just Tree-Sitter' (syntactic):
+There are different display modes. Linear modes do not show much proof structure:
 
 - Plain list: simplest display mode with just a list of open goals
 - Before after: current active goal state and previous and next goal state
 
-There are two additional modes that also work with Tree-Sitter, but it is best to add LeanDag to your Lean file to get more detailed Lean-specific information:
+There are two additional modes that show more graph structure:
 
 - Tactic tree: tree of the tactic structure next to active hypotheses and goals
 - Semantic tableau: proof shown as a semantic tableau
@@ -66,7 +66,7 @@ cargo install lean-tui
 
 If `~/.cargo/bin` is in your path, you can now run this program with `lean-tui`.
 
-### 3. Import LeanDag
+### 3. Add `LeanDag` dependency
 
 Add [LeanDag](https://github.com/wvhulle/lean-dag) as a Lake dependency.
 
@@ -79,7 +79,9 @@ git = "https://github.com/wvhulle/lean-dag.git"
 rev = "main"
 ```
 
-Fetch the source code of the latest version (Lean only hosts on Git):
+### 4. Build `lean-dag`
+
+Fetch the source code of the latest version (Lean only hosts on Git, does not provide prebuilt dependencies):
 
 ```bash
 lake update LeanDag
@@ -136,8 +138,23 @@ Switch back to your editor:
 Switch to the TUI. Key bindings:
 
 - Use the arrows or click on hypotheses and goals
-- Use `d` to jump to term definition
-- Use `t`to jump to type definition
+- Use `d` to jump to definition (first resolvable constant in the type)
+- Use `t` to jump to the type of the first variable
+- Use `y` to copy selected hypothesis or goal to clipboard (OSC 52)
+
+Examples for a goal `s ∩ t = t ∩ s` where `s t : Set Nat`:
+
+| Key | Target | Why |
+|-----|--------|-----|
+| `d` | `Inter.inter` | First operation that has source code (skips `Eq` from Prelude) |
+| `t` | `Set` | Type of the first variable `s` |
+
+For a hypothesis `h : x ∈ s`:
+
+| Key | Target | Why |
+|-----|--------|-----|
+| `d` | `Set.Mem` | The membership operation |
+| `t` | `Nat` | Type of `x` (assuming `x : Nat`) |
 
 Proof states that are incomplete will be yellow and the ones you are currently working on blue.
 Normally, you **should not need to switch** often from now on, as the Lean-TUI window will follow your edits/hovers in the editor by default.
@@ -157,30 +174,24 @@ Let me know if you tried it out and encountered any issues! PRs are also welcome
 
 ## How does it work?
 
-This program will spawn a proxy LSP that intercepts communication with the Lake LSP every time you open a Lean file.
+This program spawns a proxy LSP that intercepts communication between your editor and Lean's build system.
 
 ```mermaid
 flowchart LR
-    subgraph Terminal 1
-        subgraph Editor
-            LSPClient[LSP Client]
-        end
-    end
-
-    subgraph Terminal 2
-        TUI[lean-tui view]
-    end
-
-    subgraph Proxy Process
-        Proxy[lean-tui proxy]
-    end
-
-    LSPClient <--> |stdio| Proxy
-    Proxy <--> |LSP + Lean RPC| Lake[Lake LSP]
-    Proxy --> |Unix socket| TUI
+    Editor[Editor] <--> Proxy[lean-tui proxy]
+    Proxy <--> Lake[lake serve]
+    Proxy <--> LeanDag[lean-dag]
+    Proxy --> TUI[lean-tui view]
 ```
 
-LeanDag runs inside the default LSP server provided by Lake (the standard build tool for Lean). In this way, it has access to more detailed information about the Lean program itself. This is useful because Lean has very expressive "elaboration" mechanism to extend its own syntax and convert it into math.
+**Data flow:**
+
+1. **Editor → Proxy**: Your editor sends LSP requests (hover, completion, diagnostics) to the proxy
+2. **Proxy → Lake LSP**: Standard requests are forwarded to `lake serve` for normal Lean functionality
+3. **Proxy → lean-dag**: When cursor moves into a proof, the proxy asks lean-dag for the `ProofDag` structure
+4. **Proxy → TUI**: Goal state and proof structure are pushed to the TUI via Unix socket
+
+**lean-dag** is a custom LSP server that runs alongside Lake. It uses Lean's internal APIs to extract detailed proof information (tactic applications, goal transformations, goto locations) that isn't available through standard LSP.
 
 ## Debugging
 

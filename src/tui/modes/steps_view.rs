@@ -11,19 +11,21 @@ use ratatui::{
 use super::Mode;
 use crate::{
     lean_rpc::{ProofDag, ProofDagNode, ProofState},
-    tui::widgets::{
-        goal_section::{GoalSection, GoalSectionState},
-        hyp_section::{HypSection, HypSectionState},
-        hypothesis_indices,
-        proof_steps_sidebar::{ProofStepsSidebar, ProofStepsSidebarState},
-        render_helpers::{render_error, render_no_goals},
-        selection::SelectionState,
-        tactic_row::divider,
-        theme::FocusedPane,
-        FilterToggle, HypothesisFilters, InteractiveComponent, InteractiveStatefulWidget,
-        KeyMouseEvent, Selection,
+    tui::{
+        app::DefinitionInfo,
+        widgets::{
+            goal_section::{GoalSection, GoalSectionState},
+            hyp_section::{HypSection, HypSectionState},
+            hypothesis_indices,
+            proof_steps_sidebar::{ProofStepsSidebar, ProofStepsSidebarState},
+            render_helpers::{render_error, render_no_goals},
+            selection::SelectionState,
+            tactic_row::divider,
+            theme::FocusedPane,
+            FilterToggle, HypothesisFilters, InteractiveComponent, InteractiveStatefulWidget,
+            KeyMouseEvent, Selection,
+        },
     },
-    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Steps mode.

@@ -2,7 +2,6 @@ use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as St
 
 #[derive(Debug, Clone)]
 pub enum LspError {
-    SessionExpired,
     InvalidRequest(String),
     ParseError(String),
     RpcError {
@@ -22,7 +21,6 @@ pub enum LspError {
 impl fmt::Display for LspError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SessionExpired => write!(f, "RPC session expired"),
             Self::InvalidRequest(msg) => write!(f, "Invalid request: {msg}"),
             Self::ParseError(msg) => write!(f, "Parse error: {msg}"),
             Self::RpcError {
