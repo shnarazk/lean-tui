@@ -13,7 +13,10 @@ use super::{
     given_pane::{hyp_style_colors, truncate_str},
     ClickRegion, Selection,
 };
-use crate::{lean_rpc::{ProofDagNode, ProofState}, tui::widgets::theme::Theme};
+use crate::{
+    lean_rpc::{ProofDagNode, ProofState},
+    tui::widgets::theme::Theme,
+};
 
 /// State for a single state node widget.
 #[derive(Default)]
@@ -107,7 +110,7 @@ impl<'a> StateNode<'a> {
                     .fg(fg)
                     .bg(bg)
                     .add_modifier(if selected { Modifier::UNDERLINED } else { Modifier::empty() });
-                let text = format!(" {}: {} ", h.name, truncate_str(&h.type_, 20));
+                let text = format!(" {}: {} ", h.name, truncate_str(&h.type_.to_plain_text(), 20));
                 let mut result = Vec::new();
                 if i > 0 {
                     result.push(Span::raw(" "));
@@ -169,7 +172,7 @@ impl<'a> StateNode<'a> {
             } else {
                 Modifier::empty()
             };
-            let goal_type = truncate_str(&g.type_, 35);
+            let goal_type = truncate_str(&g.type_.to_plain_text(), 35);
 
             if let Some(name) = g.username.as_str() {
                 spans.push(Span::styled(
@@ -200,7 +203,7 @@ impl<'a> StateNode<'a> {
             } else {
                 Modifier::empty()
             };
-            let goal_type = truncate_str(&g.type_, 35);
+            let goal_type = truncate_str(&g.type_.to_plain_text(), 35);
 
             if let Some(name) = g.username.as_str() {
                 spans.push(Span::styled(

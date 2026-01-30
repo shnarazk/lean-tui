@@ -10,6 +10,7 @@ use ratatui::{
 
 use super::Mode;
 use crate::{
+    lean_rpc::{ProofDag, ProofDagNode, ProofState},
     tui::widgets::{
         goal_section::{GoalSection, GoalSectionState},
         hyp_section::{HypSection, HypSectionState},
@@ -22,7 +23,6 @@ use crate::{
         FilterToggle, HypothesisFilters, InteractiveComponent, InteractiveStatefulWidget,
         KeyMouseEvent, Selection,
     },
-    lean_rpc::{ProofDag, ProofDagNode, ProofState},
     tui_ipc::DefinitionInfo,
 };
 
@@ -64,14 +64,14 @@ impl TacticTree {
         let hyps = hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order)
             .filter(|&i| {
                 self.state.hypotheses.get(i).map_or(false, |h| {
-                    (!self.filters.hide_instances || !h.is_instance) &&
-                    (!self.filters.hide_inaccessible || !h.is_proof)
+                    (!self.filters.hide_instances || !h.is_instance)
+                        && (!self.filters.hide_inaccessible || !h.is_proof)
                 })
             })
             .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
 
-        let goals = (0..self.state.goals.len())
-            .map(move |goal_idx| Selection::Goal { node_id, goal_idx });
+        let goals =
+            (0..self.state.goals.len()).map(move |goal_idx| Selection::Goal { node_id, goal_idx });
 
         hyps.chain(goals).collect()
     }

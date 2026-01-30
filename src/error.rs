@@ -5,12 +5,18 @@ pub enum LspError {
     SessionExpired,
     InvalidRequest(String),
     ParseError(String),
-    RpcError { code: Option<i32>, message: String },
+    RpcError {
+        code: Option<i32>,
+        message: String,
+    },
     LeanDagNotFound {
         searched_paths: Vec<PathBuf>,
         project_root: Option<PathBuf>,
     },
-    LeanDagSpawnFailed { path: String, reason: String },
+    LeanDagSpawnFailed {
+        path: String,
+        reason: String,
+    },
 }
 
 impl fmt::Display for LspError {

@@ -126,8 +126,9 @@ impl StatefulWidget for SemanticTableauLayout<'_> {
             .initial_state
             .goals
             .first()
-            .map_or("", |g| g.type_.as_str());
-        let theorem_widget = TheoremPane::new(theorem_goal, self.selection);
+            .map(|g| g.type_.to_plain_text())
+            .unwrap_or_default();
+        let theorem_widget = TheoremPane::new(&theorem_goal, self.selection);
         theorem_widget.render(theorem_area, buf, &mut state.theorem);
     }
 }

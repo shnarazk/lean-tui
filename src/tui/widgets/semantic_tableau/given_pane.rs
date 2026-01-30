@@ -108,7 +108,7 @@ impl StatefulWidget for GivenPane<'_> {
                     style = style.add_modifier(Modifier::UNDERLINED);
                 }
 
-                let truncated_type = truncate_str(&h.type_, 20);
+                let truncated_type = truncate_str(&h.type_.to_plain_text(), 20);
                 let text = format!(" {}: {} ", h.name, truncated_type);
                 let text_width = text.chars().count() as u16;
 

@@ -190,7 +190,9 @@ impl App {
                     .unwrap_or_default();
 
                 // Extract definition name from the ProofDag
-                let definition_name = proof_dag.as_ref().and_then(|dag| dag.definition_name.clone());
+                let definition_name = proof_dag
+                    .as_ref()
+                    .and_then(|dag| dag.definition_name.clone());
 
                 self.temporal_goals.current = GoalState {
                     state,
@@ -391,23 +393,36 @@ impl App {
             error: self.error.clone(),
             proof_dag: self.proof_dag.clone(),
         });
+        // Derive before/after states from the ProofDag
+        let current_node = self
+            .proof_dag
+            .as_ref()
+            .and_then(|dag| dag.current_node)
+            .and_then(|id| self.proof_dag.as_ref()?.get(id));
+
+        let previous_state = self
+            .display_mode
+            .show_previous()
+            .then(|| current_node.map(|n| n.state_before.clone()))
+            .flatten();
+
+        let next_state = self
+            .display_mode
+            .show_next()
+            .then(|| {
+                current_node
+                    .and_then(|n| n.children.first())
+                    .and_then(|&child_id| self.proof_dag.as_ref()?.get(child_id))
+                    .map(|child| child.state_after.clone())
+            })
+            .flatten();
+
         self.display_mode.update_before_after(BeforeAfterModeInput {
-            previous_state: self
-                .display_mode
-                .show_previous()
-                .then(|| {
-                    self.temporal_goals
-                        .previous
-                        .as_ref()
-                        .map(|g| g.state.clone())
-                })
-                .flatten(),
-            current_state: self.proof_state().clone(),
-            next_state: self
-                .display_mode
-                .show_next()
-                .then(|| self.temporal_goals.next.as_ref().map(|g| g.state.clone()))
-                .flatten(),
+            previous_state,
+            current_state: current_node
+                .map(|n| n.state_after.clone())
+                .unwrap_or_default(),
+            next_state,
             definition: self.definition.clone(),
             error: self.error.clone(),
             proof_dag: self.proof_dag.clone(),

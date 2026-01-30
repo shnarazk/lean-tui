@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::lean_rpc::{ProofDag, ProofState};
-
 // Re-export AST-derived types from proxy for IPC consumers
 pub use crate::proxy::ast::DefinitionInfo;
 

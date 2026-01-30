@@ -9,7 +9,9 @@ use ratatui::{
     Frame,
 };
 
-use super::{hypothesis_indices, ClickRegion, HypothesisFilters, Selection};
+use super::{
+    diff_text::TaggedTextExt, hypothesis_indices, ClickRegion, HypothesisFilters, Selection,
+};
 use crate::{lean_rpc::ProofState, tui::widgets::theme::Theme};
 
 /// Widget for rendering hypotheses and goals from ProofState.
@@ -98,9 +100,10 @@ impl StatefulWidget for OpenGoalList<'_> {
         }
 
         // Count visible hypotheses
-        let visible_hyp_count = hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order)
-            .filter(|&i| self.should_show_hypothesis(i))
-            .count();
+        let visible_hyp_count =
+            hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order)
+                .filter(|&i| self.should_show_hypothesis(i))
+                .count();
 
         // Layout: hypotheses, divider, goals
         let hyp_height = visible_hyp_count.min(area.height.saturating_sub(3) as usize / 2);
@@ -130,12 +133,13 @@ impl StatefulWidget for OpenGoalList<'_> {
                 Style::default()
             };
 
-            // Format: "name : type"
-            let line = Line::from(vec![
+            // Format: "name : type" (with diff highlighting)
+            let mut spans = vec![
                 Span::styled(&h.name, style.fg(Theme::HYP_NAME)),
                 Span::styled(" : ", style),
-                Span::styled(&h.type_, style.fg(Theme::HYP_TYPE)),
-            ]);
+            ];
+            spans.extend(h.type_.to_spans(style.fg(Theme::HYP_TYPE)));
+            let line = Line::from(spans);
 
             let line_area = Rect::new(hyp_area.x, y, hyp_area.width, 1);
             Paragraph::new(line).render(line_area, buf);
@@ -144,7 +148,10 @@ impl StatefulWidget for OpenGoalList<'_> {
             if let Some(nid) = self.node_id {
                 state.click_regions.push(ClickRegion {
                     area: line_area,
-                    selection: Selection::Hyp { node_id: nid, hyp_idx },
+                    selection: Selection::Hyp {
+                        node_id: nid,
+                        hyp_idx,
+                    },
                 });
             }
 
@@ -153,7 +160,9 @@ impl StatefulWidget for OpenGoalList<'_> {
 
         // Render divider
         let divider = "─".repeat(div_area.width as usize);
-        Paragraph::new(divider).style(Theme::DIM).render(div_area, buf);
+        Paragraph::new(divider)
+            .style(Theme::DIM)
+            .render(div_area, buf);
 
         // Render goals
         y = goal_area.y;
@@ -163,7 +172,9 @@ impl StatefulWidget for OpenGoalList<'_> {
             }
 
             let is_selected = matches!(self.selection, Some(Selection::Goal { goal_idx: sel_idx, .. }) if sel_idx == goal_idx);
-            let is_active = self.active_goal_name.is_some_and(|name| g.username.as_str() == Some(name));
+            let is_active = self
+                .active_goal_name
+                .is_some_and(|name| g.username.as_str() == Some(name));
 
             let style = if is_selected {
                 Style::new().bg(Theme::SELECTION_BG)
@@ -173,17 +184,21 @@ impl StatefulWidget for OpenGoalList<'_> {
 
             // Highlight active goal
             let target_style = if is_active {
-                style.fg(Theme::CURRENT_NODE_BORDER).add_modifier(Modifier::BOLD)
+                style
+                    .fg(Theme::CURRENT_NODE_BORDER)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 style.fg(Theme::GOAL_TYPE)
             };
 
             // Format: "⊢ type" or "case name ⊢ type"
-            let prefix = g.username.as_str().map_or("⊢ ".to_string(), |name| format!("case {name} ⊢ "));
-            let line = Line::from(vec![
-                Span::styled(prefix, style),
-                Span::styled(&g.type_, target_style),
-            ]);
+            let prefix = g
+                .username
+                .as_str()
+                .map_or("⊢ ".to_string(), |name| format!("case {name} ⊢ "));
+            let mut spans = vec![Span::styled(prefix, style)];
+            spans.extend(g.type_.to_spans(target_style));
+            let line = Line::from(spans);
 
             let line_area = Rect::new(goal_area.x, y, goal_area.width, 1);
             Paragraph::new(line).render(line_area, buf);
@@ -192,7 +207,10 @@ impl StatefulWidget for OpenGoalList<'_> {
             if let Some(nid) = self.node_id {
                 state.click_regions.push(ClickRegion {
                     area: line_area,
-                    selection: Selection::Goal { node_id: nid, goal_idx },
+                    selection: Selection::Goal {
+                        node_id: nid,
+                        goal_idx,
+                    },
                 });
             }
 

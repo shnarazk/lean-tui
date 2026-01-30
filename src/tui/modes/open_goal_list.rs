@@ -6,12 +6,12 @@ use ratatui::{layout::Rect, Frame};
 
 use super::Mode;
 use crate::{
+    lean_rpc::{ProofDag, ProofState},
     tui::widgets::{
         hypothesis_indices, open_goal_list::OpenGoalList, render_helpers::render_error,
         selection::SelectionState, FilterToggle, HypothesisFilters, InteractiveComponent,
         KeyMouseEvent, Selection,
     },
-    lean_rpc::{ProofDag, ProofState},
     tui_ipc::DefinitionInfo,
 };
 

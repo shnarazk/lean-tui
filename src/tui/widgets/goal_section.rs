@@ -16,9 +16,8 @@ use ratatui::{
 use crate::{
     lean_rpc::{GoalInfo, ProofState},
     tui::widgets::{
-        layout_metrics::LayoutMetrics,
-        theme::Theme,
-        ClickRegion, Selection,
+        diff_text::TaggedTextExt, layout_metrics::LayoutMetrics, theme::Theme, ClickRegion,
+        Selection,
     },
 };
 
@@ -201,7 +200,12 @@ fn track_goal_click_regions(
     }
 }
 
-fn goal_row(goal: &GoalInfo, is_selected: bool, _is_spawned: bool, is_active: bool) -> Row<'static> {
+fn goal_row(
+    goal: &GoalInfo,
+    is_selected: bool,
+    _is_spawned: bool,
+    is_active: bool,
+) -> Row<'static> {
     let base_color = if is_active {
         Theme::CURRENT_NODE_BORDER
     } else {
@@ -220,11 +224,10 @@ fn goal_row(goal: &GoalInfo, is_selected: bool, _is_spawned: bool, is_active: bo
         .map_or(String::new(), |n| format!("{n}: "));
     let col1 = Cell::from(Line::from(vec![Span::styled(case_label, style)]));
 
-    // Column 2: goal type
-    let col2 = Cell::from(Text::from(Line::from(vec![
-        Span::styled("⊢ ", style),
-        Span::styled(goal.type_.clone(), style),
-    ])));
+    // Column 2: goal type (with diff highlighting)
+    let mut spans = vec![Span::styled("⊢ ", style)];
+    spans.extend(goal.type_.to_spans(style));
+    let col2 = Cell::from(Text::from(Line::from(spans)));
 
     Row::new(vec![col1, col2])
 }

@@ -11,6 +11,7 @@ use tracing::debug;
 
 use super::Mode;
 use crate::{
+    lean_rpc::{ProofDag, ProofState},
     tui::widgets::{
         render_helpers::{render_error, render_no_goals},
         semantic_tableau::{
@@ -19,7 +20,6 @@ use crate::{
         },
         FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
     },
-    lean_rpc::{ProofDag, ProofState},
     tui_ipc::DefinitionInfo,
 };
 

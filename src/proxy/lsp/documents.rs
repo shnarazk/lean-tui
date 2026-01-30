@@ -4,9 +4,11 @@ use std::{collections::HashMap, sync::Mutex};
 
 use async_lsp::{
     lsp_types::{
-        notification::{DidChangeTextDocument, DidOpenTextDocument, Notification, PublishDiagnostics},
-        DidChangeTextDocumentParams, DidOpenTextDocumentParams, Position,
-        PublishDiagnosticsParams, TextDocumentContentChangeEvent,
+        notification::{
+            DidChangeTextDocument, DidOpenTextDocument, Notification, PublishDiagnostics,
+        },
+        DidChangeTextDocumentParams, DidOpenTextDocumentParams, Position, PublishDiagnosticsParams,
+        TextDocumentContentChangeEvent,
     },
     AnyNotification,
 };

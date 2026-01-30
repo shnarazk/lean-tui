@@ -8,13 +8,14 @@ use std::{
     task::{Context, Poll},
 };
 
-use async_lsp::{AnyEvent, AnyNotification, AnyRequest, LspService};
-use futures::Future;
-
-use async_lsp::lsp_types::{
-    notification::{DidChangeTextDocument, DidOpenTextDocument, Notification},
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+use async_lsp::{
+    lsp_types::{
+        notification::{DidChangeTextDocument, DidOpenTextDocument, Notification},
+        DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+    },
+    AnyEvent, AnyNotification, AnyRequest, LspService,
 };
+use futures::Future;
 
 use super::{
     cursor::{extract_cursor_from_notification, extract_cursor_from_request},

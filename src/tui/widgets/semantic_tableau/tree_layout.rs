@@ -59,7 +59,7 @@ pub fn node_content_width(node: &ProofDagNode) -> u16 {
     // Hypothesis widths: " name: type "
     for &hyp_idx in &node.new_hypotheses {
         if let Some(h) = node.state_after.hypotheses.get(hyp_idx) {
-            let hyp_width = h.name.len() + h.type_.len() + 5;
+            let hyp_width = h.name.len() + h.type_.to_plain_text().len() + 5;
             max_width = max_width.max(hyp_width);
         }
     }
@@ -69,7 +69,7 @@ pub fn node_content_width(node: &ProofDagNode) -> u16 {
         max_width = max_width.max(16); // "✓ Goal completed"
     } else {
         for g in &node.state_after.goals {
-            let goal_width = g.type_.len() + 4; // "⊢ " prefix + padding
+            let goal_width = g.type_.to_plain_text().len() + 4; // "⊢ " prefix + padding
             max_width = max_width.max(goal_width);
         }
     }

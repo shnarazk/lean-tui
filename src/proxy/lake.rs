@@ -64,7 +64,10 @@ fn find_lean_dag_server() -> Option<PathBuf> {
 pub fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
     // Log working directory for debugging
     if let Ok(cwd) = env::current_dir() {
-        tracing::info!("Spawning lean server from working directory: {}", cwd.display());
+        tracing::info!(
+            "Spawning lean server from working directory: {}",
+            cwd.display()
+        );
     }
 
     match find_lean_dag_server() {
@@ -73,7 +76,9 @@ pub fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
             spawn_lean_dag_server(&server_path)
         }
         None => {
-            tracing::warn!("lean-dag server not found, falling back to lake serve (RPC will not work)");
+            tracing::warn!(
+                "lean-dag server not found, falling back to lake serve (RPC will not work)"
+            );
             spawn_standard_lake_serve()
         }
     }

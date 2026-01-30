@@ -40,7 +40,10 @@ pub async fn run() -> Result<()> {
             Some(client)
         }
         Err(e) => {
-            tracing::warn!("Failed to initialize LeanDagClient: {}. Proof DAG will be unavailable.", e);
+            tracing::warn!(
+                "Failed to initialize LeanDagClient: {}. Proof DAG will be unavailable.",
+                e
+            );
             None
         }
     };

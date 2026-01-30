@@ -8,6 +8,7 @@ use ratatui::{
 
 use super::Mode;
 use crate::{
+    lean_rpc::{ProofDag, ProofState},
     tui::widgets::{
         goals_column::{GoalsColumn, GoalsColumnState},
         hypothesis_indices,
@@ -15,7 +16,6 @@ use crate::{
         selection::SelectionState,
         FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
     },
-    lean_rpc::{ProofDag, ProofState},
     tui_ipc::DefinitionInfo,
 };
 
@@ -91,14 +91,20 @@ impl BeforeAfterMode {
         };
 
         // Hypotheses followed by goals
-        let hyp_items = hypothesis_indices(self.current_state.hypotheses.len(), self.filters.reverse_order)
-            .filter(|&hyp_idx| {
-                self.current_state.hypotheses.get(hyp_idx).map_or(false, |h| {
-                    (!self.filters.hide_instances || !h.is_instance) &&
-                    (!self.filters.hide_inaccessible || !h.is_proof)
+        let hyp_items = hypothesis_indices(
+            self.current_state.hypotheses.len(),
+            self.filters.reverse_order,
+        )
+        .filter(|&hyp_idx| {
+            self.current_state
+                .hypotheses
+                .get(hyp_idx)
+                .map_or(false, |h| {
+                    (!self.filters.hide_instances || !h.is_instance)
+                        && (!self.filters.hide_inaccessible || !h.is_proof)
                 })
-            })
-            .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
+        })
+        .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
 
         let goal_items = (0..self.current_state.goals.len())
             .map(move |goal_idx| Selection::Goal { node_id, goal_idx });

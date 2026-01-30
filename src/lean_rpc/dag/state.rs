@@ -87,13 +87,16 @@ pub struct ProofState {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalInfo {
-    /// Goal type expression.
+    /// Goal type expression (with diff highlighting).
     #[serde(rename = "type")]
-    pub type_: String,
+    pub type_: TaggedText,
     /// User-visible name (e.g., "case inl").
     pub username: UserName,
     /// Internal goal ID (for tracking across steps).
     pub id: String,
+    /// Whether this goal was removed (for diff display in "before" view).
+    #[serde(default)]
+    pub is_removed: bool,
     /// Pre-resolved goto locations for navigation.
     #[serde(default)]
     pub goto_locations: GotoLocations,
@@ -105,17 +108,20 @@ pub struct GoalInfo {
 pub struct HypothesisInfo {
     /// User-visible name.
     pub name: String,
-    /// Type expression.
+    /// Type expression (with diff highlighting).
     #[serde(rename = "type")]
-    pub type_: String,
-    /// Value for let-bindings.
-    pub value: Option<String>,
+    pub type_: TaggedText,
+    /// Value for let-bindings (with diff highlighting).
+    pub value: Option<TaggedText>,
     /// Internal ID for tracking.
     pub id: String,
     /// Whether this hypothesis is a proof term.
     pub is_proof: bool,
     /// Whether this is a type class instance.
     pub is_instance: bool,
+    /// Whether this hypothesis was removed (for diff display in "before" view).
+    #[serde(default)]
+    pub is_removed: bool,
     /// Pre-resolved goto locations for navigation.
     #[serde(default)]
     pub goto_locations: GotoLocations,
@@ -131,9 +137,10 @@ impl ProofState {
             goals: goals
                 .iter()
                 .map(|g| GoalInfo {
-                    type_: g.target.to_plain_text(),
+                    type_: g.target.clone(),
                     username: UserName::from_optional(g.user_name.as_deref()),
                     id: String::new(),
+                    is_removed: false,
                     goto_locations: g.goto_locations.clone(),
                 })
                 .collect(),
@@ -144,11 +151,12 @@ impl ProofState {
                         .iter()
                         .map(|h| HypothesisInfo {
                             name: h.names.join(", "),
-                            type_: h.type_.to_plain_text(),
-                            value: h.val.as_ref().map(TaggedText::to_plain_text),
+                            type_: h.type_.clone(),
+                            value: h.val.clone(),
                             id: String::new(),
                             is_proof: false,
                             is_instance: h.is_instance,
+                            is_removed: false,
                             goto_locations: h.goto_locations.clone(),
                         })
                         .collect()

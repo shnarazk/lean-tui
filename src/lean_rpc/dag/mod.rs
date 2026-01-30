@@ -1,8 +1,9 @@
 //! Unified proof DAG - single source of truth for all display modes.
 //!
 //! This module defines the `ProofDag` data structure that contains all semantic
-//! information about a proof, pre-computed by the server. Each display mode uses
-//! the subset of data it needs, and the TUI only handles layout and rendering.
+//! information about a proof, pre-computed by the server. Each display mode
+//! uses the subset of data it needs, and the TUI only handles layout and
+//! rendering.
 
 pub mod node;
 pub mod state;

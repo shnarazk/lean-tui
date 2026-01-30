@@ -111,7 +111,10 @@ async fn handle_fetch_temporal_goals(
 
     let text_document = TextDocumentIdentifier::new(uri.clone());
 
-    match rpc_client.fetch_combined_goals(&text_document, target).await {
+    match rpc_client
+        .fetch_combined_goals(&text_document, target)
+        .await
+    {
         Ok(goals) => {
             socket_server.broadcast_temporal_goals(
                 uri.clone(),
