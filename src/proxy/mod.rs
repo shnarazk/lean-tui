@@ -9,12 +9,11 @@
 
 pub mod ast;
 mod commands;
-pub mod dag;
 mod goals;
 mod lake;
 mod lsp;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_lsp::MainLoop;
 use commands::process_command;
@@ -36,31 +35,37 @@ pub async fn run() -> Result<()> {
 
     let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
+    // Shared slot for RPC client - set after LSP connection is established
+    let rpc_client_slot: Arc<OnceLock<Arc<RpcClient>>> = Arc::new(OnceLock::new());
+
     // Client-side: lean-tui → lake serve
     let doc_cache_client = document_cache.clone();
     let socket_server_client = socket_server.clone();
+    let rpc_slot_client = rpc_client_slot.clone();
     let (mut client_mainloop, server_socket) = MainLoop::new_client(move |_| {
         InterceptService::with_document_cache(
             DeferredService(None),
             socket_server_client.clone(),
-            None,
             doc_cache_client,
+            rpc_slot_client,
         )
     });
 
-    // Create RPC client from server socket
+    // Create RPC client from server socket and store in slot
     let rpc_client = Arc::new(RpcClient::new(server_socket.clone()));
+    let _ = rpc_client_slot.set(rpc_client.clone());
+    tracing::info!("RPC client created for LeanDag.getProofDag calls");
 
     // Server-side: editor → lean-tui
     let doc_cache_server = document_cache.clone();
     let socket_server_server = socket_server.clone();
-    let rpc_client_server = rpc_client.clone();
+    let rpc_slot_server = rpc_client_slot.clone();
     let (server_mainloop, client_socket) = MainLoop::new_server(move |_| {
         InterceptService::with_document_cache(
             server_socket,
             socket_server_server.clone(),
-            Some(rpc_client_server.clone()),
             doc_cache_server,
+            rpc_slot_server,
         )
     });
 

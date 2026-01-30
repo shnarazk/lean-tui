@@ -6,18 +6,18 @@ use ratatui::{layout::Rect, Frame};
 
 use super::Mode;
 use crate::{
-    lean_rpc::Goal,
     tui::widgets::{
         hypothesis_indices, open_goal_list::OpenGoalList, render_helpers::render_error,
         selection::SelectionState, FilterToggle, HypothesisFilters, InteractiveComponent,
         KeyMouseEvent, Selection,
     },
-    tui_ipc::{DefinitionInfo, ProofDag, ProofState},
+    lean_rpc::{ProofDag, ProofState},
+    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Open Goal List mode.
 pub struct PlainListInput {
-    pub goals: Vec<Goal>,
+    pub state: ProofState,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
     pub proof_dag: Option<ProofDag>,
@@ -26,14 +26,12 @@ pub struct PlainListInput {
 /// Open Goal List display mode - navigable list of open goals with hypotheses.
 #[derive(Default)]
 pub struct PlainList {
-    /// Current proof state (from DAG or converted from goals).
+    /// Current proof state.
     state: ProofState,
     /// Current node ID in the DAG (for building selections).
     current_node_id: Option<u32>,
     /// Name of the goal the cursor's tactic is working on.
     active_goal_name: Option<String>,
-    /// Fallback goals (used when DAG not available).
-    goals: Vec<Goal>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
     filters: HypothesisFilters,
@@ -84,23 +82,18 @@ impl InteractiveComponent for PlainList {
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
-        // Extract current node ID and state from DAG
+        // Extract current node ID from DAG
         let current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
         let current_node = current_node_id.and_then(|id| input.proof_dag.as_ref()?.get(id));
-        let new_state = current_node.map_or_else(
-            || ProofState::from_goals(&input.goals),
-            |node| node.state_after.clone(),
-        );
 
-        let state_changed = self.state.goals.len() != new_state.goals.len()
-            || self.state.hypotheses.len() != new_state.hypotheses.len();
+        let state_changed = self.state.goals.len() != input.state.goals.len()
+            || self.state.hypotheses.len() != input.state.hypotheses.len();
 
         self.current_node_id = current_node_id;
         self.active_goal_name = current_node
             .and_then(|node| node.state_before.goals.first())
             .and_then(|g| g.username.as_str().map(String::from));
-        self.state = new_state;
-        self.goals = input.goals;
+        self.state = input.state;
         self.definition = input.definition;
         self.error = input.error;
 
@@ -153,7 +146,7 @@ impl InteractiveComponent for PlainList {
 
         // Render open goal list and collect click regions
         let goal_list = OpenGoalList::new(
-            &self.goals,
+            &self.state,
             self.current_selection(),
             self.filters,
             self.current_node_id,

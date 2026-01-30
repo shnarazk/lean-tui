@@ -1,7 +1,6 @@
 //! Component-based UI architecture.
 
 pub mod diff_text;
-pub mod goal_box;
 pub mod goal_section;
 pub mod goals_column;
 pub mod help_menu;
@@ -23,8 +22,6 @@ pub use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 pub use interactive_widget::{InteractiveComponent, InteractiveStatefulWidget};
 pub use selection::{ClickRegion, Selection};
-
-use crate::lean_rpc::Hypothesis;
 
 #[derive(Clone)]
 pub enum KeyMouseEvent {
@@ -51,16 +48,6 @@ pub enum FilterToggle {
 }
 
 impl HypothesisFilters {
-    pub fn should_show(self, hyp: &Hypothesis) -> bool {
-        if self.hide_instances && hyp.is_instance {
-            return false;
-        }
-        if self.hide_inaccessible && hyp.names.iter().any(|n| n.contains('\u{2020}')) {
-            return false;
-        }
-        true
-    }
-
     /// Toggle a filter setting.
     pub const fn toggle(&mut self, filter: FilterToggle) {
         match filter {

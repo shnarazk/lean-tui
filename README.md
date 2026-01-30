@@ -13,7 +13,6 @@ See below (or go to [codeberg](https://codeberg.org/wvhulle/lean-tui)) for a scr
 
 ```lean
 import Mathlib.Data.Set.Basic
-import Paperproof
 
 theorem commutativityOfIntersections
     (s t : Set Nat) : s ∩ t = t ∩ s := by
@@ -42,7 +41,7 @@ There are different display modes. The modes that work best with 'just Tree-Sitt
 - Plain list: simplest display mode with just a list of open goals
 - Before after: current active goal state and previous and next goal state
 
-There are two additional modes that also work with Tree-Sitter, but it is best to add Paper-proof to you Lean file to get more detailed Lean-specific information:
+There are two additional modes that also work with Tree-Sitter, but it is best to add LeanDag to your Lean file to get more detailed Lean-specific information:
 
 - Tactic tree: tree of the tactic structure next to active hypotheses and goals
 - Semantic tableau: proof shown as a semantic tableau
@@ -67,27 +66,20 @@ cargo install lean-tui
 
 If `~/.cargo/bin` is in your path, you can now run this program with `lean-tui`.
 
-### 3. Import PaperProof (optional)
+### 3. Import LeanDag (optional)
 
-If you want to use the more detailed display mode, add [PaperProof](https://github.com/Paper-Proof/paperproof/tree/main) as a Lake dependency.
+If you want to use the more detailed display mode, add [LeanDag](https://github.com/wvhulle/lean-dag) as a Lake dependency.
 
 In your `lakefile.toml`:
 
 ```toml
 [[require]]
-name = "Paperproof"
-git = "https://github.com/Paper-Proof/paperproof.git"
-subDir = "lean"
+name = "LeanDag"
+git = "https://github.com/wvhulle/lean-dag.git"
 rev = "main"
 ```
 
-Fetch the source code for dependencies: `lake update Paperproof`.
-
-Add this line to the Lean source code of which you want to visualize proof state:
-
-```lean
-import Paperproof
-```
+Fetch the source code for dependencies: `lake update LeanDag`.
 
 ## Configuration
 
@@ -193,4 +185,4 @@ flowchart LR
     Proxy --> |Unix socket| TUI
 ```
 
-Using Paper-proof as a datasource is optional. When it is added, it runs inside the defaul LSP server provided by Lake (the standard build tool for Lean). In this way, it has access to more detailed information about the Lean program itself. This is useful because Lean has very expressive "elaboration" mechanism to extend its own syntax and convert it into math.
+Using LeanDag as a datasource is optional. When it is added, it runs inside the default LSP server provided by Lake (the standard build tool for Lean). In this way, it has access to more detailed information about the Lean program itself. This is useful because Lean has very expressive "elaboration" mechanism to extend its own syntax and convert it into math.

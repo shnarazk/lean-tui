@@ -12,7 +12,7 @@ use super::{
     theorem_pane::{TheoremPane, TheoremPaneState},
     ClickRegion, Selection,
 };
-use crate::{lean_rpc::Goal, tui_ipc::ProofDag};
+use crate::lean_rpc::{ProofDag, ProofState};
 
 /// Combined state for the semantic tableau layout.
 #[derive(Default)]
@@ -85,8 +85,8 @@ pub struct SemanticTableauLayout<'a> {
     dag: &'a ProofDag,
     top_down: bool,
     selection: Option<Selection>,
-    /// Actual current goals from LSP (may differ from node's `state_after`).
-    current_goals: &'a [Goal],
+    /// Current proof state from LSP (may differ from node's `state_after`).
+    current_state: &'a ProofState,
 }
 
 impl<'a> SemanticTableauLayout<'a> {
@@ -94,13 +94,13 @@ impl<'a> SemanticTableauLayout<'a> {
         dag: &'a ProofDag,
         top_down: bool,
         selection: Option<Selection>,
-        current_goals: &'a [Goal],
+        current_state: &'a ProofState,
     ) -> Self {
         Self {
             dag,
             top_down,
             selection,
-            current_goals,
+            current_state,
         }
     }
 }
@@ -115,9 +115,9 @@ impl StatefulWidget for SemanticTableauLayout<'_> {
         let given_widget = GivenPane::new(&self.dag.initial_state.hypotheses, self.selection);
         given_widget.render(given_area, buf, &mut state.given);
 
-        // Render proof pane with actual current goals
+        // Render proof pane with actual current state
         let proof_widget =
-            ProofPane::new(self.dag, self.top_down, self.selection, self.current_goals);
+            ProofPane::new(self.dag, self.top_down, self.selection, self.current_state);
         proof_widget.render(proof_area, buf, &mut state.proof);
 
         // Render theorem pane with the top-level theorem (initial goal)

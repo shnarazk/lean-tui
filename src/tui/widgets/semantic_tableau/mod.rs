@@ -1,4 +1,4 @@
-//! Semantic tableau widget - Paperproof-style proof tree visualization.
+//! Semantic tableau widget - proof tree visualization.
 
 mod canvas;
 pub mod given_pane;

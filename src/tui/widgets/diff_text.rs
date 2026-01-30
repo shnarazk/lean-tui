@@ -1,14 +1,11 @@
 //! Diff-aware text rendering.
 
-use std::iter;
-
 use ratatui::{
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Span,
 };
 
-use super::HypothesisFilters;
-use crate::lean_rpc::{DiffTag, Goal, Hypothesis, TaggedText};
+use crate::lean_rpc::{DiffTag, TaggedText};
 
 pub const fn diff_tag_style(tag: DiffTag, base_style: Style) -> Style {
     match tag {
@@ -28,14 +25,6 @@ pub const fn item_style(is_selected: bool, fg_color: Color) -> Style {
     }
 }
 
-pub const fn selection_prefix(is_selected: bool) -> &'static str {
-    if is_selected {
-        "▶ "
-    } else {
-        "  "
-    }
-}
-
 pub struct DiffState {
     pub is_inserted: bool,
     pub is_removed: bool,
@@ -44,31 +33,24 @@ pub struct DiffState {
 
 pub struct DiffStyle {
     pub style: Style,
-    pub marker: &'static str,
 }
-
-const DIM_GRAY: Style = Style::new().fg(Color::DarkGray);
 
 pub const fn diff_style(state: &DiffState, is_selected: bool, base_color: Color) -> DiffStyle {
     if state.is_inserted {
         DiffStyle {
             style: item_style(is_selected, Color::Green),
-            marker: "+",
         }
     } else if state.is_removed {
         DiffStyle {
             style: item_style(is_selected, Color::Red).add_modifier(Modifier::CROSSED_OUT),
-            marker: "-",
         }
     } else if state.has_diff {
         DiffStyle {
             style: item_style(is_selected, base_color),
-            marker: "~",
         }
     } else {
         DiffStyle {
             style: item_style(is_selected, base_color),
-            marker: " ",
         }
     }
 }
@@ -93,69 +75,4 @@ impl TaggedTextExt for TaggedText {
                 .collect(),
         }
     }
-}
-
-pub fn render_hypothesis_line(
-    hyp: &Hypothesis,
-    is_selected: bool,
-    filters: HypothesisFilters,
-) -> Line<'static> {
-    let state = DiffState {
-        is_inserted: hyp.is_inserted,
-        is_removed: hyp.is_removed,
-        has_diff: hyp.type_.has_any_diff(),
-    };
-    let diff = diff_style(&state, is_selected, Color::White);
-
-    let names = hyp.names.join(", ");
-    let selection = selection_prefix(is_selected);
-
-    let base_spans = [
-        Span::styled(diff.marker, DIM_GRAY),
-        Span::styled(selection.to_string(), diff.style),
-        Span::styled(format!("{names} : "), diff.style),
-    ];
-
-    let type_spans = hyp.type_.to_spans(diff.style);
-
-    let value_spans: Vec<Span<'static>> = match (&hyp.val, filters.hide_let_values) {
-        (Some(val), false) => iter::once(Span::styled(" := ".to_string(), diff.style))
-            .chain(val.to_spans(diff.style))
-            .collect(),
-        _ => Vec::new(),
-    };
-
-    Line::from(
-        base_spans
-            .into_iter()
-            .chain(type_spans)
-            .chain(value_spans)
-            .collect::<Vec<_>>(),
-    )
-}
-
-pub fn render_target_line(goal: &Goal, is_selected: bool) -> Line<'static> {
-    let state = DiffState {
-        is_inserted: goal.is_inserted,
-        is_removed: goal.is_removed,
-        has_diff: goal.target.has_any_diff(),
-    };
-    let diff = diff_style(&state, is_selected, Color::Cyan);
-
-    let selection = selection_prefix(is_selected);
-
-    let base_spans = [
-        Span::styled(diff.marker, DIM_GRAY),
-        Span::styled(selection.to_string(), diff.style),
-        Span::styled(goal.prefix.clone(), diff.style),
-    ];
-
-    let target_spans = goal.target.to_spans(diff.style);
-
-    Line::from(
-        base_spans
-            .into_iter()
-            .chain(target_spans)
-            .collect::<Vec<_>>(),
-    )
 }

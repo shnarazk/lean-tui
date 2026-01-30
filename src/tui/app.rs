@@ -18,15 +18,15 @@ use super::{
     widgets::{welcome::WelcomeScreen, KeyMouseEvent, Selection},
 };
 use crate::{
-    lean_rpc::{Goal, GotoLocation},
+    lean_rpc::{GotoLocation, ProofDag, ProofState},
     tui::widgets::{
         help_menu::{HelpMenu, HelpMenuWidget},
         status_bar::{StatusBar, StatusBarInput, StatusBarWidget},
         InteractiveStatefulWidget,
     },
     tui_ipc::{
-        socket_path, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position, ProofDag,
-        ProofDagSource, TemporalSlot,
+        socket_path, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position,
+        TemporalSlot,
     },
 };
 
@@ -38,7 +38,7 @@ pub enum NavigationKind {
     TypeDefinition,
 }
 
-/// A step in the local proof history (includes goals, used for navigation).
+/// A step in the local proof history (includes state, used for navigation).
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
 pub struct LocalProofStep {
@@ -46,8 +46,8 @@ pub struct LocalProofStep {
     pub position: Position,
     /// The tactic text (if extractable).
     pub tactic: Option<String>,
-    /// Goals at this proof step.
-    pub goals: Vec<Goal>,
+    /// Proof state at this step.
+    pub state: ProofState,
     /// Nesting depth (for have/cases scopes).
     pub scope_depth: usize,
 }
@@ -76,7 +76,7 @@ pub enum LoadStatus {
 /// Goal state at a specific position.
 #[derive(Debug, Clone, Default)]
 pub struct GoalState {
-    pub goals: Vec<Goal>,
+    pub state: ProofState,
     pub position: Position,
     #[allow(dead_code)]
     pub status: LoadStatus,
@@ -109,7 +109,7 @@ pub struct App {
     outgoing_commands: Vec<Command>,
     /// Current display mode.
     display_mode: DisplayMode,
-    /// Proof history for Paperproof view.
+    /// Proof history for tree visualization views.
     #[allow(dead_code)] // Will be used in Phase 2-5 for proof history tracking
     proof_history: ProofHistory,
     /// Unified proof DAG - single source of truth for all display modes.
@@ -122,18 +122,18 @@ pub struct App {
 
 fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> GoalState {
     match result {
-        GoalResult::Ready { position, goals } => GoalState {
-            goals,
+        GoalResult::Ready { position, state } => GoalState {
+            state,
             position,
             status: LoadStatus::Ready,
         },
         GoalResult::NotAvailable => GoalState {
-            goals: vec![],
+            state: ProofState::default(),
             position: cursor_position,
             status: LoadStatus::NotAvailable,
         },
         GoalResult::Error { error } => GoalState {
-            goals: vec![],
+            state: ProofState::default(),
             position: cursor_position,
             status: LoadStatus::Error(error),
         },
@@ -141,14 +141,14 @@ fn goal_state_from_result(result: GoalResult, cursor_position: Position) -> Goal
 }
 
 impl App {
-    /// Get current goals.
-    pub fn goals(&self) -> &[Goal] {
-        &self.temporal_goals.current.goals
+    /// Get current proof state.
+    pub fn proof_state(&self) -> &ProofState {
+        &self.temporal_goals.current.state
     }
 
     /// Get position where current goals were fetched.
     pub const fn goals_position(&self) -> Option<Position> {
-        if self.temporal_goals.current.goals.is_empty() {
+        if self.temporal_goals.current.state.goals.is_empty() {
             None
         } else {
             Some(self.temporal_goals.current.position)
@@ -176,30 +176,32 @@ impl App {
                 self.connected = true;
                 self.error = None;
             }
-            Message::Goals {
+            Message::ProofDag {
                 uri: _,
                 position,
-                goals,
-                definition,
                 proof_dag,
             } => {
-                let line_changed = self.temporal_goals.current.position.line != position.line;
+                // Extract proof state directly from current node (no conversion needed)
+                let state = proof_dag
+                    .as_ref()
+                    .and_then(|dag| dag.current_node)
+                    .and_then(|id| proof_dag.as_ref()?.get(id))
+                    .map(|node| node.state_after.clone())
+                    .unwrap_or_default();
 
-                // Keep previous definition if new one is None and we're on the same line
-                let new_definition = if definition.is_none() && !line_changed {
-                    self.definition.clone()
-                } else {
-                    definition
-                };
+                // Extract definition name from the ProofDag
+                let definition_name = proof_dag.as_ref().and_then(|dag| dag.definition_name.clone());
 
-                // Always update goals to ensure goto_locations are updated
-                // (they may be resolved asynchronously after initial goal fetch)
                 self.temporal_goals.current = GoalState {
-                    goals,
+                    state,
                     position,
                     status: LoadStatus::Ready,
                 };
-                self.definition = new_definition;
+                self.definition = definition_name.map(|name| DefinitionInfo {
+                    name,
+                    kind: None,
+                    line: None,
+                });
                 self.proof_dag = proof_dag;
                 self.connected = true;
                 self.error = None;
@@ -328,7 +330,7 @@ impl App {
             TemporalSlot::Previous => {
                 if self.temporal_goals.previous.is_none() {
                     self.temporal_goals.previous = Some(GoalState {
-                        goals: vec![],
+                        state: ProofState::default(),
                         position: cursor.position,
                         status: LoadStatus::Loading,
                     });
@@ -337,7 +339,7 @@ impl App {
             TemporalSlot::Next => {
                 if self.temporal_goals.next.is_none() {
                     self.temporal_goals.next = Some(GoalState {
-                        goals: vec![],
+                        state: ProofState::default(),
                         position: cursor.position,
                         status: LoadStatus::Loading,
                     });
@@ -384,41 +386,41 @@ impl App {
 
     fn update_display_mode(&mut self) {
         self.display_mode.update_open_goal_list(PlainListInput {
-            goals: self.goals().to_vec(),
+            state: self.proof_state().clone(),
             definition: self.definition.clone(),
             error: self.error.clone(),
             proof_dag: self.proof_dag.clone(),
         });
         self.display_mode.update_before_after(BeforeAfterModeInput {
-            previous_goals: self
+            previous_state: self
                 .display_mode
                 .show_previous()
                 .then(|| {
                     self.temporal_goals
                         .previous
                         .as_ref()
-                        .map(|g| g.goals.clone())
+                        .map(|g| g.state.clone())
                 })
                 .flatten(),
-            current_goals: self.goals().to_vec(),
-            next_goals: self
+            current_state: self.proof_state().clone(),
+            next_state: self
                 .display_mode
                 .show_next()
-                .then(|| self.temporal_goals.next.as_ref().map(|g| g.goals.clone()))
+                .then(|| self.temporal_goals.next.as_ref().map(|g| g.state.clone()))
                 .flatten(),
             definition: self.definition.clone(),
             error: self.error.clone(),
             proof_dag: self.proof_dag.clone(),
         });
         self.display_mode.update_steps(StepsModeInput {
-            goals: self.goals().to_vec(),
+            state: self.proof_state().clone(),
             definition: self.definition.clone(),
             error: self.error.clone(),
             proof_dag: self.proof_dag.clone(),
         });
         self.display_mode
             .update_deduction_tree(DeductionTreeModeInput {
-                goals: self.goals().to_vec(),
+                state: self.proof_state().clone(),
                 definition: self.definition.clone(),
                 error: self.error.clone(),
                 proof_dag: self.proof_dag.clone(),
@@ -473,7 +475,8 @@ impl App {
     fn build_title(&self) -> String {
         if let (Some(def), Some(cursor)) = (&self.definition, &self.cursor) {
             let filename = cursor.filename().unwrap_or("?");
-            format!(" {} {} ({}) ", def.kind, def.name, filename)
+            let kind = def.kind.as_deref().unwrap_or("proof");
+            format!(" {kind} {} ({}) ", def.name, filename)
         } else if let Some(cursor) = &self.cursor {
             let filename = cursor.filename().unwrap_or("?");
             format!(" lean-tui [{}] ({}) ", self.display_mode.name(), filename)
@@ -494,11 +497,11 @@ impl App {
     }
 
     fn build_backend_display(&self) -> String {
-        let source_name = self.proof_dag.as_ref().map(|dag| match dag.source {
-            ProofDagSource::Paperproof => "Paperproof",
-            ProofDagSource::Local => "tree-sitter",
-        });
-        source_name.map_or(String::new(), |name| format!(" {name} "))
+        if self.proof_dag.is_some() {
+            " Server ".to_string()
+        } else {
+            String::new()
+        }
     }
 
     /// Handle crossterm events.

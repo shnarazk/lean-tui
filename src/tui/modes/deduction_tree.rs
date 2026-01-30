@@ -1,4 +1,4 @@
-//! Deduction Tree mode - Paperproof tree visualization.
+//! Deduction Tree mode - semantic tree visualization.
 
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
@@ -11,7 +11,6 @@ use tracing::debug;
 
 use super::Mode;
 use crate::{
-    lean_rpc::Goal,
     tui::widgets::{
         render_helpers::{render_error, render_no_goals},
         semantic_tableau::{
@@ -20,20 +19,21 @@ use crate::{
         },
         FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
     },
-    tui_ipc::{DefinitionInfo, ProofDag},
+    lean_rpc::{ProofDag, ProofState},
+    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Deduction Tree mode.
 pub struct DeductionTreeModeInput {
-    pub goals: Vec<Goal>,
+    pub state: ProofState,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
     pub proof_dag: Option<ProofDag>,
 }
 
-/// Deduction Tree display mode - Paperproof tree visualization.
+/// Deduction Tree display mode - semantic tree visualization.
 pub struct SemanticTableau {
-    goals: Vec<Goal>,
+    state: ProofState,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
     proof_dag: Option<ProofDag>,
@@ -49,7 +49,7 @@ pub struct SemanticTableau {
 impl Default for SemanticTableau {
     fn default() -> Self {
         Self {
-            goals: Vec::new(),
+            state: ProofState::default(),
             definition: None,
             error: None,
             proof_dag: None,
@@ -176,27 +176,21 @@ impl InteractiveComponent for SemanticTableau {
         let new_count = input.proof_dag.as_ref().map_or(0, ProofDag::len);
         let old_current = self.proof_dag.as_ref().and_then(|dag| dag.current_node);
         let new_current = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
-        let old_goal_count = self.goals.len();
-        let new_goal_count = input.goals.len();
 
         let tree_changed = old_count != new_count || old_current != new_current;
-        let goals_changed = old_goal_count != new_goal_count
-            || self
-                .goals
-                .iter()
-                .zip(input.goals.iter())
-                .any(|(old, new)| old.target.to_plain_text() != new.target.to_plain_text());
+        let state_changed = self.state.goals.len() != input.state.goals.len()
+            || self.state.hypotheses.len() != input.state.hypotheses.len();
 
         // Update state when current node changes
         self.tableau_state.update_current_node(new_current);
 
-        self.goals = input.goals;
+        self.state = input.state;
         self.definition = input.definition;
         self.error = input.error;
         self.proof_dag = input.proof_dag;
 
         // Auto-select active goal when tree or goals change
-        if tree_changed || goals_changed {
+        if tree_changed || state_changed {
             if let Some(sel) = self.active_goal_selection() {
                 self.select_by_selection(sel);
             } else {
@@ -235,7 +229,7 @@ impl InteractiveComponent for SemanticTableau {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let content_area = render_error(frame, area, self.error.as_deref());
 
-        if self.goals.is_empty() {
+        if self.state.goals.is_empty() {
             render_no_goals(frame, content_area);
             return;
         }
@@ -245,7 +239,7 @@ impl InteractiveComponent for SemanticTableau {
                 dag,
                 self.tree_top_down,
                 self.current_tree_selection(),
-                &self.goals,
+                &self.state,
             );
             frame.render_stateful_widget(widget, content_area, &mut self.tableau_state);
         } else {

@@ -38,18 +38,3 @@ fn test_find_next_tactic() {
     assert!(next.is_some());
     assert_eq!(next.unwrap().line, 3);
 }
-
-#[test]
-fn test_find_enclosing_definition() {
-    let code = "theorem foo : True := by\n  intro n\n  sorry";
-    let tree = parse(code);
-    let pos = Position {
-        line: 1,
-        character: 4,
-    };
-    let def = find_enclosing_definition(&tree, code, pos);
-    assert!(def.is_some());
-    let info = def.unwrap();
-    assert_eq!(info.kind, "theorem");
-    assert_eq!(info.name, "foo");
-}

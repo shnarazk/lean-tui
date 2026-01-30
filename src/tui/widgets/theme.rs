@@ -18,6 +18,16 @@ impl Theme {
     pub const TITLE_HYPOTHESIS: Color = Color::Blue;
     pub const TITLE_GOAL: Color = Color::Cyan;
 
+    // Selection highlighting
+    pub const SELECTION_BG: Color = Color::Rgb(50, 50, 80);
+
+    // Hypothesis colors
+    pub const HYP_NAME: Color = Color::Blue;
+    pub const HYP_TYPE: Color = Color::White;
+
+    // Goal colors
+    pub const GOAL_TYPE: Color = Color::Cyan;
+
     // Semantic tableau - proof hypothesis colors (green tones)
     pub const PROOF_HYP_BG: Color = Color::Rgb(30, 45, 30);
     pub const PROOF_HYP_FG: Color = Color::Rgb(150, 200, 150);

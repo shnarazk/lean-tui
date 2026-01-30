@@ -13,7 +13,7 @@ use super::{
     given_pane::{hyp_style_colors, truncate_str},
     ClickRegion, Selection,
 };
-use crate::{lean_rpc::Goal, tui::widgets::theme::Theme, tui_ipc::ProofDagNode};
+use crate::{lean_rpc::{ProofDagNode, ProofState}, tui::widgets::theme::Theme};
 
 /// State for a single state node widget.
 #[derive(Default)]
@@ -28,8 +28,8 @@ pub struct StateNode<'a> {
     is_current: bool,
     selection: Option<Selection>,
     top_down: bool,
-    /// Override goals from LSP (for current node).
-    override_goals: Option<&'a [Goal]>,
+    /// Override state from LSP (for current node).
+    override_state: Option<&'a ProofState>,
 }
 
 impl<'a> StateNode<'a> {
@@ -38,21 +38,21 @@ impl<'a> StateNode<'a> {
         is_current: bool,
         selection: Option<Selection>,
         top_down: bool,
-        override_goals: Option<&'a [Goal]>,
+        override_state: Option<&'a ProofState>,
     ) -> Self {
         Self {
             node,
             is_current,
             selection,
             top_down,
-            override_goals,
+            override_state,
         }
     }
 
     /// Determine if the node should show as complete.
     fn is_effective_complete(&self) -> bool {
-        self.override_goals
-            .map_or_else(|| self.node.is_complete(), <[Goal]>::is_empty)
+        self.override_state
+            .map_or_else(|| self.node.is_complete(), |s| s.goals.is_empty())
     }
 
     /// Get the border color for this node.
@@ -140,9 +140,9 @@ impl<'a> StateNode<'a> {
             ));
         }
 
-        // Use override goals if provided
-        if let Some(goals) = self.override_goals {
-            self.append_goal_spans_from_lsp(&mut spans, goals);
+        // Use override state if provided
+        if let Some(state) = self.override_state {
+            self.append_goal_spans_from_state(&mut spans, state);
         } else {
             self.append_goal_spans_from_node(&mut spans);
         }
@@ -153,9 +153,9 @@ impl<'a> StateNode<'a> {
         Line::from(spans)
     }
 
-    /// Append goal spans from LSP goals.
-    fn append_goal_spans_from_lsp(&self, spans: &mut Vec<Span<'static>>, goals: &[Goal]) {
-        for (goal_idx, g) in goals.iter().enumerate() {
+    /// Append goal spans from override state.
+    fn append_goal_spans_from_state(&self, spans: &mut Vec<Span<'static>>, state: &ProofState) {
+        for (goal_idx, g) in state.goals.iter().enumerate() {
             if goal_idx > 0 {
                 spans.push(Span::styled(" │ ", Style::new().fg(Color::DarkGray)));
             }
@@ -169,16 +169,11 @@ impl<'a> StateNode<'a> {
             } else {
                 Modifier::empty()
             };
-            let goal_type = truncate_str(&g.target.to_plain_text(), 35);
+            let goal_type = truncate_str(&g.type_, 35);
 
-            let show_username = g
-                .user_name
-                .as_ref()
-                .is_some_and(|u| !u.is_empty() && u != "[anonymous]");
-            if show_username {
-                let username = g.user_name.as_ref().unwrap();
+            if let Some(name) = g.username.as_str() {
                 spans.push(Span::styled(
-                    format!("{username}: "),
+                    format!("{name}: "),
                     Style::new().fg(Color::Cyan).add_modifier(underline),
                 ));
             }
@@ -233,8 +228,8 @@ impl<'a> StateNode<'a> {
 
         // Goal click regions
         let goal_count = self
-            .override_goals
-            .map_or(self.node.state_after.goals.len(), <[Goal]>::len);
+            .override_state
+            .map_or(self.node.state_after.goals.len(), |s| s.goals.len());
         for goal_idx in 0..goal_count {
             regions.push(ClickRegion {
                 area: Rect::new(inner.x, goals_y, inner.width, 1),

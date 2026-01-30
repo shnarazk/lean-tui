@@ -4,13 +4,10 @@ pub use async_lsp::lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::lean_rpc::Goal;
+use crate::lean_rpc::{ProofDag, ProofState};
+
 // Re-export AST-derived types from proxy for IPC consumers
 pub use crate::proxy::ast::DefinitionInfo;
-// Re-export ProofDag types
-pub use crate::proxy::dag::{
-    HypothesisInfo, NodeId, ProofDag, ProofDagNode, ProofDagSource, ProofState,
-};
 
 /// Returns the path to the Unix socket for IPC.
 pub fn socket_path() -> PathBuf {
@@ -38,7 +35,7 @@ pub enum GoalResult {
     /// Successfully fetched goals at the position.
     Ready {
         position: Position,
-        goals: Vec<Goal>,
+        state: ProofState,
     },
     /// No goals available (at proof boundary or outside proof).
     NotAvailable,
@@ -74,15 +71,11 @@ impl CursorInfo {
 pub enum Message {
     Connected,
     Cursor(CursorInfo),
-    Goals {
+    /// Unified proof DAG - single source of truth for all display modes.
+    ProofDag {
         uri: Url,
         position: Position,
-        goals: Vec<Goal>,
-        /// The enclosing definition (theorem, lemma, etc.)
-        #[serde(default)]
-        definition: Option<DefinitionInfo>,
-        /// Unified proof DAG - single source of truth for all display modes.
-        /// Contains all proof steps, tree structure, and navigation info.
+        /// Contains all proof steps, tree structure, and state info.
         #[serde(default)]
         proof_dag: Option<ProofDag>,
     },

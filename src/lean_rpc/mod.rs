@@ -1,14 +1,11 @@
 //! Lean RPC protocol types and client.
 
 mod client;
-pub mod paperproof;
+pub mod dag;
 
 use async_lsp::lsp_types::{Position, Range, Url};
 pub use client::{GoToKind, RpcClient};
-pub use paperproof::{
-    fetch_paperproof_via_cli, PaperproofGoalInfo, PaperproofHypothesis, PaperproofMode,
-    PaperproofStep,
-};
+pub use dag::{GoalInfo, HypothesisInfo, ProofDag, ProofDagNode, ProofState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -27,6 +24,7 @@ pub struct GotoLocation {
 /// Holds both definition and type definition locations, resolved at goal fetch
 /// time.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GotoLocations {
     /// Location of the definition (for "go to definition").
     pub definition: Option<GotoLocation>,
@@ -396,3 +394,4 @@ pub const RPC_CALL: &str = "$/lean/rpc/call";
 pub const GET_INTERACTIVE_GOALS: &str = "Lean.Widget.getInteractiveGoals";
 pub const GET_INTERACTIVE_TERM_GOAL: &str = "Lean.Widget.getInteractiveTermGoal";
 pub const GET_GOTO_LOCATION: &str = "Lean.Widget.getGoToLocation";
+pub const GET_PROOF_DAG: &str = "LeanDag.getProofDag";

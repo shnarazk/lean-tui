@@ -9,19 +9,18 @@ use async_lsp::{
     lsp_types::{Location, LocationLink, Position, TextDocumentIdentifier, Url},
     AnyRequest, ServerSocket,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Mutex;
 use tower_service::Service;
 
 use super::{
-    paperproof::{
-        PaperproofInputParams, PaperproofMode, PaperproofOutputParams, PAPERPROOF_GET_SNAPSHOT_DATA,
-    },
     Goal, GotoLocation, InteractiveGoalsResponse, InteractiveTermGoalResponse, RpcConnectResponse,
-    GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, RPC_CALL, RPC_CONNECT,
+    GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, GET_PROOF_DAG, RPC_CALL,
+    RPC_CONNECT,
 };
 use crate::error::LspError;
+use super::dag::ProofDag;
 
 #[derive(Serialize)]
 struct RpcConnectParams {
@@ -56,6 +55,22 @@ pub enum GoToKind {
 struct GetGoToLocationParams {
     kind: GoToKind,
     info: serde_json::Value,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GetProofDagParams {
+    text_document: TextDocumentIdentifier,
+    position: Position,
+    mode: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetProofDagResult {
+    proof_dag: ProofDag,
+    #[allow(dead_code)]
+    version: u32,
 }
 
 pub struct RpcClient {
@@ -361,52 +376,77 @@ impl RpcClient {
         None
     }
 
-    /// Get proof steps from Paperproof if available.
+    /// Fetch combined goals (tactic + term) with pre-resolved goto locations.
     ///
-    /// Returns `None` if Paperproof is not available in the user's Lean
-    /// project, or `Some(output)` with the proof step data.
-    pub async fn get_paperproof_snapshot(
+    /// This is the high-level entry point for fetching goals at a position.
+    /// It combines tactic goals and term goals, and pre-resolves goto locations
+    /// for all hypotheses and targets.
+    pub async fn fetch_combined_goals(
         &self,
         text_document: &TextDocumentIdentifier,
         position: Position,
-        mode: PaperproofMode,
-    ) -> Result<Option<PaperproofOutputParams>, LspError> {
-        let uri = &text_document.uri;
-        let params = PaperproofInputParams {
-            pos: position,
-            mode,
+    ) -> Result<Vec<Goal>, LspError> {
+        let (tactic_result, term_result) = tokio::join!(
+            self.get_goals(text_document, position),
+            self.get_term_goal(text_document, position)
+        );
+
+        let term_goal = term_result.ok().flatten();
+        let tactic_goals = match tactic_result {
+            Ok(goals) => goals,
+            Err(e) if term_goal.is_none() => return Err(e),
+            Err(_) => vec![],
         };
 
-        let result = self
-            .rpc_call_with_retry(
-                uri,
-                text_document,
-                position,
-                PAPERPROOF_GET_SNAPSHOT_DATA,
-                params,
-            )
+        let mut goals: Vec<Goal> = term_goal.into_iter().chain(tactic_goals).collect();
+
+        // Pre-resolve goto locations while RPC session is active
+        for goal in &mut goals {
+            self.resolve_goto_locations(text_document, position, goal)
+                .await;
+        }
+
+        Ok(goals)
+    }
+
+    /// Fetch the proof DAG at a position using the LeanDag RPC method.
+    ///
+    /// This calls `LeanDag.getProofDag` which returns a complete proof DAG
+    /// with parent/child relationships already computed server-side.
+    pub async fn get_proof_dag(
+        &self,
+        text_document: &TextDocumentIdentifier,
+        position: Position,
+        mode: &str,
+    ) -> Result<Option<ProofDag>, LspError> {
+        let uri = &text_document.uri;
+        let params = GetProofDagParams {
+            text_document: text_document.clone(),
+            position,
+            mode: mode.to_string(),
+        };
+
+        let response = self
+            .rpc_call_with_retry(uri, text_document, position, GET_PROOF_DAG, params)
             .await;
 
-        match result {
-            Ok(response) => {
-                if response.is_null() {
+        match response {
+            Ok(value) => {
+                if value.is_null() {
+                    tracing::debug!("LeanDag.getProofDag returned null");
                     return Ok(None);
                 }
-                let output: PaperproofOutputParams = serde_json::from_value(response)
+                let result: GetProofDagResult = serde_json::from_value(value)
                     .map_err(|e| LspError::ParseError(e.to_string()))?;
-                tracing::info!(
-                    "Paperproof: got {} proof steps (version {})",
-                    output.steps.len(),
-                    output.version
+                tracing::debug!(
+                    "LeanDag.getProofDag returned {} nodes",
+                    result.proof_dag.nodes.len()
                 );
-                Ok(Some(output))
+                Ok(Some(result.proof_dag))
             }
-            Err(LspError::RpcError { message, .. })
-                if message.contains("unknown method")
-                    || message.contains("Paperproof")
-                    || message.contains("not found") =>
-            {
-                tracing::debug!("Paperproof not available: {message}");
+            Err(LspError::RpcError { message, .. }) if message.contains("unknown method") => {
+                // LeanDag not available - likely the project doesn't have the dependency
+                tracing::debug!("LeanDag.getProofDag not available: {message}");
                 Ok(None)
             }
             Err(e) => Err(e),

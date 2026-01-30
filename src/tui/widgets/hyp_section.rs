@@ -1,4 +1,4 @@
-//! Hypotheses section - the top portion of the Paperproof view.
+//! Hypotheses section - the top portion of the tactic tree view.
 
 use std::collections::HashSet;
 
@@ -14,7 +14,7 @@ use ratatui::{
 
 use super::hyp_layer::{HypLayer, HypLayerRenderContext};
 use crate::{
-    lean_rpc::Goal,
+    lean_rpc::ProofState,
     tui::widgets::{
         layout_metrics::LayoutMetrics, theme::Theme, ClickRegion, HypothesisFilters, Selection,
     },
@@ -43,7 +43,7 @@ impl HypSectionState {
     /// Update the state with new data.
     pub fn update(
         &mut self,
-        goals: &[Goal],
+        state: &ProofState,
         filters: HypothesisFilters,
         depends_on: HashSet<String>,
         selection: Option<Selection>,
@@ -55,17 +55,16 @@ impl HypSectionState {
         self.selection = selection;
         let mut seen: HashSet<String> = HashSet::new();
 
-        let hyps = goals.iter().flat_map(|goal| {
-            goal.hyps
-                .iter()
-                .enumerate()
-                .filter(|(_, hyp)| filters.should_show(hyp))
-                .map(|(hyp_idx, hyp)| (hyp_idx, hyp.clone()))
-        });
-
-        for (hyp_idx, hyp) in hyps {
-            if seen.insert(hyp.names.join(",")) {
-                self.layer.add(hyp_idx, hyp);
+        for (hyp_idx, h) in state.hypotheses.iter().enumerate() {
+            // Apply filters
+            if filters.hide_instances && h.is_instance {
+                continue;
+            }
+            if filters.hide_inaccessible && h.is_proof {
+                continue;
+            }
+            if seen.insert(h.name.clone()) {
+                self.layer.add_from_info(hyp_idx, h);
             }
         }
     }

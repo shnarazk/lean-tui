@@ -16,10 +16,8 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use super::protocol::{
-    socket_path, Command, CursorInfo, GoalResult, Message, ProofDag, TemporalSlot,
-};
-use crate::lean_rpc::Goal;
+use super::protocol::{socket_path, Command, CursorInfo, GoalResult, Message, TemporalSlot};
+use crate::lean_rpc::ProofDag;
 
 // ============================================================================
 // SocketServer - broadcasts messages to TUI clients
@@ -64,20 +62,16 @@ impl SocketServer {
         self.send(Message::Cursor(cursor));
     }
 
-    /// Broadcast goals to all connected clients.
-    pub fn broadcast_goals(
+    /// Broadcast proof dag to all connected clients.
+    pub fn broadcast_proof_dag(
         &self,
         uri: Url,
         position: super::Position,
-        goals: Vec<Goal>,
-        definition: Option<super::DefinitionInfo>,
         proof_dag: Option<ProofDag>,
     ) {
-        self.send(Message::Goals {
+        self.send(Message::ProofDag {
             uri,
             position,
-            goals,
-            definition,
             proof_dag,
         });
     }

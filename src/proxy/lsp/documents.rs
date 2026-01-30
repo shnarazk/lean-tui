@@ -101,14 +101,6 @@ impl DocumentCache {
             .get(uri)
             .and_then(|d| d.tree.clone())
     }
-
-    pub fn get_tree_and_content(&self, uri: &str) -> Option<(Tree, String)> {
-        self.documents
-            .lock()
-            .expect("lock poisoned")
-            .get(uri)
-            .and_then(|d| d.tree.clone().map(|t| (t, d.content.clone())))
-    }
 }
 
 impl Default for DocumentCache {

@@ -5,7 +5,7 @@
 use tracing::debug;
 
 use super::{tree_layout::TreeLayout, Selection};
-use crate::tui_ipc::ProofDag;
+use crate::lean_rpc::ProofDag;
 
 /// Region for keyboard navigation - uses virtual coordinates (i32).
 #[derive(Debug, Clone, Copy)]

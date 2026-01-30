@@ -1,4 +1,4 @@
-//! Hypothesis layer - groups hypotheses for the Paperproof view.
+//! Hypothesis layer - groups hypotheses for the tactic tree view.
 
 use std::collections::HashSet;
 
@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::{
-    lean_rpc::Hypothesis,
+    lean_rpc::{Hypothesis, HypothesisInfo, TaggedText},
     tui::widgets::{
         diff_text::{diff_style, DiffState, TaggedTextExt},
         ClickRegion, Selection,
@@ -44,7 +44,21 @@ impl HypLayer {
         self.node_id = node_id;
     }
 
-    pub fn add(&mut self, hyp_idx: usize, hyp: Hypothesis) {
+    /// Add a hypothesis from HypothesisInfo (used when working directly with ProofState).
+    pub fn add_from_info(&mut self, hyp_idx: usize, info: &HypothesisInfo) {
+        let hyp = Hypothesis {
+            names: vec![info.name.clone()],
+            type_: TaggedText::Text {
+                text: info.type_.clone(),
+            },
+            val: info.value.as_ref().map(|v| TaggedText::Text { text: v.clone() }),
+            is_instance: info.is_instance,
+            is_type: false,
+            fvar_ids: None,
+            is_inserted: false,
+            is_removed: false,
+            goto_locations: info.goto_locations.clone(),
+        };
         self.hypotheses.push((hyp_idx, hyp));
     }
 

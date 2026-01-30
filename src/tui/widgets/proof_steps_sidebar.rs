@@ -1,4 +1,4 @@
-//! Proof steps sidebar widget for the Paperproof view.
+//! Proof steps sidebar widget for the tactic tree view.
 
 use ratatui::{
     buffer::Buffer,
@@ -12,8 +12,8 @@ use ratatui::{
 };
 
 use crate::{
+    lean_rpc::{ProofDag, ProofDagNode},
     tui::widgets::{theme::Theme, InteractiveStatefulWidget},
-    tui_ipc::{ProofDag, ProofDagNode},
 };
 
 // Tree drawing characters

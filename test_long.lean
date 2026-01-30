@@ -1,4 +1,4 @@
--- import Paperproof
+-- import LeanDag
  /-- A prime is a number larger than 1 with no trivial divisors -/
 def IsPrime (n : Nat) := 1 < n ∧ ∀ k, 1 < k → k < n → ¬ k ∣ n
 

@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use async_lsp::lsp_types::{Position, TextDocumentIdentifier, Url};
 
-use super::{ast, goals::fetch_combined_goals, lsp::DocumentCache};
+use super::{ast, lsp::DocumentCache};
 use crate::{
-    lean_rpc::{GoToKind, RpcClient},
+    lean_rpc::{GoToKind, ProofState, RpcClient},
     tui_ipc::{Command, GoalResult, SocketServer, TemporalSlot},
 };
 
@@ -111,7 +111,7 @@ async fn handle_fetch_temporal_goals(
 
     let text_document = TextDocumentIdentifier::new(uri.clone());
 
-    match fetch_combined_goals(rpc_client, &text_document, target).await {
+    match rpc_client.fetch_combined_goals(&text_document, target).await {
         Ok(goals) => {
             socket_server.broadcast_temporal_goals(
                 uri.clone(),
@@ -119,7 +119,7 @@ async fn handle_fetch_temporal_goals(
                 slot,
                 GoalResult::Ready {
                     position: target,
-                    goals,
+                    state: ProofState::from_goals(&goals),
                 },
             );
         }

@@ -14,7 +14,7 @@ use super::{
     tree_layout::{calculate_tree_layout, NodePosition, TreeLayout},
     ClickRegion, Selection,
 };
-use crate::{lean_rpc::Goal, tui_ipc::ProofDag};
+use crate::lean_rpc::{ProofDag, ProofState};
 
 /// State for the proof pane widget.
 #[derive(Default)]
@@ -91,9 +91,9 @@ pub struct ProofPane<'a> {
     dag: &'a ProofDag,
     top_down: bool,
     selection: Option<Selection>,
-    /// Actual current goals from LSP (used to override current node's goals if
+    /// Current proof state from LSP (used to override current node's state if
     /// different).
-    current_goals: &'a [Goal],
+    current_state: &'a ProofState,
 }
 
 impl<'a> ProofPane<'a> {
@@ -101,13 +101,13 @@ impl<'a> ProofPane<'a> {
         dag: &'a ProofDag,
         top_down: bool,
         selection: Option<Selection>,
-        current_goals: &'a [Goal],
+        current_state: &'a ProofState,
     ) -> Self {
         Self {
             dag,
             top_down,
             selection,
-            current_goals,
+            current_state,
         }
     }
 }
@@ -168,9 +168,9 @@ impl StatefulWidget for ProofPane<'_> {
             }
 
             let is_current = self.dag.is_current(pos.node_id);
-            // For the current node, use actual LSP goals if they differ from node's state
-            let override_goals = if is_current && !self.current_goals.is_empty() {
-                Some(self.current_goals)
+            // For the current node, use actual LSP state if it differs from node's state
+            let override_state = if is_current && !self.current_state.goals.is_empty() {
+                Some(self.current_state)
             } else {
                 None
             };
@@ -180,7 +180,7 @@ impl StatefulWidget for ProofPane<'_> {
                 is_current,
                 self.selection,
                 self.top_down,
-                override_goals,
+                override_state,
             );
             let mut node_state = StateNodeState::default();
             node_widget.render(render_area, buf, &mut node_state);

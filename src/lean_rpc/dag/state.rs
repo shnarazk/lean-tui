@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::lean_rpc::{Goal, GotoLocations, PaperproofGoalInfo, PaperproofHypothesis, TaggedText};
+use super::super::{Goal, GotoLocations, TaggedText};
 
 /// Check if a name is a Lean 4 hygienic macro identifier.
 /// These contain `._hyg.` or `._@.` patterns and are internal implementation
@@ -14,13 +14,32 @@ fn is_hygienic_name(name: &str) -> bool {
 }
 
 /// User-visible name for a goal.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+///
+/// Serializes to/from `Option<String>` (null or a string) for compatibility
+/// with the Lean server which sends `username: null` or `username: "name"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum UserName {
     /// No user-visible name (anonymous goal).
     #[default]
     Anonymous,
     /// A named goal (e.g., "case inl", "h").
     Named(String),
+}
+
+impl Serialize for UserName {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Anonymous => serializer.serialize_none(),
+            Self::Named(name) => serializer.serialize_some(name),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UserName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let opt: Option<String> = Option::deserialize(deserializer)?;
+        Ok(opt.map_or(Self::Anonymous, |name| Self::from_raw(&name)))
+    }
 }
 
 impl fmt::Display for UserName {
@@ -58,6 +77,7 @@ impl UserName {
 
 /// A proof state (goals and hypotheses at a point in the proof).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ProofState {
     pub goals: Vec<GoalInfo>,
     pub hypotheses: Vec<HypothesisInfo>,
@@ -65,8 +85,10 @@ pub struct ProofState {
 
 /// A goal to prove.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct GoalInfo {
     /// Goal type expression.
+    #[serde(rename = "type")]
     pub type_: String,
     /// User-visible name (e.g., "case inl").
     pub username: UserName,
@@ -79,10 +101,12 @@ pub struct GoalInfo {
 
 /// A hypothesis in scope.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct HypothesisInfo {
     /// User-visible name.
     pub name: String,
     /// Type expression.
+    #[serde(rename = "type")]
     pub type_: String,
     /// Value for let-bindings.
     pub value: Option<String>,
@@ -98,56 +122,10 @@ pub struct HypothesisInfo {
 }
 
 // ============================================================================
-// Conversions
+// Conversions (for local fallback)
 // ============================================================================
 
-impl From<&PaperproofGoalInfo> for GoalInfo {
-    fn from(goal: &PaperproofGoalInfo) -> Self {
-        Self {
-            type_: goal.type_.clone(),
-            username: UserName::from_raw(&goal.username),
-            id: goal.id.clone(),
-            goto_locations: GotoLocations::default(),
-        }
-    }
-}
-
-impl From<&PaperproofHypothesis> for HypothesisInfo {
-    fn from(h: &PaperproofHypothesis) -> Self {
-        let name = if is_hygienic_name(&h.username) {
-            String::new()
-        } else {
-            h.username.clone()
-        };
-        Self {
-            name,
-            type_: h.type_.clone(),
-            value: h.value.clone(),
-            id: h.id.clone(),
-            is_proof: h.is_proof == "proof",
-            is_instance: false,
-            goto_locations: GotoLocations::default(),
-        }
-    }
-}
-
-impl From<&PaperproofGoalInfo> for ProofState {
-    fn from(goal: &PaperproofGoalInfo) -> Self {
-        Self {
-            goals: vec![goal.into()],
-            hypotheses: goal.hyps.iter().map(HypothesisInfo::from).collect(),
-        }
-    }
-}
-
 impl ProofState {
-    pub(super) fn from_goals_after(goals_after: &[PaperproofGoalInfo]) -> Self {
-        goals_after.first().map_or_else(Self::default, |goal| Self {
-            goals: goals_after.iter().map(GoalInfo::from).collect(),
-            hypotheses: goal.hyps.iter().map(HypothesisInfo::from).collect(),
-        })
-    }
-
     pub fn from_goals(goals: &[Goal]) -> Self {
         Self {
             goals: goals

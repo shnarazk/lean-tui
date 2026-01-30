@@ -7,6 +7,7 @@ use super::{state::ProofState, NodeId};
 
 /// A node representing a proof state after applying a tactic.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProofDagNode {
     pub id: NodeId,
 
@@ -47,6 +48,7 @@ impl ProofDagNode {
 
 /// Information about a tactic application.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DagTacticInfo {
     /// The tactic text (e.g., "intro n").
     pub text: String,

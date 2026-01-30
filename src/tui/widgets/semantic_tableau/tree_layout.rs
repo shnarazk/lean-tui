@@ -1,6 +1,6 @@
 //! Tree layout calculation for the semantic tableau.
 
-use crate::tui_ipc::{NodeId, ProofDag, ProofDagNode};
+use crate::lean_rpc::dag::{NodeId, ProofDag, ProofDagNode};
 
 pub const MIN_NODE_WIDTH: u16 = 25;
 pub const MAX_NODE_WIDTH: u16 = 60;

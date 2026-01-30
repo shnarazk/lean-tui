@@ -10,7 +10,6 @@ use ratatui::{
 
 use super::Mode;
 use crate::{
-    lean_rpc::Goal,
     tui::widgets::{
         goal_section::{GoalSection, GoalSectionState},
         hyp_section::{HypSection, HypSectionState},
@@ -23,12 +22,13 @@ use crate::{
         FilterToggle, HypothesisFilters, InteractiveComponent, InteractiveStatefulWidget,
         KeyMouseEvent, Selection,
     },
-    tui_ipc::{DefinitionInfo, ProofDag, ProofDagNode},
+    lean_rpc::{ProofDag, ProofDagNode, ProofState},
+    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Steps mode.
 pub struct StepsModeInput {
-    pub goals: Vec<Goal>,
+    pub state: ProofState,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
     pub proof_dag: Option<ProofDag>,
@@ -37,7 +37,7 @@ pub struct StepsModeInput {
 /// Steps display mode - sidebar + hypotheses + goals.
 #[derive(Default)]
 pub struct TacticTree {
-    goals: Vec<Goal>,
+    state: ProofState,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
     proof_dag: Option<ProofDag>,
@@ -60,18 +60,18 @@ impl TacticTree {
             return Vec::new();
         };
 
-        // All hypotheses first (matching the Hypotheses pane order),
-        // then all goals (matching the Goals pane order).
-        let hyps = self.goals.iter().flat_map(|goal| {
-            hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
-                .filter(|&i| self.filters.should_show(&goal.hyps[i]))
-                .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx })
-        });
-        let goals = self
-            .goals
-            .iter()
-            .enumerate()
-            .map(move |(goal_idx, _)| Selection::Goal { node_id, goal_idx });
+        // All hypotheses first, then all goals
+        let hyps = hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order)
+            .filter(|&i| {
+                self.state.hypotheses.get(i).map_or(false, |h| {
+                    (!self.filters.hide_instances || !h.is_instance) &&
+                    (!self.filters.hide_inaccessible || !h.is_proof)
+                })
+            })
+            .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
+
+        let goals = (0..self.state.goals.len())
+            .map(move |goal_idx| Selection::Goal { node_id, goal_idx });
 
         hyps.chain(goals).collect()
     }
@@ -231,14 +231,15 @@ impl InteractiveComponent for TacticTree {
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
-        let goals_changed = self.goals != input.goals;
-        self.goals = input.goals;
+        let state_changed = self.state.goals.len() != input.state.goals.len()
+            || self.state.hypotheses.len() != input.state.hypotheses.len();
+        self.state = input.state;
         self.definition = input.definition;
         self.error = input.error;
         self.current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
         self.proof_dag = input.proof_dag;
 
-        if goals_changed {
+        if state_changed {
             self.selection.reset(self.selectable_items().len());
         }
     }
@@ -255,7 +256,7 @@ impl InteractiveComponent for TacticTree {
 
         let content = render_error(frame, area, self.error.as_deref());
 
-        if self.goals.is_empty() {
+        if self.state.goals.is_empty() {
             render_no_goals(frame, content);
             return;
         }
@@ -299,7 +300,7 @@ impl InteractiveComponent for TacticTree {
 
         // Render hypothesis section
         self.hyp_section_state.update(
-            &self.goals,
+            &self.state,
             self.filters,
             depends_on,
             self.current_selection(),
@@ -317,7 +318,7 @@ impl InteractiveComponent for TacticTree {
 
         // Render goal section
         self.goal_section_state.update(
-            self.goals.clone(),
+            &self.state,
             self.current_selection(),
             spawned_goal_ids,
             self.current_node_id,

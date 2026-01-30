@@ -1,27 +1,23 @@
 //! Unified proof DAG - single source of truth for all display modes.
 //!
 //! This module defines the `ProofDag` data structure that contains all semantic
-//! information about a proof, pre-computed by the proxy. Each display mode uses
+//! information about a proof, pre-computed by the server. Each display mode uses
 //! the subset of data it needs, and the TUI only handles layout and rendering.
 
-mod from_local;
-mod from_paperproof;
-mod goto_resolution;
 pub mod node;
 pub mod state;
-mod structure;
 
-use async_lsp::lsp_types::Position;
 pub use node::ProofDagNode;
 use serde::{Deserialize, Serialize};
-pub use state::{HypothesisInfo, ProofState};
+pub use state::{GoalInfo, HypothesisInfo, ProofState};
 
 /// Unique identifier for a node in the proof DAG.
 pub type NodeId = u32;
 
 /// The complete proof DAG - single source of truth for all display modes.
-/// Contains all semantic information pre-computed by the proxy.
+/// Contains all semantic information pre-computed by the server.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ProofDag {
     /// All nodes indexed by `NodeId`.
     pub nodes: Vec<ProofDagNode>,
@@ -38,24 +34,10 @@ pub struct ProofDag {
     /// Metadata about the proof.
     pub definition_name: Option<String>,
 
-    /// Source of the DAG data.
-    pub source: ProofDagSource,
-
     /// Orphan nodes not connected to main tree (e.g., inline `by` blocks).
     /// These should be rendered separately.
     #[serde(default)]
     pub orphans: Vec<NodeId>,
-}
-
-/// Source of proof DAG data.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ProofDagSource {
-    /// From Paperproof Lean library RPC.
-    Paperproof,
-    /// From local tree-sitter analysis.
-    #[default]
-    Local,
 }
 
 // ============================================================================
@@ -84,26 +66,6 @@ impl ProofDag {
     /// Get number of nodes.
     pub const fn len(&self) -> usize {
         self.nodes.len()
-    }
-
-    /// Find and set the current node (closest to cursor).
-    pub(crate) fn set_current_node(&mut self, cursor: Position) {
-        self.current_node = self
-            .nodes
-            .iter()
-            .map(|node| {
-                let line_diff = (i64::from(node.position.line) - i64::from(cursor.line)).abs();
-                let char_diff =
-                    (i64::from(node.position.character) - i64::from(cursor.character)).abs();
-                let penalty = if node.position.line > cursor.line {
-                    10000
-                } else {
-                    0
-                };
-                (node.id, line_diff * 1000 + char_diff + penalty)
-            })
-            .min_by_key(|(_, dist)| *dist)
-            .map(|(id, _)| id);
     }
 
     /// Check if a node is the current node (closest to cursor).

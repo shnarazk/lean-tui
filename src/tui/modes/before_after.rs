@@ -1,7 +1,5 @@
 //! Before/After mode - three-column temporal comparison view.
 
-use std::iter;
-
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -10,7 +8,6 @@ use ratatui::{
 
 use super::Mode;
 use crate::{
-    lean_rpc::Goal,
     tui::widgets::{
         goals_column::{GoalsColumn, GoalsColumnState},
         hypothesis_indices,
@@ -18,14 +15,15 @@ use crate::{
         selection::SelectionState,
         FilterToggle, HypothesisFilters, InteractiveComponent, KeyMouseEvent, Selection,
     },
-    tui_ipc::{DefinitionInfo, ProofDag},
+    lean_rpc::{ProofDag, ProofState},
+    tui_ipc::DefinitionInfo,
 };
 
 /// Input for updating the Before/After mode.
 pub struct BeforeAfterModeInput {
-    pub previous_goals: Option<Vec<Goal>>,
-    pub current_goals: Vec<Goal>,
-    pub next_goals: Option<Vec<Goal>>,
+    pub previous_state: Option<ProofState>,
+    pub current_state: ProofState,
+    pub next_state: Option<ProofState>,
     pub definition: Option<DefinitionInfo>,
     pub error: Option<String>,
     pub proof_dag: Option<ProofDag>,
@@ -33,9 +31,9 @@ pub struct BeforeAfterModeInput {
 
 /// Before/After display mode - temporal comparison of goal states.
 pub struct BeforeAfterMode {
-    previous_goals: Option<Vec<Goal>>,
-    current_goals: Vec<Goal>,
-    next_goals: Option<Vec<Goal>>,
+    previous_state: Option<ProofState>,
+    current_state: ProofState,
+    next_state: Option<ProofState>,
     definition: Option<DefinitionInfo>,
     error: Option<String>,
     /// Current node ID in the DAG (for building selections).
@@ -54,9 +52,9 @@ pub struct BeforeAfterMode {
 impl Default for BeforeAfterMode {
     fn default() -> Self {
         Self {
-            previous_goals: None,
-            current_goals: Vec::new(),
-            next_goals: None,
+            previous_state: None,
+            current_state: ProofState::default(),
+            next_state: None,
             definition: None,
             error: None,
             current_node_id: None,
@@ -92,17 +90,20 @@ impl BeforeAfterMode {
             return Vec::new();
         };
 
-        self.current_goals
-            .iter()
-            .enumerate()
-            .flat_map(|(goal_idx, goal)| {
-                let hyp_items = hypothesis_indices(goal.hyps.len(), self.filters.reverse_order)
-                    .filter(|&hyp_idx| self.filters.should_show(&goal.hyps[hyp_idx]))
-                    .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
-
-                hyp_items.chain(iter::once(Selection::Goal { node_id, goal_idx }))
+        // Hypotheses followed by goals
+        let hyp_items = hypothesis_indices(self.current_state.hypotheses.len(), self.filters.reverse_order)
+            .filter(|&hyp_idx| {
+                self.current_state.hypotheses.get(hyp_idx).map_or(false, |h| {
+                    (!self.filters.hide_instances || !h.is_instance) &&
+                    (!self.filters.hide_inaccessible || !h.is_proof)
+                })
             })
-            .collect()
+            .map(move |hyp_idx| Selection::Hyp { node_id, hyp_idx });
+
+        let goal_items = (0..self.current_state.goals.len())
+            .map(move |goal_idx| Selection::Goal { node_id, goal_idx });
+
+        hyp_items.chain(goal_items).collect()
     }
 }
 
@@ -111,10 +112,11 @@ impl InteractiveComponent for BeforeAfterMode {
     type Event = KeyMouseEvent;
 
     fn update(&mut self, input: Self::Input) {
-        let goals_changed = self.current_goals != input.current_goals;
-        self.previous_goals = input.previous_goals;
-        self.current_goals = input.current_goals;
-        self.next_goals = input.next_goals;
+        let state_changed = self.current_state.goals.len() != input.current_state.goals.len()
+            || self.current_state.hypotheses.len() != input.current_state.hypotheses.len();
+        self.previous_state = input.previous_state;
+        self.current_state = input.current_state;
+        self.next_state = input.next_state;
         self.definition = input.definition;
         self.error = input.error;
         let current_node_id = input.proof_dag.as_ref().and_then(|dag| dag.current_node);
@@ -123,7 +125,7 @@ impl InteractiveComponent for BeforeAfterMode {
         self.active_goal_name = current_node
             .and_then(|node| node.state_before.goals.first())
             .and_then(|g| g.username.as_str().map(String::from));
-        if goals_changed {
+        if state_changed {
             self.selection.reset(self.selectable_items().len());
         }
     }
@@ -179,8 +181,8 @@ impl InteractiveComponent for BeforeAfterMode {
         let content_area = render_error(frame, area, self.error.as_deref());
 
         // Three-column layout
-        let has_prev = self.previous_goals.is_some() && self.show_previous;
-        let has_next = self.next_goals.is_some() && self.show_next;
+        let has_prev = self.previous_state.is_some() && self.show_previous;
+        let has_next = self.next_state.is_some() && self.show_next;
 
         let constraints = match (has_prev, has_next) {
             (true, true) => vec![
@@ -199,12 +201,12 @@ impl InteractiveComponent for BeforeAfterMode {
         let selection = self.current_selection();
 
         // Previous column
-        if let Some(ref goals) = self.previous_goals {
+        if let Some(ref state) = self.previous_state {
             if self.show_previous {
                 frame.render_stateful_widget(
                     GoalsColumn::new(
                         "Previous",
-                        goals,
+                        state,
                         self.filters,
                         None,
                         false,
@@ -222,7 +224,7 @@ impl InteractiveComponent for BeforeAfterMode {
         frame.render_stateful_widget(
             GoalsColumn::new(
                 "Current",
-                &self.current_goals,
+                &self.current_state,
                 self.filters,
                 selection,
                 true,
@@ -239,12 +241,12 @@ impl InteractiveComponent for BeforeAfterMode {
         col_idx += 1;
 
         // Next column
-        if let Some(ref goals) = self.next_goals {
+        if let Some(ref state) = self.next_state {
             if self.show_next {
                 frame.render_stateful_widget(
                     GoalsColumn::new(
                         "Next",
-                        goals,
+                        state,
                         self.filters,
                         None,
                         false,

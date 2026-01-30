@@ -10,8 +10,7 @@ mod proxy_endpoint;
 mod tui_endpoint;
 
 pub use protocol::{
-    socket_path, Command, CursorInfo, DefinitionInfo, GoalResult, HypothesisInfo, Message, NodeId,
-    Position, ProofDag, ProofDagNode, ProofDagSource, ProofState, TemporalSlot,
+    socket_path, Command, CursorInfo, DefinitionInfo, GoalResult, Message, Position, TemporalSlot,
 };
 pub use proxy_endpoint::{CommandHandler, SocketServer};
 pub use tui_endpoint::spawn_socket_handler;

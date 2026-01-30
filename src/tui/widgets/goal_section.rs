@@ -1,4 +1,4 @@
-//! Goals section - the bottom portion of the Paperproof view.
+//! Goals section - the bottom portion of the tactic tree view.
 
 use std::collections::HashSet;
 
@@ -14,9 +14,8 @@ use ratatui::{
 };
 
 use crate::{
-    lean_rpc::Goal,
+    lean_rpc::{GoalInfo, ProofState},
     tui::widgets::{
-        diff_text::{item_style, TaggedTextExt},
         layout_metrics::LayoutMetrics,
         theme::Theme,
         ClickRegion, Selection,
@@ -26,7 +25,7 @@ use crate::{
 /// State for the goal section widget.
 #[derive(Default)]
 pub struct GoalSectionState {
-    goals: Vec<Goal>,
+    goals: Vec<GoalInfo>,
     selection: Option<Selection>,
     spawned_goal_ids: HashSet<String>,
     /// Node ID for creating click region selections.
@@ -50,13 +49,13 @@ impl GoalSectionState {
     /// Update the state with new data.
     pub fn update(
         &mut self,
-        goals: Vec<Goal>,
+        state: &ProofState,
         selection: Option<Selection>,
         spawned_goal_ids: HashSet<String>,
         node_id: Option<u32>,
         active_goal_name: Option<String>,
     ) {
-        self.goals = goals;
+        self.goals = state.goals.clone();
         self.selection = selection;
         self.spawned_goal_ids = spawned_goal_ids;
         self.node_id = node_id;
@@ -144,13 +143,13 @@ impl StatefulWidget for GoalSection {
                     Some(Selection::Goal { goal_idx: gi, .. }) if gi == goal_idx
                 );
                 let is_spawned = goal
-                    .user_name
-                    .as_ref()
+                    .username
+                    .as_str()
                     .is_some_and(|name| state.spawned_goal_ids.contains(name));
                 let is_active = goal
-                    .user_name
-                    .as_ref()
-                    .is_some_and(|name| state.active_goal_name.as_ref() == Some(name));
+                    .username
+                    .as_str()
+                    .is_some_and(|name| state.active_goal_name.as_deref() == Some(name));
                 goal_row(goal, is_selected, is_spawned, is_active)
             })
             .collect();
@@ -202,25 +201,30 @@ fn track_goal_click_regions(
     }
 }
 
-fn goal_row(goal: &Goal, is_selected: bool, _is_spawned: bool, is_active: bool) -> Row<'static> {
+fn goal_row(goal: &GoalInfo, is_selected: bool, _is_spawned: bool, is_active: bool) -> Row<'static> {
     let base_color = if is_active {
         Theme::CURRENT_NODE_BORDER
     } else {
         Theme::INCOMPLETE_NODE_BORDER
     };
-    let style = item_style(is_selected, base_color);
+    let style = if is_selected {
+        Style::new().bg(Theme::SELECTION_BG).fg(base_color)
+    } else {
+        Style::new().fg(base_color)
+    };
 
     // Column 1: case label (e.g. "Expected:" or "h.mpr:")
     let case_label = goal
-        .user_name
-        .as_ref()
+        .username
+        .as_str()
         .map_or(String::new(), |n| format!("{n}: "));
     let col1 = Cell::from(Line::from(vec![Span::styled(case_label, style)]));
 
-    // Column 2: goal type (prefix + target text), underlined when selected
-    let mut spans = vec![Span::styled(goal.prefix.clone(), style)];
-    spans.extend(goal.target.to_spans(style));
-    let col2 = Cell::from(Text::from(Line::from(spans)));
+    // Column 2: goal type
+    let col2 = Cell::from(Text::from(Line::from(vec![
+        Span::styled("⊢ ", style),
+        Span::styled(goal.type_.clone(), style),
+    ])));
 
     Row::new(vec![col1, col2])
 }

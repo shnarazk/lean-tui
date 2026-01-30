@@ -4,7 +4,7 @@ use std::{
     ops::ControlFlow,
     pin::Pin,
     result::Result as StdResult,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     task::{Context, Poll},
 };
 
@@ -17,43 +17,32 @@ use super::{
 };
 use crate::{lean_rpc::RpcClient, proxy::goals::spawn_goal_fetch, tui_ipc::SocketServer};
 
+/// Shared container for RPC client that can be set after service creation.
+pub type RpcClientSlot = Arc<OnceLock<Arc<RpcClient>>>;
+
 /// Intercepts LSP messages, extracts cursor position, and forwards to inner
 /// service.
 pub struct InterceptService<S> {
     pub service: S,
     pub socket_server: Arc<SocketServer>,
-    pub rpc_client: Option<Arc<RpcClient>>,
     pub document_cache: Arc<DocumentCache>,
+    /// RPC client slot - set after LSP connection is established.
+    pub rpc_client_slot: RpcClientSlot,
 }
 
 impl<S: LspService> InterceptService<S> {
-    #[allow(dead_code)]
-    pub fn new(
+    /// Create with a shared document cache and RPC client slot.
+    pub fn with_document_cache(
         service: S,
         socket_server: Arc<SocketServer>,
-        rpc_client: Option<Arc<RpcClient>>,
-    ) -> Self {
-        Self {
-            service,
-            socket_server,
-            rpc_client,
-            document_cache: Arc::new(DocumentCache::new()),
-        }
-    }
-
-    /// Create with a shared document cache (for sharing between client/server
-    /// sides).
-    pub const fn with_document_cache(
-        service: S,
-        socket_server: Arc<SocketServer>,
-        rpc_client: Option<Arc<RpcClient>>,
         document_cache: Arc<DocumentCache>,
+        rpc_client_slot: RpcClientSlot,
     ) -> Self {
         Self {
             service,
             socket_server,
-            rpc_client,
             document_cache,
+            rpc_client_slot,
         }
     }
 
@@ -70,8 +59,8 @@ impl<S: LspService> InterceptService<S> {
 
             self.socket_server.broadcast_cursor(cursor.clone());
 
-            if let Some(rpc) = &self.rpc_client {
-                spawn_goal_fetch(&cursor, &self.socket_server, rpc, &self.document_cache);
+            if let Some(rpc) = self.rpc_client_slot.get() {
+                spawn_goal_fetch(&cursor, &self.socket_server, rpc);
             }
         }
     }
@@ -91,8 +80,8 @@ impl<S: LspService> InterceptService<S> {
 
             self.socket_server.broadcast_cursor(cursor.clone());
 
-            if let Some(rpc) = &self.rpc_client {
-                spawn_goal_fetch(&cursor, &self.socket_server, rpc, &self.document_cache);
+            if let Some(rpc) = self.rpc_client_slot.get() {
+                spawn_goal_fetch(&cursor, &self.socket_server, rpc);
             }
         }
     }
