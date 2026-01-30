@@ -22,7 +22,7 @@ use super::{
     widgets::{welcome::WelcomeScreen, KeyMouseEvent, Selection},
 };
 use crate::{
-    lean_rpc::{GotoLocation, ProofDag, ProofState},
+    lean_rpc::{ProofDag, ProofState},
     tui::widgets::{
         help_menu::{HelpMenu, HelpMenuWidget},
         status_bar::{StatusBar, StatusBarInput, StatusBarWidget},
@@ -30,14 +30,6 @@ use crate::{
     },
     tui_ipc::{socket_path, Command, CursorInfo, Message, Position},
 };
-
-/// Kind of navigation (definition or type definition).
-#[derive(Debug, Clone, Copy, Default)]
-pub enum NavigationKind {
-    #[default]
-    Definition,
-    TypeDefinition,
-}
 
 /// Information about the enclosing definition (theorem, lemma, def, etc.)
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,78 +144,39 @@ impl App {
         self.display_mode.prev();
     }
 
-    /// Navigate to the given selection (go to definition).
+    /// Navigate to where the selected item was introduced.
+    /// - Hypotheses: go to binder location (where variable was bound)
+    /// - Goals: go to tactic position (where goal was created)
     pub fn navigate_to_selection(&mut self, selection: Option<Selection>) {
-        self.navigate_to_selection_with_kind(selection, NavigationKind::Definition);
-    }
-
-    /// Navigate to the given selection with a specific navigation kind.
-    pub fn navigate_to_selection_with_kind(
-        &mut self,
-        selection: Option<Selection>,
-        kind: NavigationKind,
-    ) {
         let Some(cursor) = &self.cursor else {
             return;
         };
 
-        let goals_pos = self.goals_position().unwrap_or(cursor.position);
-        let cmd = self.build_navigation_command(selection, cursor.uri.clone(), goals_pos, kind);
-        self.queue_command(cmd);
-    }
+        let dag = self.proof_dag.as_ref();
+        let fallback_pos = self.goals_position().unwrap_or(cursor.position);
 
-    fn build_navigation_command(
-        &self,
-        selection: Option<Selection>,
-        uri: Url,
-        position: Position,
-        kind: NavigationKind,
-    ) -> Command {
-        let goto_location = self.resolve_goto_location(selection, kind);
-
-        tracing::debug!(
-            "Navigation: selection={:?}, kind={:?}, goto_location={:?}",
-            selection,
-            kind,
-            goto_location.map(|l| (&l.uri, l.position))
-        );
-
-        goto_location.map_or(Command::Navigate { uri, position }, |loc| {
-            Command::Navigate {
-                uri: loc.uri.clone(),
-                position: loc.position,
-            }
-        })
-    }
-
-    fn resolve_goto_location(
-        &self,
-        selection: Option<Selection>,
-        kind: NavigationKind,
-    ) -> Option<&GotoLocation> {
-        let dag = self.proof_dag.as_ref()?;
-
-        let locations = match selection? {
+        // Resolve goto location based on selection type
+        let goto_location: Option<(Url, Position)> = selection.and_then(|sel| match sel {
+            // Hypotheses: use binder location from goto_locations
             Selection::InitialHyp { hyp_idx } => dag
-                .initial_state
-                .hypotheses
-                .get(hyp_idx)
-                .map(|h| &h.goto_locations),
+                .and_then(|d| d.initial_state.hypotheses.get(hyp_idx))
+                .and_then(|h| h.goto_locations.definition.as_ref())
+                .map(|loc| (loc.uri.clone(), loc.position)),
             Selection::Hyp { node_id, hyp_idx } => dag
-                .get(node_id)
+                .and_then(|d| d.get(node_id))
                 .and_then(|node| node.state_after.hypotheses.get(hyp_idx))
-                .map(|h| &h.goto_locations),
-            Selection::Goal { node_id, goal_idx } => dag
-                .get(node_id)
-                .and_then(|node| node.state_after.goals.get(goal_idx))
-                .map(|g| &g.goto_locations),
-            Selection::Theorem => dag.initial_state.goals.first().map(|g| &g.goto_locations),
-        }?;
+                .and_then(|h| h.goto_locations.definition.as_ref())
+                .map(|loc| (loc.uri.clone(), loc.position)),
+            // Goals: use node's tactic position
+            Selection::Goal { node_id, .. } => dag
+                .and_then(|d| d.get(node_id))
+                .map(|node| (cursor.uri.clone(), node.position)),
+            // Theorem: fallback to cursor position
+            Selection::Theorem => None,
+        });
 
-        match kind {
-            NavigationKind::Definition => locations.definition.as_ref(),
-            NavigationKind::TypeDefinition => locations.type_def.as_ref(),
-        }
+        let (uri, position) = goto_location.unwrap_or((cursor.uri.clone(), fallback_pos));
+        self.queue_command(Command::Navigate { uri, position });
     }
 
     /// Get the text of the currently selected item (hypothesis or goal).
@@ -442,14 +395,9 @@ impl App {
                 self.prev_mode();
                 true
             }
-            KeyCode::Char('d') | KeyCode::Enter => {
+            KeyCode::Char('g') | KeyCode::Enter => {
                 let selection = self.display_mode.current_selection();
                 self.navigate_to_selection(selection);
-                true
-            }
-            KeyCode::Char('t') => {
-                let selection = self.display_mode.current_selection();
-                self.navigate_to_selection_with_kind(selection, NavigationKind::TypeDefinition);
                 true
             }
             KeyCode::Char('y') => {

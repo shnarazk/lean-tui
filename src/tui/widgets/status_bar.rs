@@ -62,14 +62,14 @@ impl StatefulWidget for StatusBarWidget {
             ]
         });
 
-        // Navigation shortcuts (d/t) in magenta, before filters
+        // Navigation shortcuts
         let nav_spans = [
             separator.clone(),
-            Span::styled("d", Style::new().fg(Color::Magenta)),
-            Span::raw(": def"),
+            Span::styled("g", Style::new().fg(Color::Magenta)),
+            Span::raw(": goto"),
             Span::raw(" "),
-            Span::styled("t", Style::new().fg(Color::Magenta)),
-            Span::raw(": type"),
+            Span::styled("y", Style::new().fg(Color::Magenta)),
+            Span::raw(": copy"),
         ];
 
         let filter_status = build_filter_status(state.filters, state.supported_filters);

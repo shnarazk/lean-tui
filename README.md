@@ -1,13 +1,8 @@
 # Lean-TUI
 
-(**Warning**: early release, under development)
+Standalone TUI infoview for Lean 4 theorem prover.
 
-This is a **terminal-only (TUI) info view**, comparable to the VS Code info view for [Lean 4](https://lean-lang.org/).
-
-It shows:
-
-- The proof structure, hypotheses and goals for a mathematician proving and formalizing proofs (tactic mode in Lean).
-- The active variable bindings for a developer writing code (called "term-mode" in Lean).
+Shows proof structure, hypotheses and goals - comparable to the VS Code infoview but for any terminal.
 
 See below (or go to [codeberg](https://codeberg.org/wvhulle/lean-tui)) for a screenshot of proof state of a simple but incomplete Lean proof:
 
@@ -137,34 +132,16 @@ Switch back to your editor:
 
 Switch to the TUI. Key bindings:
 
-- Use the arrows or click on hypotheses and goals
-- Use `d` to jump to definition (first resolvable constant in the type)
-- Use `t` to jump to the type of the first variable
-- Use `y` to copy selected hypothesis or goal to clipboard (OSC 52)
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate hypotheses and goals |
+| `g` | Go to where item was introduced |
+| `y` | Copy to clipboard (OSC 52) |
+| `[/]` | Switch display mode |
+| `?` | Help menu |
+| `q` | Quit |
 
-Examples for a goal `s ∩ t = t ∩ s` where `s t : Set Nat`:
-
-| Key | Target | Why |
-|-----|--------|-----|
-| `d` | `Inter.inter` | First operation that has source code (skips `Eq` from Prelude) |
-| `t` | `Set` | Type of the first variable `s` |
-
-For a hypothesis `h : x ∈ s`:
-
-| Key | Target | Why |
-|-----|--------|-----|
-| `d` | `Set.Mem` | The membership operation |
-| `t` | `Nat` | Type of `x` (assuming `x : Nat`) |
-
-Proof states that are incomplete will be yellow and the ones you are currently working on blue.
-Normally, you **should not need to switch** often from now on, as the Lean-TUI window will follow your edits/hovers in the editor by default.
-
-_Under development: filtering certain types of hypotheses with keyboard shortcuts (`i` for class instance terms and so on)._
-
-More shortcuts:
-
-- Help menu `?`
-- Close with `q`
+The TUI follows your cursor in the editor automatically.
 
 ## Why?
 
