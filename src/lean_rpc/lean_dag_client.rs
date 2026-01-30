@@ -1,7 +1,8 @@
 //! Dedicated LSP client for lean-dag server.
 //!
-//! This client spawns its own lean-dag process and manages the full LSP lifecycle,
-//! ensuring proper synchronization between document opening and RPC calls.
+//! This client spawns its own lean-dag process and manages the full LSP
+//! lifecycle, ensuring proper synchronization between document opening and RPC
+//! calls.
 
 use std::{
     collections::HashMap,
@@ -79,10 +80,9 @@ impl tower_service::Service<AnyRequest> for LeanDagService {
 impl LspService for LeanDagService {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
         if notif.method == "textDocument/publishDiagnostics" {
-            if let Ok(params) =
-                serde_json::from_value::<async_lsp::lsp_types::PublishDiagnosticsParams>(
-                    notif.params,
-                )
+            if let Ok(params) = serde_json::from_value::<
+                async_lsp::lsp_types::PublishDiagnosticsParams,
+            >(notif.params)
             {
                 tracing::debug!("[LeanDag] publishDiagnostics for {}", params.uri);
             }
@@ -210,10 +210,10 @@ impl LeanDagClient {
         tracing::debug!("[LeanDag] Sending initialize request");
 
         let id = self.next_request_id();
-        let request_json =
-            json!({ "id": id, "method": Initialize::METHOD, "params": params });
-        let request: AnyRequest = serde_json::from_value(request_json)
-            .map_err(|e| LspError::InvalidRequest(format!("Failed to build initialize request: {e}")))?;
+        let request_json = json!({ "id": id, "method": Initialize::METHOD, "params": params });
+        let request: AnyRequest = serde_json::from_value(request_json).map_err(|e| {
+            LspError::InvalidRequest(format!("Failed to build initialize request: {e}"))
+        })?;
 
         self.socket
             .clone()
@@ -222,7 +222,8 @@ impl LeanDagClient {
             .map_err(|e| LspError::RpcError {
                 code: Some(e.code.0),
                 message: format!(
-                    "lean-dag initialization failed: {}. Check ~/.cache/lean-tui/lean-dag-client.log for details",
+                    "lean-dag initialization failed: {}. Check \
+                     ~/.cache/lean-tui/lean-dag-client.log for details",
                     e.message
                 ),
             })?;
@@ -340,9 +341,8 @@ impl LeanDagClient {
             uri: uri.to_string(),
         };
         let response = self.request(RPC_CONNECT, params).await?;
-        let resp: RpcConnectResponse = serde_json::from_value(response).map_err(|e| {
-            LspError::ParseError(format!("Invalid RPC session response: {e}"))
-        })?;
+        let resp: RpcConnectResponse = serde_json::from_value(response)
+            .map_err(|e| LspError::ParseError(format!("Invalid RPC session response: {e}")))?;
 
         let session_id = resp.session_id;
         tracing::debug!("[LeanDag] RPC session for {}: {}", uri, session_id);
@@ -381,7 +381,9 @@ impl LeanDagClient {
         // Try with existing session, retry once if session is outdated
         match self.try_get_proof_dag(uri, position, mode).await {
             Ok(result) => Ok(result),
-            Err(LspError::RpcError { code: Some(code), .. }) if code == RPC_SESSION_OUTDATED => {
+            Err(LspError::RpcError {
+                code: Some(code), ..
+            }) if code == RPC_SESSION_OUTDATED => {
                 tracing::debug!("[LeanDag] Session outdated for {}, renewing", uri);
                 self.invalidate_session(uri).await;
                 self.try_get_proof_dag(uri, position, mode).await
@@ -445,7 +447,8 @@ fn find_lake_root() -> Option<PathBuf> {
 ///
 /// Search order:
 /// 1. LEAN_DAG_SERVER environment variable (development override)
-/// 2. Git-imported LeanDag package at .lake/packages/LeanDag/.lake/build/bin/lean-dag
+/// 2. Git-imported LeanDag package at
+///    .lake/packages/LeanDag/.lake/build/bin/lean-dag
 fn find_lean_dag_server() -> Result<PathBuf, LspError> {
     let mut searched_paths = Vec::new();
 
@@ -480,7 +483,7 @@ fn get_lean_dag_log_file() -> Option<File> {
     let home = env::var("HOME").ok()?;
     let log_dir = PathBuf::from(home).join(".cache/lean-tui");
     fs::create_dir_all(&log_dir).ok()?;
-    let log_path = log_dir.join("lean-dag-client.log");
+    let log_path = log_dir.join("lean-dag.log");
     File::create(&log_path).ok()
 }
 
@@ -517,14 +520,20 @@ fn spawn_lean_dag_server(
             reason: e.to_string(),
         })?;
 
-    let stdin = child.stdin.take().ok_or_else(|| LspError::LeanDagSpawnFailed {
-        path: server_str.clone(),
-        reason: "Failed to capture stdin pipe".to_string(),
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| LspError::LeanDagSpawnFailed {
-        path: server_str,
-        reason: "Failed to capture stdout pipe".to_string(),
-    })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| LspError::LeanDagSpawnFailed {
+            path: server_str.clone(),
+            reason: "Failed to capture stdin pipe".to_string(),
+        })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| LspError::LeanDagSpawnFailed {
+            path: server_str,
+            reason: "Failed to capture stdout pipe".to_string(),
+        })?;
 
     Ok((stdin, stdout))
 }

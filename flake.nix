@@ -68,6 +68,7 @@
             nodejs
             elan
           ];
+          MATHLIB_NO_CACHE_ON_UPDATE = "1";
         };
       }
     );

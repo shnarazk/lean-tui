@@ -66,9 +66,9 @@ cargo install lean-tui
 
 If `~/.cargo/bin` is in your path, you can now run this program with `lean-tui`.
 
-### 3. Import LeanDag (optional)
+### 3. Import LeanDag
 
-If you want to use the more detailed display mode, add [LeanDag](https://github.com/wvhulle/lean-dag) as a Lake dependency.
+Add [LeanDag](https://github.com/wvhulle/lean-dag) as a Lake dependency.
 
 In your `lakefile.toml`:
 
@@ -79,7 +79,17 @@ git = "https://github.com/wvhulle/lean-dag.git"
 rev = "main"
 ```
 
-Fetch the source code for dependencies: `lake update LeanDag`.
+Fetch the source code of the latest version (Lean only hosts on Git):
+
+```bash
+lake update LeanDag
+```
+
+Build the `lean-dag` binary (it will stay deep in the build artifacts directory):
+
+```bash
+lake build LeanDag/lean-dag
+```
 
 ## Configuration
 
@@ -139,21 +149,6 @@ More shortcuts:
 - Help menu `?`
 - Close with `q`
 
-## Debugging
-
-Follow `lean-tui` logs with:
-
-```bash
-tail -f ~/.cache/lean-tui/proxy.log # Proxy server only
-tail -f ~/.cache/lean-tui/tui.log # TUI front-end only
-```
-
-Some editors also have debug logs for the LSP client. For Helix:
-
-```bash
-tail -f ~/.cache/helix/helix.log
-```
-
 ## Why?
 
 I developed this because not everyone wants to be stuck in the Microsoft ecosystem. Many people have an efficient workflow in their own (often modal) text editor. There existed a [Lean plugin for Neovim](https://github.com/Julian/lean.nvim) already, but not yet for the other ones. This is my attempt at a more generic one, not bound to any editor in particular, and usable from any terminal window.
@@ -185,4 +180,25 @@ flowchart LR
     Proxy --> |Unix socket| TUI
 ```
 
-Using LeanDag as a datasource is optional. When it is added, it runs inside the default LSP server provided by Lake (the standard build tool for Lean). In this way, it has access to more detailed information about the Lean program itself. This is useful because Lean has very expressive "elaboration" mechanism to extend its own syntax and convert it into math.
+LeanDag runs inside the default LSP server provided by Lake (the standard build tool for Lean). In this way, it has access to more detailed information about the Lean program itself. This is useful because Lean has very expressive "elaboration" mechanism to extend its own syntax and convert it into math.
+
+## Debugging
+
+If you see errors in the editor like "incompatible headers", you can try
+
+1. Close both the TUI view and the LSP client and restart.
+2. Rebuilding `lean-dag`
+
+If that does not help and you have time, follow along with the logs while reproducing the bug (and paste the output in a bug report):
+
+```bash
+tail -f ~/.cache/lean-tui/proxy.log # Proxy server only (for debugging RPC deserialization)
+tail -f ~/.cache/lean-tui/tui.log # TUI front-end only (for debugging the Ratatui-side)
+tail -f ~/.cache/lean-tui/lean-dag.log # Lean RPC server (for debugging Lean-side)
+```
+
+Some editors also have debug logs for the LSP client. For Helix:
+
+```bash
+tail -f ~/.cache/helix/helix.log
+```
