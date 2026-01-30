@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fmt, io, result::Result as StdResult};
+use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult};
 
 #[derive(Debug, Clone)]
 pub enum LspError {
@@ -6,7 +6,10 @@ pub enum LspError {
     InvalidRequest(String),
     ParseError(String),
     RpcError { code: Option<i32>, message: String },
-    LeanDagNotFound { searched_paths: Vec<String> },
+    LeanDagNotFound {
+        searched_paths: Vec<PathBuf>,
+        project_root: Option<PathBuf>,
+    },
     LeanDagSpawnFailed { path: String, reason: String },
 }
 
@@ -24,19 +27,42 @@ impl fmt::Display for LspError {
                 code: None,
                 message,
             } => write!(f, "RPC error: {message}"),
-            Self::LeanDagNotFound { searched_paths } => {
-                writeln!(f, "lean-dag server not found.")?;
-                writeln!(f)?;
-                writeln!(f, "To enable proof DAG visualization, add LeanDag to your lakefile.lean:")?;
-                writeln!(f)?;
-                writeln!(f, "  require LeanDag from git")?;
-                writeln!(f, "    \"https://github.com/wvhulle/lean-dag.git\" @ \"main\"")?;
-                writeln!(f)?;
-                writeln!(f, "Then run: lake build lean-dag")?;
-                writeln!(f)?;
+            Self::LeanDagNotFound {
+                searched_paths,
+                project_root,
+            } => {
+                if let Some(root) = project_root {
+                    write!(
+                        f,
+                        r#"lean-dag server not found.
+
+Lake project found at: {}
+
+To enable proof DAG visualization, add LeanDag to your lakefile.lean:
+
+  require LeanDag from git
+    "https://github.com/wvhulle/lean-dag.git" @ "main"
+
+Then run: lake build lean-dag
+
+"#,
+                        root.display()
+                    )?;
+                } else {
+                    write!(
+                        f,
+                        r"lean-dag server not found.
+
+No Lake project found.
+
+Run from a directory containing lakefile.lean (or a subdirectory).
+
+"
+                    )?;
+                }
                 writeln!(f, "Searched locations:")?;
                 for path in searched_paths {
-                    writeln!(f, "  - {path}")?;
+                    writeln!(f, "  - {}", path.display())?;
                 }
                 Ok(())
             }

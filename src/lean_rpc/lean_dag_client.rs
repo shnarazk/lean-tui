@@ -428,6 +428,19 @@ impl LeanDagClient {
     }
 }
 
+/// Find the Lake project root by searching upward for lakefile.lean.
+fn find_lake_root() -> Option<PathBuf> {
+    let mut current = env::current_dir().ok()?;
+    loop {
+        if current.join("lakefile.lean").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
 /// Find the lean-dag server binary.
 ///
 /// Search order:
@@ -442,23 +455,24 @@ fn find_lean_dag_server() -> Result<PathBuf, LspError> {
         if p.exists() {
             return Ok(p);
         }
-        searched_paths.push(format!("$LEAN_DAG_SERVER={path}"));
+        searched_paths.push(p);
     }
 
-    // 2. Git-imported LeanDag package (uses project's toolchain)
-    let cwd = env::current_dir().map_err(|e| LspError::RpcError {
-        code: None,
-        message: format!("Cannot determine current directory: {e}"),
-    })?;
+    // 2. Find Lake project root
+    let project_root = find_lake_root();
 
-    let package_binary = cwd.join(".lake/packages/LeanDag/.lake/build/bin/lean-dag");
-    searched_paths.push(package_binary.display().to_string());
-
-    if package_binary.exists() {
-        return Ok(package_binary);
+    if let Some(ref root) = project_root {
+        let package_binary = root.join(".lake/packages/LeanDag/.lake/build/bin/lean-dag");
+        searched_paths.push(package_binary.clone());
+        if package_binary.exists() {
+            return Ok(package_binary);
+        }
     }
 
-    Err(LspError::LeanDagNotFound { searched_paths })
+    Err(LspError::LeanDagNotFound {
+        searched_paths,
+        project_root,
+    })
 }
 
 /// Get the lean-dag log file path.
