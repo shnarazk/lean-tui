@@ -1,6 +1,11 @@
 //! Lake serve child process management.
 
-use std::{env, path::PathBuf, process::Stdio};
+use std::{
+    env,
+    fs::{self, File},
+    path::PathBuf,
+    process::Stdio,
+};
 
 use tokio::process::{ChildStdin, ChildStdout, Command};
 
@@ -10,6 +15,20 @@ use crate::error::{Error, LspError, Result};
 const LEAN_PP_OPTIONS: &[&str] = &[
     "pp.showLetValues=true", // Show full let-binding values (not ⋯)
 ];
+
+/// Get the lean-dag log file path, creating the directory if needed.
+/// Truncates existing log file on startup (simple rotation).
+fn get_lean_dag_log_file() -> Option<File> {
+    let home = env::var("HOME").ok()?;
+    let log_dir = PathBuf::from(home).join(".cache/lean-tui");
+    fs::create_dir_all(&log_dir).ok()?;
+
+    let log_path = log_dir.join("lean-dag.log");
+    tracing::info!("lean-dag server log: {}", log_path.display());
+
+    // Truncate on startup for simple rotation
+    File::create(&log_path).ok()
+}
 
 /// Find the lean-dag server binary.
 ///
@@ -43,6 +62,11 @@ fn find_lean_dag_server() -> Option<PathBuf> {
 ///
 /// Falls back to `lake serve` if lean-dag server is not found.
 pub fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
+    // Log working directory for debugging
+    if let Ok(cwd) = env::current_dir() {
+        tracing::info!("Spawning lean server from working directory: {}", cwd.display());
+    }
+
     match find_lean_dag_server() {
         Some(server_path) => {
             tracing::info!("Using lean-dag server: {}", server_path.display());
@@ -59,6 +83,7 @@ pub fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
 ///
 /// Uses the same shell-based approach as lean-dag's test suite to ensure
 /// LEAN_WORKER_PATH is properly set for worker processes.
+/// Server stderr is logged to ~/.cache/lean-tui/lean-dag.log
 fn spawn_lean_dag_server(server_path: &PathBuf) -> Result<(ChildStdin, ChildStdout)> {
     let server_str = server_path.display();
     let pp_opts: String = LEAN_PP_OPTIONS
@@ -78,10 +103,16 @@ fn spawn_lean_dag_server(server_path: &PathBuf) -> Result<(ChildStdin, ChildStdo
     cmd.env_remove("LEAN_PATH");
     cmd.env_remove("LEAN_SYSROOT");
 
+    // Redirect stderr to log file for debugging
+    let stderr = match get_lean_dag_log_file() {
+        Some(file) => Stdio::from(file),
+        None => Stdio::inherit(),
+    };
+
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(stderr)
         .spawn()?;
 
     let stdin = child.stdin.take().ok_or_else(|| {

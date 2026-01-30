@@ -9,18 +9,16 @@ use async_lsp::{
     lsp_types::{Location, LocationLink, Position, TextDocumentIdentifier, Url},
     AnyRequest, ServerSocket,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Mutex;
 use tower_service::Service;
 
 use super::{
     Goal, GotoLocation, InteractiveGoalsResponse, InteractiveTermGoalResponse, RpcConnectResponse,
-    GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, GET_PROOF_DAG, RPC_CALL,
-    RPC_CONNECT,
+    GET_GOTO_LOCATION, GET_INTERACTIVE_GOALS, GET_INTERACTIVE_TERM_GOAL, RPC_CALL, RPC_CONNECT,
 };
 use crate::error::LspError;
-use super::dag::ProofDag;
 
 #[derive(Serialize)]
 struct RpcConnectParams {
@@ -32,9 +30,18 @@ struct RpcConnectParams {
 struct RpcCallParams<P> {
     text_document: TextDocumentIdentifier,
     position: Position,
-    session_id: String,
+    #[serde(serialize_with = "serialize_session_id")]
+    session_id: u64,
     method: &'static str,
     params: P,
+}
+
+/// Serialize session ID as a string (Lean expects string format).
+fn serialize_session_id<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&value.to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -57,25 +64,9 @@ struct GetGoToLocationParams {
     info: serde_json::Value,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct GetProofDagParams {
-    text_document: TextDocumentIdentifier,
-    position: Position,
-    mode: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GetProofDagResult {
-    proof_dag: ProofDag,
-    #[allow(dead_code)]
-    version: u32,
-}
-
 pub struct RpcClient {
     socket: ServerSocket,
-    sessions: Mutex<HashMap<String, String>>,
+    sessions: Mutex<HashMap<String, u64>>,
     next_id: AtomicI64,
 }
 
@@ -120,7 +111,7 @@ impl RpcClient {
         }
     }
 
-    async fn connect(&self, uri: &Url) -> Result<String, LspError> {
+    async fn connect(&self, uri: &Url) -> Result<u64, LspError> {
         let params = RpcConnectParams {
             uri: uri.to_string(),
         };
@@ -135,12 +126,12 @@ impl RpcClient {
         self.sessions
             .lock()
             .await
-            .insert(uri.to_string(), session_id.clone());
+            .insert(uri.to_string(), session_id);
         Ok(session_id)
     }
 
-    async fn get_session(&self, uri: &Url) -> Result<String, LspError> {
-        let existing = self.sessions.lock().await.get(uri.as_str()).cloned();
+    async fn get_session(&self, uri: &Url) -> Result<u64, LspError> {
+        let existing = self.sessions.lock().await.get(uri.as_str()).copied();
         if let Some(id) = existing {
             return Ok(id);
         }
@@ -407,49 +398,5 @@ impl RpcClient {
         }
 
         Ok(goals)
-    }
-
-    /// Fetch the proof DAG at a position using the LeanDag RPC method.
-    ///
-    /// This calls `LeanDag.getProofDag` which returns a complete proof DAG
-    /// with parent/child relationships already computed server-side.
-    pub async fn get_proof_dag(
-        &self,
-        text_document: &TextDocumentIdentifier,
-        position: Position,
-        mode: &str,
-    ) -> Result<Option<ProofDag>, LspError> {
-        let uri = &text_document.uri;
-        let params = GetProofDagParams {
-            text_document: text_document.clone(),
-            position,
-            mode: mode.to_string(),
-        };
-
-        let response = self
-            .rpc_call_with_retry(uri, text_document, position, GET_PROOF_DAG, params)
-            .await;
-
-        match response {
-            Ok(value) => {
-                if value.is_null() {
-                    tracing::debug!("LeanDag.getProofDag returned null");
-                    return Ok(None);
-                }
-                let result: GetProofDagResult = serde_json::from_value(value)
-                    .map_err(|e| LspError::ParseError(e.to_string()))?;
-                tracing::debug!(
-                    "LeanDag.getProofDag returned {} nodes",
-                    result.proof_dag.nodes.len()
-                );
-                Ok(Some(result.proof_dag))
-            }
-            Err(LspError::RpcError { message, .. }) if message.contains("unknown method") => {
-                // LeanDag not available - likely the project doesn't have the dependency
-                tracing::debug!("LeanDag.getProofDag not available: {message}");
-                Ok(None)
-            }
-            Err(e) => Err(e),
-        }
     }
 }

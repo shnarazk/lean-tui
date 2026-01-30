@@ -1,11 +1,13 @@
 use std::{error::Error as StdError, fmt, io, result::Result as StdResult};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LspError {
     SessionExpired,
     InvalidRequest(String),
     ParseError(String),
     RpcError { code: Option<i32>, message: String },
+    LeanDagNotFound { searched_paths: Vec<String> },
+    LeanDagSpawnFailed { path: String, reason: String },
 }
 
 impl fmt::Display for LspError {
@@ -22,6 +24,29 @@ impl fmt::Display for LspError {
                 code: None,
                 message,
             } => write!(f, "RPC error: {message}"),
+            Self::LeanDagNotFound { searched_paths } => {
+                writeln!(f, "lean-dag server not found.")?;
+                writeln!(f)?;
+                writeln!(f, "To enable proof DAG visualization, add LeanDag to your lakefile.lean:")?;
+                writeln!(f)?;
+                writeln!(f, "  require LeanDag from git")?;
+                writeln!(f, "    \"https://github.com/wvhulle/lean-dag.git\" @ \"main\"")?;
+                writeln!(f)?;
+                writeln!(f, "Then run: lake build lean-dag")?;
+                writeln!(f)?;
+                writeln!(f, "Searched locations:")?;
+                for path in searched_paths {
+                    writeln!(f, "  - {path}")?;
+                }
+                Ok(())
+            }
+            Self::LeanDagSpawnFailed { path, reason } => {
+                writeln!(f, "Failed to start lean-dag server at {path}")?;
+                writeln!(f)?;
+                writeln!(f, "Reason: {reason}")?;
+                writeln!(f)?;
+                writeln!(f, "Try rebuilding: lake build lean-dag")
+            }
         }
     }
 }

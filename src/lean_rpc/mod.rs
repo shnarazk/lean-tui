@@ -2,10 +2,12 @@
 
 mod client;
 pub mod dag;
+mod lean_dag_client;
 
 use async_lsp::lsp_types::{Position, Range, Url};
 pub use client::{GoToKind, RpcClient};
 pub use dag::{GoalInfo, HypothesisInfo, ProofDag, ProofDagNode, ProofState};
+pub use lean_dag_client::LeanDagClient;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -154,7 +156,36 @@ impl TaggedText {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcConnectResponse {
-    pub session_id: String,
+    #[serde(deserialize_with = "deserialize_session_id")]
+    pub session_id: u64,
+}
+
+/// Deserialize session ID from either a number or a string.
+fn deserialize_session_id<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+
+    struct SessionIdVisitor;
+
+    impl<'de> Visitor<'de> for SessionIdVisitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a u64 or a string containing a u64")
+        }
+
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<u64, E> {
+            Ok(value)
+        }
+
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<u64, E> {
+            value.parse().map_err(de::Error::custom)
+        }
+    }
+
+    deserializer.deserialize_any(SessionIdVisitor)
 }
 
 /// Simplified goal representation for TUI display.

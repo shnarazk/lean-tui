@@ -4,9 +4,9 @@ use std::{collections::HashMap, sync::Mutex};
 
 use async_lsp::{
     lsp_types::{
-        notification::{DidChangeTextDocument, DidOpenTextDocument, Notification},
+        notification::{DidChangeTextDocument, DidOpenTextDocument, Notification, PublishDiagnostics},
         DidChangeTextDocumentParams, DidOpenTextDocumentParams, Position,
-        TextDocumentContentChangeEvent,
+        PublishDiagnosticsParams, TextDocumentContentChangeEvent,
     },
     AnyNotification,
 };
@@ -35,6 +35,7 @@ impl DocumentCache {
         }
     }
 
+    /// Handle client-to-server notifications (`DidOpen`, `DidChange`).
     pub fn handle_notification(&self, notif: &AnyNotification) {
         if notif.method == DidOpenTextDocument::METHOD {
             let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone())
@@ -54,6 +55,21 @@ impl DocumentCache {
             if let Some(content) = self.apply_changes(uri, &p.content_changes) {
                 self.update(uri, content);
             }
+        }
+    }
+
+    /// Handle server-to-client notifications (`PublishDiagnostics`).
+    pub fn handle_server_notification(&self, notif: &AnyNotification) {
+        if notif.method == PublishDiagnostics::METHOD {
+            let Ok(p) = serde_json::from_value::<PublishDiagnosticsParams>(notif.params.clone())
+            else {
+                return;
+            };
+            tracing::debug!(
+                "PublishDiagnostics for {}: {} diagnostics",
+                p.uri,
+                p.diagnostics.len()
+            );
         }
     }
 

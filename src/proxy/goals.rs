@@ -2,19 +2,21 @@
 
 use std::sync::Arc;
 
-use async_lsp::lsp_types::TextDocumentIdentifier;
-
 use crate::{
-    lean_rpc::RpcClient,
+    lean_rpc::LeanDagClient,
     tui_ipc::{CursorInfo, SocketServer},
 };
 
+/// Spawn a task to fetch the proof DAG at the given cursor position.
+///
+/// Uses the dedicated `LeanDagClient` which manages its own LSP connection
+/// to the lean-dag server, ensuring proper synchronization.
 pub fn spawn_goal_fetch(
     cursor: &CursorInfo,
     socket_server: &Arc<SocketServer>,
-    rpc_client: &Arc<RpcClient>,
+    lean_dag_client: &Arc<LeanDagClient>,
 ) {
-    let rpc_client = rpc_client.clone();
+    let lean_dag_client = lean_dag_client.clone();
     let socket_server = socket_server.clone();
     let uri = cursor.uri.clone();
     let position = cursor.position;
@@ -27,12 +29,9 @@ pub fn spawn_goal_fetch(
             position.character
         );
 
-        let text_document = TextDocumentIdentifier { uri: uri.clone() };
-
-        // Fetch pre-built ProofDag from LeanDag server
-        let result = rpc_client
-            .get_proof_dag(&text_document, position, "tree")
-            .await;
+        // Fetch proof DAG using the dedicated lean-dag client
+        // The client handles waitForDiagnostics internally
+        let result = lean_dag_client.get_proof_dag(&uri, position, "tree").await;
 
         match result {
             Ok(Some(dag)) => {
