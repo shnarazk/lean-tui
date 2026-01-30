@@ -40,6 +40,9 @@ use crate::error::LspError;
 /// Lean pretty-printer options for the server.
 const LEAN_PP_OPTIONS: &[&str] = &["pp.showLetValues=true"];
 
+/// Lean LSP error code for outdated RPC session.
+const RPC_SESSION_OUTDATED: i32 = -32900;
+
 /// Document state tracked by the client.
 struct DocumentState {
     version: u32,
@@ -328,6 +331,11 @@ impl LeanDagClient {
             return Ok(id);
         }
 
+        self.create_session(uri).await
+    }
+
+    /// Create a new RPC session for a document, replacing any existing one.
+    async fn create_session(&self, uri: &Url) -> Result<u64, LspError> {
         let params = RpcConnectParams {
             uri: uri.to_string(),
         };
@@ -344,6 +352,11 @@ impl LeanDagClient {
             .await
             .insert(uri.to_string(), session_id);
         Ok(session_id)
+    }
+
+    /// Invalidate the RPC session for a document.
+    async fn invalidate_session(&self, uri: &Url) {
+        self.sessions.lock().await.remove(uri.as_str());
     }
 
     /// Get the proof DAG at a position.
@@ -365,10 +378,27 @@ impl LeanDagClient {
         // Wait for diagnostics first
         self.wait_for_diagnostics(uri, version).await?;
 
-        // Get RPC session
+        // Try with existing session, retry once if session is outdated
+        match self.try_get_proof_dag(uri, position, mode).await {
+            Ok(result) => Ok(result),
+            Err(LspError::RpcError { code: Some(code), .. }) if code == RPC_SESSION_OUTDATED => {
+                tracing::info!("[LeanDag] Session outdated for {}, renewing", uri);
+                self.invalidate_session(uri).await;
+                self.try_get_proof_dag(uri, position, mode).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Internal: attempt to get proof DAG with current session.
+    async fn try_get_proof_dag(
+        &self,
+        uri: &Url,
+        position: Position,
+        mode: &str,
+    ) -> Result<Option<ProofDag>, LspError> {
         let session_id = self.get_session(uri).await?;
 
-        // Make RPC call
         let text_document = TextDocumentIdentifier { uri: uri.clone() };
         let inner_params = GetProofDagParams {
             text_document: text_document.clone(),
