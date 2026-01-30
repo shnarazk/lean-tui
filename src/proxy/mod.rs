@@ -70,7 +70,6 @@ pub async fn run() -> Result<()> {
     // Create RPC client from server socket and store in slot
     let rpc_client = Arc::new(RpcClient::new(server_socket.clone()));
     let _ = rpc_client_slot.set(rpc_client.clone());
-    tracing::info!("RPC client created for LeanDag.getProofDag calls");
 
     // Server-side: editor → lean-tui
     let doc_cache_server = document_cache.clone();

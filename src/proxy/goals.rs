@@ -35,23 +35,12 @@ pub fn spawn_goal_fetch(
 
         match result {
             Ok(Some(dag)) => {
-                tracing::info!("ProofDag: {} nodes, root={:?}", dag.nodes.len(), dag.root);
-                for node in &dag.nodes {
-                    tracing::debug!(
-                        "Node {} '{}': {} goals, {} hyps, new_hyps={:?}",
-                        node.id,
-                        node.tactic.text,
-                        node.state_after.goals.len(),
-                        node.state_after.hypotheses.len(),
-                        node.new_hypotheses
-                    );
-                    for (i, g) in node.state_after.goals.iter().enumerate() {
-                        tracing::debug!("  goal[{}]: name={:?}, type={}", i, g.username, g.type_);
-                    }
-                    for (i, h) in node.state_after.hypotheses.iter().enumerate() {
-                        tracing::debug!("  hyp[{}]: name={}, type={}", i, h.name, h.type_);
-                    }
-                }
+                tracing::debug!(
+                    "ProofDag: {} nodes, root={:?}, current={:?}",
+                    dag.nodes.len(),
+                    dag.root,
+                    dag.current_node
+                );
                 socket_server.broadcast_proof_dag(uri, position, Some(dag));
             }
             Ok(None) => {

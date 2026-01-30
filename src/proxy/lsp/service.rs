@@ -53,14 +53,13 @@ impl<S: LspService> InterceptService<S> {
 
     fn handle_request(&self, req: &AnyRequest) {
         if let Some(cursor) = extract_cursor_from_request(req) {
-            let _span = tracing::info_span!(
+            let _span = tracing::debug_span!(
                 "cursor",
                 file = cursor.filename().unwrap_or("?"),
                 line = cursor.position.line,
                 char = cursor.position.character
             )
             .entered();
-            tracing::info!("cursor position");
 
             self.socket_server.broadcast_cursor(cursor.clone());
 
@@ -71,11 +70,6 @@ impl<S: LspService> InterceptService<S> {
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
-        // Log all document-related notifications for debugging
-        if notif.method.starts_with("textDocument/") {
-            tracing::info!("→ LSP notification: {} (forwarding)", notif.method);
-        }
-
         // Handle client-to-server notifications (DidOpen, DidChange)
         self.document_cache.handle_notification(notif);
         // Handle server-to-client notifications (PublishDiagnostics)
@@ -85,14 +79,13 @@ impl<S: LspService> InterceptService<S> {
         self.forward_to_lean_dag(notif);
 
         if let Some(cursor) = extract_cursor_from_notification(notif) {
-            let _span = tracing::info_span!(
+            let _span = tracing::debug_span!(
                 "cursor",
                 file = cursor.filename().unwrap_or("?"),
                 line = cursor.position.line,
                 char = cursor.position.character
             )
             .entered();
-            tracing::info!("cursor position");
 
             self.socket_server.broadcast_cursor(cursor.clone());
 
@@ -158,11 +151,7 @@ where
 {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
         self.handle_notification(&notif);
-        let method = notif.method.clone();
-        tracing::info!("↓ Forwarding notification to server: {}", method);
-        let result = self.service.notify(notif);
-        tracing::info!("↓ Forward result for {}: {:?}", method, result);
-        result
+        self.service.notify(notif)
     }
 
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<async_lsp::Result<()>> {

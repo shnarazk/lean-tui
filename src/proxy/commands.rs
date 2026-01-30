@@ -47,8 +47,8 @@ pub async fn process_command(
                 .await
             {
                 Ok(Some(location)) => {
-                    tracing::info!(
-                        "Resolved hypothesis location to {}:{}:{}",
+                    tracing::debug!(
+                        "Resolved hypothesis to {}:{}:{}",
                         location.target_uri,
                         location.target_selection_range.start.line,
                         location.target_selection_range.start.character
@@ -59,7 +59,7 @@ pub async fn process_command(
                     })
                 }
                 Ok(None) => {
-                    tracing::info!("No definition found for hypothesis, using fallback");
+                    tracing::debug!("No definition found for hypothesis");
                     Some(cmd)
                 }
                 Err(e) => {

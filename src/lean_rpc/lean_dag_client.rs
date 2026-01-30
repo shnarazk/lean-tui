@@ -207,7 +207,7 @@ impl LeanDagClient {
             ..Default::default()
         };
 
-        tracing::info!("[LeanDag] Sending initialize request");
+        tracing::debug!("[LeanDag] Sending initialize request");
 
         let id = self.next_request_id();
         let request_json =
@@ -268,7 +268,7 @@ impl LeanDagClient {
         let version = params.text_document.version as u32;
         let content = params.text_document.text.clone();
 
-        tracing::info!("[LeanDag] didOpen {} v{}", uri, version);
+        tracing::debug!("[LeanDag] didOpen {} v{}", uri, version);
 
         self.socket
             .notify::<DidOpenTextDocument>(params)
@@ -290,7 +290,7 @@ impl LeanDagClient {
         let uri = params.text_document.uri.to_string();
         let version = params.text_document.version as u32;
 
-        tracing::info!("[LeanDag] didChange {} v{}", uri, version);
+        tracing::debug!("[LeanDag] didChange {} v{}", uri, version);
 
         self.socket
             .notify::<DidChangeTextDocument>(params)
@@ -315,11 +315,11 @@ impl LeanDagClient {
             version,
         };
 
-        tracing::info!("[LeanDag] waitForDiagnostics {} v{}", uri, version);
+        tracing::debug!("[LeanDag] waitForDiagnostics {} v{}", uri, version);
         let _ = self
             .request("textDocument/waitForDiagnostics", params)
             .await?;
-        tracing::info!("[LeanDag] File ready: {} v{}", uri, version);
+        tracing::debug!("[LeanDag] File ready: {} v{}", uri, version);
 
         Ok(())
     }
@@ -345,7 +345,7 @@ impl LeanDagClient {
         })?;
 
         let session_id = resp.session_id;
-        tracing::info!("[LeanDag] RPC session for {}: {}", uri, session_id);
+        tracing::debug!("[LeanDag] RPC session for {}: {}", uri, session_id);
 
         self.sessions
             .lock()
@@ -382,7 +382,7 @@ impl LeanDagClient {
         match self.try_get_proof_dag(uri, position, mode).await {
             Ok(result) => Ok(result),
             Err(LspError::RpcError { code: Some(code), .. }) if code == RPC_SESSION_OUTDATED => {
-                tracing::info!("[LeanDag] Session outdated for {}, renewing", uri);
+                tracing::debug!("[LeanDag] Session outdated for {}, renewing", uri);
                 self.invalidate_session(uri).await;
                 self.try_get_proof_dag(uri, position, mode).await
             }
