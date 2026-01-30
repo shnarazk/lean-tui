@@ -6,7 +6,7 @@ keywords = ["lean4", "proof-assistant", "tui", "mathematics"]
 license = "MIT"
 name = "lean-tui"
 repository = "https://codeberg.org/wvhulle/lean-tui"
-version = "0.0.9"
+version = "0.0.10"
 
 [lints.clippy]
 excessive_nesting = { level = "deny", priority = 2 }

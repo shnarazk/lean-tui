@@ -20,8 +20,8 @@ impl Widget for WelcomeScreen {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let text = "Standalone TUI infoview for Lean 4 theorem prover\n\n\
-                    Move cursor to a tactic in your editor.";
+        let text = "Standalone TUI infoview for Lean 4 theorem prover\n\nMove cursor to a tactic \
+                    in your editor.";
 
         Paragraph::new(text)
             .alignment(Alignment::Center)
