@@ -1,4 +1,4 @@
-//! Lake serve child process management.
+//! Lake serve child process management for the editor-facing LSP server.
 
 use std::{
     env,
@@ -16,100 +16,43 @@ const LEAN_PP_OPTIONS: &[&str] = &[
     "pp.showLetValues=true", // Show full let-binding values (not ⋯)
 ];
 
-/// Get the lean-dag log file path, creating the directory if needed.
-/// Truncates existing log file on startup (simple rotation).
-fn get_lean_dag_log_file() -> Option<File> {
+/// Get the lake serve log file path, creating the directory if needed.
+fn get_lake_serve_log_file() -> Option<File> {
     let home = env::var("HOME").ok()?;
     let log_dir = PathBuf::from(home).join(".cache/lean-tui");
     fs::create_dir_all(&log_dir).ok()?;
 
-    let log_path = log_dir.join("lean-dag.log");
-    tracing::info!("lean-dag server log: {}", log_path.display());
+    let log_path = log_dir.join("lake-serve-editor.log");
+    tracing::info!("lake serve log: {}", log_path.display());
 
-    // Truncate on startup for simple rotation
     File::create(&log_path).ok()
 }
 
-/// Find the lean-dag server binary.
+/// Spawn lake serve for the editor-facing LSP connection.
 ///
-/// Checks in order:
-/// 1. LEAN_DAG_SERVER environment variable
-/// 2. ../lean-dag/.lake/build/bin/lean-dag (sibling directory)
-fn find_lean_dag_server() -> Option<PathBuf> {
-    // Check environment variable first
-    if let Ok(path) = env::var("LEAN_DAG_SERVER") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
-    // Check sibling directory (development setup)
-    let cwd = env::current_dir().ok()?;
-    let sibling = cwd.parent()?.join("lean-dag/.lake/build/bin/lean-dag");
-    if sibling.exists() {
-        return Some(sibling);
-    }
-
-    None
-}
-
-/// Spawn Lean server with LeanDag RPC methods.
-///
-/// Uses `lake env` to get the project environment, then runs the lean-dag
-/// server binary with that environment. This makes the RPC method available
-/// without requiring users to import LeanDag in their files.
-///
-/// Falls back to `lake serve` if lean-dag server is not found.
+/// This server handles standard LSP requests from the editor (hover, diagnostics, etc.).
+/// The RPC client for proof DAGs is separate and spawns its own server.
 pub fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
     // Log working directory for debugging
     if let Ok(cwd) = env::current_dir() {
         tracing::info!(
-            "Spawning lean server from working directory: {}",
+            "Spawning lake serve from working directory: {}",
             cwd.display()
         );
     }
 
-    match find_lean_dag_server() {
-        Some(server_path) => {
-            tracing::info!("Using lean-dag server: {}", server_path.display());
-            spawn_lean_dag_server(&server_path)
-        }
-        None => {
-            tracing::warn!(
-                "lean-dag server not found, falling back to lake serve (RPC will not work)"
-            );
-            spawn_standard_lake_serve()
-        }
-    }
-}
-
-/// Spawn the lean-dag server with the current project's lake environment.
-///
-/// Uses the same shell-based approach as lean-dag's test suite to ensure
-/// LEAN_WORKER_PATH is properly set for worker processes.
-/// Server stderr is logged to ~/.cache/lean-tui/lean-dag.log
-fn spawn_lean_dag_server(server_path: &PathBuf) -> Result<(ChildStdin, ChildStdout)> {
-    let server_str = server_path.display();
-    let pp_opts: String = LEAN_PP_OPTIONS
-        .iter()
-        .map(|opt| format!("-D {opt}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    // Match lean-dag test suite: use shell to set LEAN_WORKER_PATH inside lake env
-    // This ensures workers use the lean-dag binary with RPC methods registered
-    let shell_cmd = format!("LEAN_WORKER_PATH={server_str} exec {server_str} -- {pp_opts}");
-
     let mut cmd = Command::new("lake");
-    cmd.args(["env", "sh", "-c", &shell_cmd]);
+    cmd.arg("serve").arg("--");
+    for opt in LEAN_PP_OPTIONS {
+        cmd.args(["-D", opt]);
+    }
 
     // Clear potentially conflicting environment
     cmd.env_remove("LEAN_PATH");
     cmd.env_remove("LEAN_SYSROOT");
 
     // Redirect stderr to log file for debugging
-    let stderr = match get_lean_dag_log_file() {
+    let stderr = match get_lake_serve_log_file() {
         Some(file) => Stdio::from(file),
         None => Stdio::inherit(),
     };
@@ -118,36 +61,6 @@ fn spawn_lean_dag_server(server_path: &PathBuf) -> Result<(ChildStdin, ChildStdo
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(stderr)
-        .spawn()?;
-
-    let stdin = child.stdin.take().ok_or_else(|| {
-        Error::Lsp(LspError::RpcError {
-            code: None,
-            message: "Failed to capture lean-dag server stdin".to_string(),
-        })
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        Error::Lsp(LspError::RpcError {
-            code: None,
-            message: "Failed to capture lean-dag server stdout".to_string(),
-        })
-    })?;
-
-    Ok((stdin, stdout))
-}
-
-/// Spawn standard lake serve (fallback).
-fn spawn_standard_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
-    let mut cmd = Command::new("lake");
-    cmd.arg("serve").arg("--");
-    for opt in LEAN_PP_OPTIONS {
-        cmd.args(["-D", opt]);
-    }
-
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
         .spawn()?;
 
     let stdin = child.stdin.take().ok_or_else(|| {

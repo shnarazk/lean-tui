@@ -18,65 +18,80 @@ use std::sync::{Arc, OnceLock};
 use async_lsp::MainLoop;
 use documents::DocumentCache;
 use lake::spawn_lake_serve;
-use lsp::{DeferredService, InterceptService};
+use lsp::{DeferredService, InterceptService, RpcClientSlot};
 use tokio::io::{stdin, stdout};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
     error::{Error, LspError, Result},
-    lean_rpc::LeanDagClient,
-    tui_ipc::{CommandHandler, SocketServer},
+    lean_rpc::RpcClient,
+    tui_ipc::{CommandHandler, ServerMode, SocketServer},
 };
 
 /// Run the LSP proxy: editor ↔ lean-tui ↔ lake serve.
-pub async fn run() -> Result<()> {
-    let socket_server = Arc::new(SocketServer::new());
+///
+/// # Arguments
+/// * `standalone` - If true, use the lean-dag binary (standalone mode).
+///                  If false, use `lake serve` (library mode - users import LeanDag).
+pub async fn run(standalone: bool) -> Result<()> {
+    let server_mode = if standalone {
+        tracing::info!("Running in standalone mode (lean-dag binary)");
+        ServerMode::Standalone
+    } else {
+        tracing::info!("Running in library mode (lake serve + import LeanDag)");
+        ServerMode::Library
+    };
+
+    let socket_server = Arc::new(SocketServer::new(server_mode));
     let document_cache = Arc::new(DocumentCache::new());
 
-    // Create lean-dag client for proof DAG fetching
-    let lean_dag_client = match LeanDagClient::new().await {
+    // Create RPC client based on mode
+    let rpc_client: Option<RpcClient> = match RpcClient::new(standalone).await {
         Ok(client) => {
-            tracing::info!("LeanDagClient initialized successfully");
+            tracing::info!("RPC client initialized successfully");
             Some(client)
         }
         Err(e) => {
             tracing::warn!(
-                "Failed to initialize LeanDagClient: {}. Proof DAG will be unavailable.",
+                "Failed to initialize RPC client: {}. Proof DAG will be unavailable.",
                 e
             );
             None
         }
     };
-    let lean_dag_slot: Arc<OnceLock<Arc<LeanDagClient>>> = Arc::new(OnceLock::new());
-    if let Some(client) = lean_dag_client {
-        let _ = lean_dag_slot.set(client);
+    let rpc_client_slot: RpcClientSlot = Arc::new(OnceLock::new());
+    if let Some(client) = rpc_client {
+        let _ = rpc_client_slot.set(client);
     }
 
+    // Spawn the editor-facing LSP server (lake serve)
+    // Note: In both modes, the editor talks to lake serve for standard LSP.
+    // The RPC client is separate and handles proof DAG fetching.
     let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
     // Client-side: lean-tui → lake serve
     let doc_cache_client = document_cache.clone();
     let socket_server_client = socket_server.clone();
-    let lean_dag_slot_client = lean_dag_slot.clone();
+    let rpc_client_slot_client = rpc_client_slot.clone();
     let (mut client_mainloop, server_socket) = MainLoop::new_client(move |_| {
         InterceptService::new(
             DeferredService(None),
             socket_server_client.clone(),
             doc_cache_client,
-            lean_dag_slot_client,
+            rpc_client_slot_client,
         )
     });
 
     // Server-side: editor → lean-tui
     let doc_cache_server = document_cache.clone();
     let socket_server_server = socket_server.clone();
-    let lean_dag_slot_server = lean_dag_slot.clone();
+    let rpc_client_slot_server = rpc_client_slot.clone();
     let (server_mainloop, client_socket) = MainLoop::new_server(move |_| {
         InterceptService::new(
             server_socket,
             socket_server_server.clone(),
             doc_cache_server,
-            lean_dag_slot_server,
+            rpc_client_slot_server,
         )
     });
 

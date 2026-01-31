@@ -82,7 +82,13 @@ Fetch the source code of the latest version (Lean only hosts on Git, does not pr
 lake update LeanDag
 ```
 
-Build the `lean-dag` binary (it will stay deep in the build artifacts directory):
+Now you have two options: modify your source code and add:
+
+```lean
+import LeanDag
+```
+
+If you don't want to modify, you can build the `lean-dag` binary (it will stay deep in the build artifacts directory):
 
 ```bash
 lake build LeanDag/lean-dag
@@ -152,22 +158,6 @@ Let me know if you tried it out and encountered any issues! PRs are also welcome
 ## How does it work?
 
 This program spawns a proxy LSP that intercepts communication between your editor and Lean's build system.
-
-```mermaid
-flowchart LR
-    Editor[Editor] <--> Proxy[lean-tui proxy]
-    Proxy <--> Lake[lake serve]
-    Proxy <--> LeanDag[lean-dag]
-    Proxy --> TUI[lean-tui view]
-```
-
-**Data flow:**
-
-1. **Editor → Proxy**: Your editor sends LSP requests (hover, completion, diagnostics) to the proxy
-2. **Proxy → Lake LSP**: Standard requests are forwarded to `lake serve` for normal Lean functionality
-3. **Proxy → lean-dag**: When cursor moves into a proof, the proxy asks lean-dag for the `ProofDag` structure
-4. **Proxy → TUI**: Goal state and proof structure are pushed to the TUI via Unix socket
-
 **lean-dag** is a custom LSP server that runs alongside Lake. It uses Lean's internal APIs to extract detailed proof information (tactic applications, goal transformations, goto locations) that isn't available through standard LSP.
 
 ## Debugging

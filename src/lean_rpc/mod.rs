@@ -1,11 +1,21 @@
-//! Lean RPC protocol types and client.
+//! Lean RPC protocol types and clients.
+//!
+//! This module provides two LSP clients for fetching proof DAGs:
+//!
+//! - [`LeanServerClient`] - Library mode: uses `lake serve`, requires `import LeanDag`
+//! - [`LeanDagClient`] - Standalone mode: uses lean-dag binary, no import required
+//!
+//! Use [`RpcClient::new(standalone)`] to create the appropriate client.
 
+mod base;
+mod client;
 mod dag;
-mod lean_dag_client;
+mod lean_dag;
+mod lean_server;
 
 use async_lsp::lsp_types::{Position, Url};
+pub use client::RpcClient;
 pub use dag::{GoalInfo, HypothesisInfo, NodeId, ProofDag, ProofDagNode, ProofState};
-pub use lean_dag_client::LeanDagClient;
 use serde::{Deserialize, Serialize};
 
 /// Pre-resolved goto location for navigation without RPC calls.

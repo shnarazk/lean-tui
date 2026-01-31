@@ -28,7 +28,7 @@ use crate::{
         status_bar::{StatusBar, StatusBarInput, StatusBarWidget},
         InteractiveStatefulWidget,
     },
-    tui_ipc::{socket_path, Command, CursorInfo, Message, Position},
+    tui_ipc::{socket_path, Command, CursorInfo, Message, Position, ServerMode},
 };
 
 /// Information about the enclosing definition (theorem, lemma, def, etc.)
@@ -61,6 +61,8 @@ pub struct App {
     display_mode: DisplayMode,
     /// Unified proof DAG - single source of truth for all display modes.
     proof_dag: Option<ProofDag>,
+    /// Server mode (Library or Standalone).
+    server_mode: Option<ServerMode>,
     /// Status bar component.
     status_bar: StatusBar,
     /// Help menu overlay.
@@ -100,8 +102,9 @@ impl App {
     /// Handle incoming message from proxy.
     pub fn handle_message(&mut self, msg: Message) {
         match msg {
-            Message::Connected => {
+            Message::Connected { server_mode } => {
                 self.connected = true;
+                self.server_mode = server_mode;
             }
             Message::Cursor(cursor) => {
                 self.cursor = Some(cursor);
@@ -352,10 +355,10 @@ impl App {
     }
 
     fn build_backend_display(&self) -> String {
-        if self.proof_dag.is_some() {
-            " Server ".to_string()
-        } else {
-            String::new()
+        match self.server_mode {
+            Some(mode) => format!(" {} ", mode.display_name()),
+            None if self.proof_dag.is_some() => " Server ".to_string(),
+            None => String::new(),
         }
     }
 

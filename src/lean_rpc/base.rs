@@ -1,20 +1,10 @@
-//! Dedicated LSP client for lean-dag server.
-//!
-//! This client spawns its own lean-dag process and manages the full LSP
-//! lifecycle, ensuring proper synchronization between document opening and RPC
-//! calls.
+//! Shared LSP client infrastructure for both library and standalone modes.
 
 use std::{
     collections::HashMap,
     env,
-    fs::{self, File},
     ops::ControlFlow,
-    path::PathBuf,
-    process::Stdio,
-    sync::{
-        atomic::{AtomicI64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicI64, Ordering},
 };
 
 use async_lsp::{
@@ -24,35 +14,39 @@ use async_lsp::{
         DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams,
         InitializedParams, Position, TextDocumentIdentifier, Url,
     },
-    AnyEvent, AnyNotification, AnyRequest, LspService, MainLoop, ResponseError, ServerSocket,
+    AnyEvent, AnyNotification, AnyRequest, LspService, ResponseError, ServerSocket,
 };
 use serde::Serialize;
 use serde_json::json;
-use tokio::{
-    process::Command,
-    sync::{Mutex, RwLock},
-};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tokio::sync::{Mutex, RwLock};
 use tower_service::Service;
 
 use super::{ProofDag, RpcConnectResponse, GET_PROOF_DAG, RPC_CALL, RPC_CONNECT};
 use crate::error::LspError;
 
 /// Lean pretty-printer options for the server.
-const LEAN_PP_OPTIONS: &[&str] = &["pp.showLetValues=true"];
+pub const LEAN_PP_OPTIONS: &[&str] = &["pp.showLetValues=true"];
 
 /// Lean LSP error code for outdated RPC session.
 const RPC_SESSION_OUTDATED: i32 = -32900;
 
 /// Document state tracked by the client.
-struct DocumentState {
-    version: u32,
+pub struct DocumentState {
+    pub version: u32,
 }
 
 /// A simple service that receives notifications from the server.
-struct LeanDagService;
+pub struct LeanService {
+    name: &'static str,
+}
 
-impl tower_service::Service<AnyRequest> for LeanDagService {
+impl LeanService {
+    pub fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+}
+
+impl tower_service::Service<AnyRequest> for LeanService {
     type Response = serde_json::Value;
     type Error = ResponseError;
     type Future = std::pin::Pin<
@@ -71,14 +65,14 @@ impl tower_service::Service<AnyRequest> for LeanDagService {
     }
 }
 
-impl LspService for LeanDagService {
+impl LspService for LeanService {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
         if notif.method == "textDocument/publishDiagnostics" {
             if let Ok(params) = serde_json::from_value::<
                 async_lsp::lsp_types::PublishDiagnosticsParams,
             >(notif.params)
             {
-                tracing::debug!("[LeanDag] publishDiagnostics for {}", params.uri);
+                tracing::debug!("[{}] publishDiagnostics for {}", self.name, params.uri);
             }
         }
         ControlFlow::Continue(())
@@ -90,19 +84,19 @@ impl LspService for LeanDagService {
 }
 
 #[derive(Serialize)]
-struct RpcConnectParams {
-    uri: String,
+pub struct RpcConnectParams {
+    pub uri: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RpcCallParams<P> {
-    text_document: TextDocumentIdentifier,
-    position: Position,
+pub struct RpcCallParams<P> {
+    pub text_document: TextDocumentIdentifier,
+    pub position: Position,
     #[serde(serialize_with = "serialize_session_id")]
-    session_id: u64,
-    method: &'static str,
-    params: P,
+    pub session_id: u64,
+    pub method: &'static str,
+    pub params: P,
 }
 
 fn serialize_session_id<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
@@ -114,71 +108,50 @@ where
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct GetProofDagParams {
-    text_document: TextDocumentIdentifier,
-    position: Position,
-    mode: String,
+pub struct GetProofDagParams {
+    pub text_document: TextDocumentIdentifier,
+    pub position: Position,
+    pub mode: String,
 }
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GetProofDagResult {
-    proof_dag: ProofDag,
+pub struct GetProofDagResult {
+    pub proof_dag: ProofDag,
 }
 
 #[derive(Serialize)]
-struct WaitForDiagnosticsParams {
-    uri: String,
-    version: u32,
+pub struct WaitForDiagnosticsParams {
+    pub uri: String,
+    pub version: u32,
 }
 
-/// Dedicated LSP client for lean-dag.
+/// Base LSP client with shared functionality.
 ///
-/// Spawns its own lean-dag process and manages the full LSP lifecycle.
-pub struct LeanDagClient {
+/// Both `LeanServerClient` and `LeanDagClient` wrap this with different
+/// server spawning logic.
+pub struct BaseLspClient {
+    name: &'static str,
     socket: ServerSocket,
     documents: RwLock<HashMap<String, DocumentState>>,
     sessions: Mutex<HashMap<String, u64>>,
     next_id: AtomicI64,
 }
 
-impl LeanDagClient {
-    /// Create a new lean-dag client, spawning the server process.
-    pub async fn new() -> Result<Arc<Self>, LspError> {
-        let server_path = find_lean_dag_server()?;
-
-        tracing::info!("[LeanDag] Starting server: {}", server_path.display());
-
-        let (stdin, stdout) = spawn_lean_dag_server(&server_path)?;
-
-        // Create main loop with our service
-        let (mainloop, socket) = MainLoop::new_client(|_| LeanDagService);
-
-        // Run the mainloop in a background task
-        tokio::spawn(async move {
-            if let Err(e) = mainloop
-                .run_buffered(stdout.compat(), stdin.compat_write())
-                .await
-            {
-                tracing::error!("[LeanDag] MainLoop error: {:?}", e);
-            }
-        });
-
-        let client = Arc::new(Self {
+impl BaseLspClient {
+    /// Create a new base client with the given socket.
+    pub fn new(name: &'static str, socket: ServerSocket) -> Self {
+        Self {
+            name,
             socket,
             documents: RwLock::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             next_id: AtomicI64::new(1),
-        });
-
-        // Initialize the LSP connection
-        client.initialize().await?;
-
-        Ok(client)
+        }
     }
 
     /// Initialize the LSP connection.
-    async fn initialize(&self) -> Result<(), LspError> {
+    pub async fn initialize(&self) -> Result<(), LspError> {
         let cwd = env::current_dir().map_err(|e| LspError::RpcError {
             code: None,
             message: format!("Cannot determine working directory: {e}"),
@@ -196,7 +169,7 @@ impl LeanDagClient {
             ..Default::default()
         };
 
-        tracing::debug!("[LeanDag] Sending initialize request");
+        tracing::debug!("[{}] Sending initialize request", self.name);
 
         let id = self.next_request_id();
         let request_json = json!({ "id": id, "method": Initialize::METHOD, "params": params });
@@ -211,9 +184,8 @@ impl LeanDagClient {
             .map_err(|e| LspError::RpcError {
                 code: Some(e.code.0),
                 message: format!(
-                    "lean-dag initialization failed: {}. Check \
-                     ~/.cache/lean-tui/lean-dag-client.log for details",
-                    e.message
+                    "{} initialization failed: {}. Check logs for details",
+                    self.name, e.message
                 ),
             })?;
 
@@ -224,7 +196,7 @@ impl LeanDagClient {
                 message: format!("Failed to complete initialization handshake: {e:?}"),
             })?;
 
-        tracing::info!("[LeanDag] Server initialized");
+        tracing::info!("[{}] Server initialized", self.name);
         Ok(())
     }
 
@@ -232,7 +204,7 @@ impl LeanDagClient {
         self.next_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    async fn request(
+    pub async fn request(
         &self,
         method: &str,
         params: impl Serialize,
@@ -252,18 +224,21 @@ impl LeanDagClient {
             })
     }
 
-    /// Open a document in the lean-dag server.
+    /// Open a document in the server.
     pub async fn did_open(&self, params: DidOpenTextDocumentParams) -> Result<(), LspError> {
         let uri = params.text_document.uri.to_string();
         let version = params.text_document.version as u32;
 
-        tracing::debug!("[LeanDag] didOpen {} v{}", uri, version);
+        tracing::debug!("[{}] didOpen {} v{}", self.name, uri, version);
 
         self.socket
             .notify::<DidOpenTextDocument>(params)
             .map_err(|e| LspError::RpcError {
                 code: None,
-                message: format!("Lost connection to lean-dag while opening document: {e:?}"),
+                message: format!(
+                    "Lost connection to {} while opening document: {e:?}",
+                    self.name
+                ),
             })?;
 
         self.documents
@@ -274,18 +249,21 @@ impl LeanDagClient {
         Ok(())
     }
 
-    /// Update a document in the lean-dag server.
+    /// Update a document in the server.
     pub async fn did_change(&self, params: DidChangeTextDocumentParams) -> Result<(), LspError> {
         let uri = params.text_document.uri.to_string();
         let version = params.text_document.version as u32;
 
-        tracing::debug!("[LeanDag] didChange {} v{}", uri, version);
+        tracing::debug!("[{}] didChange {} v{}", self.name, uri, version);
 
         self.socket
             .notify::<DidChangeTextDocument>(params)
             .map_err(|e| LspError::RpcError {
                 code: None,
-                message: format!("Lost connection to lean-dag while updating document: {e:?}"),
+                message: format!(
+                    "Lost connection to {} while updating document: {e:?}",
+                    self.name
+                ),
             })?;
 
         if let Some(doc) = self.documents.write().await.get_mut(&uri) {
@@ -298,23 +276,28 @@ impl LeanDagClient {
     }
 
     /// Wait for diagnostics to complete for a document.
-    async fn wait_for_diagnostics(&self, uri: &Url, version: u32) -> Result<(), LspError> {
+    pub async fn wait_for_diagnostics(&self, uri: &Url, version: u32) -> Result<(), LspError> {
         let params = WaitForDiagnosticsParams {
             uri: uri.to_string(),
             version,
         };
 
-        tracing::debug!("[LeanDag] waitForDiagnostics {} v{}", uri, version);
+        tracing::debug!(
+            "[{}] waitForDiagnostics {} v{}",
+            self.name,
+            uri,
+            version
+        );
         let _ = self
             .request("textDocument/waitForDiagnostics", params)
             .await?;
-        tracing::debug!("[LeanDag] File ready: {} v{}", uri, version);
+        tracing::debug!("[{}] File ready: {} v{}", self.name, uri, version);
 
         Ok(())
     }
 
     /// Get or create an RPC session for a document.
-    async fn get_session(&self, uri: &Url) -> Result<u64, LspError> {
+    pub async fn get_session(&self, uri: &Url) -> Result<u64, LspError> {
         let existing = self.sessions.lock().await.get(uri.as_str()).copied();
         if let Some(id) = existing {
             return Ok(id);
@@ -324,7 +307,7 @@ impl LeanDagClient {
     }
 
     /// Create a new RPC session for a document, replacing any existing one.
-    async fn create_session(&self, uri: &Url) -> Result<u64, LspError> {
+    pub async fn create_session(&self, uri: &Url) -> Result<u64, LspError> {
         let params = RpcConnectParams {
             uri: uri.to_string(),
         };
@@ -333,7 +316,7 @@ impl LeanDagClient {
             .map_err(|e| LspError::ParseError(format!("Invalid RPC session response: {e}")))?;
 
         let session_id = resp.session_id;
-        tracing::debug!("[LeanDag] RPC session for {}: {}", uri, session_id);
+        tracing::debug!("[{}] RPC session for {}: {}", self.name, uri, session_id);
 
         self.sessions
             .lock()
@@ -343,7 +326,7 @@ impl LeanDagClient {
     }
 
     /// Invalidate the RPC session for a document.
-    async fn invalidate_session(&self, uri: &Url) {
+    pub async fn invalidate_session(&self, uri: &Url) {
         self.sessions.lock().await.remove(uri.as_str());
     }
 
@@ -372,7 +355,7 @@ impl LeanDagClient {
             Err(LspError::RpcError {
                 code: Some(code), ..
             }) if code == RPC_SESSION_OUTDATED => {
-                tracing::debug!("[LeanDag] Session outdated for {}, renewing", uri);
+                tracing::debug!("[{}] Session outdated for {}, renewing", self.name, uri);
                 self.invalidate_session(uri).await;
                 self.try_get_proof_dag(uri, position, mode).await
             }
@@ -416,112 +399,4 @@ impl LeanDagClient {
 
         Ok(Some(result.proof_dag))
     }
-}
-
-/// Find the Lake project root by searching upward for lakefile.lean.
-fn find_lake_root() -> Option<PathBuf> {
-    let mut current = env::current_dir().ok()?;
-    loop {
-        if current.join("lakefile.lean").exists() {
-            return Some(current);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
-/// Find the lean-dag server binary.
-///
-/// Search order:
-/// 1. LEAN_DAG_SERVER environment variable (development override)
-/// 2. Git-imported LeanDag package at
-///    .lake/packages/LeanDag/.lake/build/bin/lean-dag
-fn find_lean_dag_server() -> Result<PathBuf, LspError> {
-    let mut searched_paths = Vec::new();
-
-    // 1. Environment variable override (for development)
-    if let Ok(path) = env::var("LEAN_DAG_SERVER") {
-        let p = PathBuf::from(&path);
-        if p.exists() {
-            return Ok(p);
-        }
-        searched_paths.push(p);
-    }
-
-    // 2. Find Lake project root
-    let project_root = find_lake_root();
-
-    if let Some(ref root) = project_root {
-        let package_binary = root.join(".lake/packages/LeanDag/.lake/build/bin/lean-dag");
-        searched_paths.push(package_binary.clone());
-        if package_binary.exists() {
-            return Ok(package_binary);
-        }
-    }
-
-    Err(LspError::LeanDagNotFound {
-        searched_paths,
-        project_root,
-    })
-}
-
-/// Get the lean-dag log file path.
-fn get_lean_dag_log_file() -> Option<File> {
-    let home = env::var("HOME").ok()?;
-    let log_dir = PathBuf::from(home).join(".cache/lean-tui");
-    fs::create_dir_all(&log_dir).ok()?;
-    let log_path = log_dir.join("lean-dag.log");
-    File::create(&log_path).ok()
-}
-
-/// Spawn the lean-dag server process.
-fn spawn_lean_dag_server(
-    server_path: &PathBuf,
-) -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout), LspError> {
-    let server_str = server_path.display().to_string();
-    let pp_opts: String = LEAN_PP_OPTIONS
-        .iter()
-        .map(|opt| format!("-D {opt}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let shell_cmd = format!("LEAN_WORKER_PATH={server_str} exec {server_str} -- {pp_opts}");
-
-    let mut cmd = Command::new("lake");
-    cmd.args(["env", "sh", "-c", &shell_cmd]);
-    cmd.env_remove("LEAN_PATH");
-    cmd.env_remove("LEAN_SYSROOT");
-
-    let stderr = match get_lean_dag_log_file() {
-        Some(file) => Stdio::from(file),
-        None => Stdio::inherit(),
-    };
-
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(stderr)
-        .spawn()
-        .map_err(|e| LspError::LeanDagSpawnFailed {
-            path: server_str.clone(),
-            reason: e.to_string(),
-        })?;
-
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| LspError::LeanDagSpawnFailed {
-            path: server_str.clone(),
-            reason: "Failed to capture stdin pipe".to_string(),
-        })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| LspError::LeanDagSpawnFailed {
-            path: server_str,
-            reason: "Failed to capture stdout pipe".to_string(),
-        })?;
-
-    Ok((stdin, stdout))
 }

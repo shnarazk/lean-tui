@@ -19,7 +19,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Run as LSP proxy between editor and lake serve
-    Proxy,
+    Proxy {
+        /// Use standalone lean-dag binary instead of library mode.
+        /// In library mode (default), users must `import LeanDag` in their Lean files.
+        /// In standalone mode, the lean-dag binary provides RPC methods directly.
+        #[arg(long)]
+        standalone: bool,
+    },
     /// Run TUI viewer (connects to proxy)
     View,
 }
@@ -29,8 +35,8 @@ async fn main() {
     let cli = Cli::parse();
 
     // Init tracing to log file (separate files for proxy and TUI)
-    let log_filename = match cli.command {
-        Commands::Proxy => "proxy.log",
+    let log_filename = match &cli.command {
+        Commands::Proxy { .. } => "proxy.log",
         Commands::View => "tui.log",
     };
     let log_path = dirs::cache_dir()
@@ -58,7 +64,7 @@ async fn main() {
     }
 
     let result = match cli.command {
-        Commands::Proxy => proxy::run().await,
+        Commands::Proxy { standalone } => proxy::run(standalone).await,
         Commands::View => tui::run().await,
     };
 

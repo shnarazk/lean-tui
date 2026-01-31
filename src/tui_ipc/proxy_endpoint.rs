@@ -16,7 +16,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use super::protocol::{socket_path, Command, CursorInfo, Message};
+use super::protocol::{socket_path, Command, CursorInfo, Message, ServerMode};
 use crate::lean_rpc::ProofDag;
 
 // ============================================================================
@@ -28,13 +28,18 @@ use crate::lean_rpc::ProofDag;
 pub struct SocketServer {
     /// Sender for outgoing messages to TUI clients.
     msg_sender: broadcast::Sender<Message>,
+    /// Server mode for RPC communication.
+    server_mode: ServerMode,
 }
 
 impl SocketServer {
-    /// Create a new socket server.
-    pub fn new() -> Self {
+    /// Create a new socket server with the specified server mode.
+    pub fn new(server_mode: ServerMode) -> Self {
         let (msg_sender, _) = broadcast::channel(16);
-        Self { msg_sender }
+        Self {
+            msg_sender,
+            server_mode,
+        }
     }
 
     /// Start the socket listener.
@@ -42,9 +47,10 @@ impl SocketServer {
     pub fn start_listener(&self) -> mpsc::Receiver<Command> {
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(16);
         let msg_sender = self.msg_sender.clone();
+        let server_mode = self.server_mode;
 
         tokio::spawn(async move {
-            run_listener(msg_sender, cmd_tx).await;
+            run_listener(msg_sender, cmd_tx, server_mode).await;
         });
 
         cmd_rx
@@ -83,7 +89,11 @@ impl SocketServer {
 }
 
 /// Run the Unix socket listener.
-async fn run_listener(msg_sender: broadcast::Sender<Message>, cmd_tx: mpsc::Sender<Command>) {
+async fn run_listener(
+    msg_sender: broadcast::Sender<Message>,
+    cmd_tx: mpsc::Sender<Command>,
+    server_mode: ServerMode,
+) {
     let path = socket_path();
 
     // Ensure parent directory exists
@@ -111,7 +121,7 @@ async fn run_listener(msg_sender: broadcast::Sender<Message>, cmd_tx: mpsc::Send
             Ok((stream, _)) => {
                 let msg_rx = msg_sender.subscribe();
                 let cmd_tx = cmd_tx.clone();
-                tokio::spawn(handle_client(stream, msg_rx, cmd_tx));
+                tokio::spawn(handle_client(stream, msg_rx, cmd_tx, server_mode));
             }
             Err(e) => {
                 tracing::error!("Accept error: {e}");
@@ -125,12 +135,15 @@ async fn handle_client(
     stream: UnixStream,
     mut msg_rx: broadcast::Receiver<Message>,
     cmd_tx: mpsc::Sender<Command>,
+    server_mode: ServerMode,
 ) {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
 
-    // Send Connected message immediately
-    if let Ok(json) = serde_json::to_string(&Message::Connected) {
+    // Send Connected message immediately with server mode
+    if let Ok(json) = serde_json::to_string(&Message::Connected {
+        server_mode: Some(server_mode),
+    }) {
         let _ = writer.write_all(format!("{json}\n").as_bytes()).await;
     }
 

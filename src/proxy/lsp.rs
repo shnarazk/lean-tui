@@ -21,10 +21,10 @@ use super::{
     cursor::{extract_cursor_from_notification, extract_cursor_from_request},
     documents::DocumentCache,
 };
-use crate::{lean_rpc::LeanDagClient, proxy::goals::spawn_goal_fetch, tui_ipc::SocketServer};
+use crate::{lean_rpc::RpcClient, proxy::goals::spawn_goal_fetch, tui_ipc::SocketServer};
 
-/// Shared container for LeanDag client that can be set after service creation.
-pub type LeanDagClientSlot = Arc<OnceLock<Arc<LeanDagClient>>>;
+/// Shared container for RPC client that can be set after service creation.
+pub type RpcClientSlot = Arc<OnceLock<RpcClient>>;
 
 /// Intercepts LSP messages, extracts cursor position, and forwards to inner
 /// service.
@@ -32,23 +32,23 @@ pub struct InterceptService<S> {
     pub service: S,
     pub socket_server: Arc<SocketServer>,
     pub document_cache: Arc<DocumentCache>,
-    /// LeanDag client slot - set after lean-dag process is spawned.
-    pub lean_dag_slot: LeanDagClientSlot,
+    /// RPC client slot - set after client is initialized.
+    pub rpc_client_slot: RpcClientSlot,
 }
 
 impl<S: LspService> InterceptService<S> {
-    /// Create with a shared document cache and LeanDag client.
+    /// Create with a shared document cache and RPC client.
     pub fn new(
         service: S,
         socket_server: Arc<SocketServer>,
         document_cache: Arc<DocumentCache>,
-        lean_dag_slot: LeanDagClientSlot,
+        rpc_client_slot: RpcClientSlot,
     ) -> Self {
         Self {
             service,
             socket_server,
             document_cache,
-            lean_dag_slot,
+            rpc_client_slot,
         }
     }
 
@@ -64,8 +64,8 @@ impl<S: LspService> InterceptService<S> {
 
             self.socket_server.broadcast_cursor(cursor.clone());
 
-            if let Some(lean_dag) = self.lean_dag_slot.get() {
-                spawn_goal_fetch(&cursor, &self.socket_server, lean_dag);
+            if let Some(client) = self.rpc_client_slot.get() {
+                spawn_goal_fetch(&cursor, &self.socket_server, client);
             }
         }
     }
@@ -76,8 +76,8 @@ impl<S: LspService> InterceptService<S> {
         // Handle server-to-client notifications (PublishDiagnostics)
         self.document_cache.handle_server_notification(notif);
 
-        // Forward document notifications to LeanDag client
-        self.forward_to_lean_dag(notif);
+        // Forward document notifications to RPC client
+        self.forward_to_rpc_client(notif);
 
         if let Some(cursor) = extract_cursor_from_notification(notif) {
             let _span = tracing::debug_span!(
@@ -90,14 +90,14 @@ impl<S: LspService> InterceptService<S> {
 
             self.socket_server.broadcast_cursor(cursor.clone());
 
-            if let Some(lean_dag) = self.lean_dag_slot.get() {
-                spawn_goal_fetch(&cursor, &self.socket_server, lean_dag);
+            if let Some(client) = self.rpc_client_slot.get() {
+                spawn_goal_fetch(&cursor, &self.socket_server, client);
             }
         }
     }
 
-    fn forward_to_lean_dag(&self, notif: &AnyNotification) {
-        let Some(lean_dag) = self.lean_dag_slot.get() else {
+    fn forward_to_rpc_client(&self, notif: &AnyNotification) {
+        let Some(client) = self.rpc_client_slot.get() else {
             return;
         };
 
@@ -105,10 +105,10 @@ impl<S: LspService> InterceptService<S> {
             if let Ok(params) =
                 serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone())
             {
-                let lean_dag = lean_dag.clone();
+                let client = client.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = lean_dag.did_open(params).await {
-                        tracing::warn!("Failed to forward didOpen to LeanDag: {}", e);
+                    if let Err(e) = client.did_open(params).await {
+                        tracing::warn!("Failed to forward didOpen to RPC client: {}", e);
                     }
                 });
             }
@@ -116,10 +116,10 @@ impl<S: LspService> InterceptService<S> {
             if let Ok(params) =
                 serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone())
             {
-                let lean_dag = lean_dag.clone();
+                let client = client.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = lean_dag.did_change(params).await {
-                        tracing::warn!("Failed to forward didChange to LeanDag: {}", e);
+                    if let Err(e) = client.did_change(params).await {
+                        tracing::warn!("Failed to forward didChange to RPC client: {}", e);
                     }
                 });
             }

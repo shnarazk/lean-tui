@@ -34,11 +34,33 @@ impl CursorInfo {
     }
 }
 
+/// Server mode for RPC communication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ServerMode {
+    /// Library mode: uses `lake serve`, requires `import LeanDag`
+    Library,
+    /// Standalone mode: uses lean-dag binary, no import required
+    Standalone,
+}
+
+impl ServerMode {
+    /// Display name for the server mode.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Library => "Library",
+            Self::Standalone => "Standalone",
+        }
+    }
+}
+
 /// Messages sent from proxy to TUI over the Unix socket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Message {
-    Connected,
+    Connected {
+        #[serde(default)]
+        server_mode: Option<ServerMode>,
+    },
     Cursor(CursorInfo),
     /// Unified proof DAG - single source of truth for all display modes.
     ProofDag {
