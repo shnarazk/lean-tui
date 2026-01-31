@@ -2,14 +2,13 @@
 
 use async_lsp::{
     lsp_types::{
-        notification::{DidChangeTextDocument, Notification},
         request::{
             Completion, DocumentHighlightRequest, GotoDefinition, GotoImplementation,
             GotoTypeDefinition, HoverRequest, References, Request, SignatureHelpRequest,
         },
-        DidChangeTextDocumentParams, TextDocumentPositionParams,
+        TextDocumentPositionParams,
     },
-    AnyNotification, AnyRequest,
+    AnyRequest,
 };
 
 use crate::tui_ipc::CursorInfo;
@@ -34,19 +33,5 @@ pub fn extract_cursor_from_request(req: &AnyRequest) -> Option<CursorInfo> {
         params.text_document.uri,
         params.position,
         &req.method,
-    ))
-}
-
-pub fn extract_cursor_from_notification(notif: &AnyNotification) -> Option<CursorInfo> {
-    if notif.method != <DidChangeTextDocument as Notification>::METHOD {
-        return None;
-    }
-    let params: DidChangeTextDocumentParams = serde_json::from_value(notif.params.clone()).ok()?;
-    let first_change = params.content_changes.first()?;
-    let range = first_change.range?;
-    Some(CursorInfo::new(
-        params.text_document.uri,
-        range.start,
-        "didChange",
     ))
 }

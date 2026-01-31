@@ -17,11 +17,65 @@ use async_lsp::{
 };
 use futures::Future;
 
-use super::{
-    cursor::{extract_cursor_from_notification, extract_cursor_from_request},
-    documents::DocumentCache,
+use super::{cursor::extract_cursor_from_request, documents::DocumentCache};
+use crate::{
+    lean_rpc::RpcClient, proxy::goals::spawn_goal_fetch, tui_ipc::CursorInfo,
+    tui_ipc::LspProxySocketEndpoint,
 };
-use crate::{lean_rpc::RpcClient, proxy::goals::spawn_goal_fetch, tui_ipc::LspProxySocketEndpoint};
+
+/// Spawn async task to forward didOpen to RPC client.
+fn spawn_did_open(client: RpcClient, params: DidOpenTextDocumentParams) {
+    tokio::spawn(async move {
+        if let Err(e) = client.did_open(params).await {
+            tracing::warn!("Failed to forward didOpen to RPC client: {e}");
+        }
+    });
+}
+
+/// Spawn async task to forward didChange to RPC client.
+fn spawn_did_change(client: RpcClient, params: DidChangeTextDocumentParams) {
+    tokio::spawn(async move {
+        if let Err(e) = client.did_change(params).await {
+            tracing::warn!("Failed to forward didChange to RPC client: {e}");
+        }
+    });
+}
+
+/// Parsed notification variants for single-parse optimization.
+pub enum ParsedNotification {
+    DidOpen(DidOpenTextDocumentParams),
+    DidChange(DidChangeTextDocumentParams),
+    Other,
+}
+
+impl ParsedNotification {
+    /// Parse notification once, returning typed variant.
+    fn from_any(notif: &AnyNotification) -> Self {
+        if notif.method == DidOpenTextDocument::METHOD {
+            serde_json::from_value(notif.params.clone()).map_or(Self::Other, Self::DidOpen)
+        } else if notif.method == DidChangeTextDocument::METHOD {
+            serde_json::from_value(notif.params.clone()).map_or(Self::Other, Self::DidChange)
+        } else {
+            Self::Other
+        }
+    }
+
+    /// Extract cursor info from parsed notification.
+    fn cursor_info(&self) -> Option<CursorInfo> {
+        match self {
+            Self::DidChange(params) => {
+                let first_change = params.content_changes.first()?;
+                let range = first_change.range?;
+                Some(CursorInfo::new(
+                    params.text_document.uri.clone(),
+                    range.start,
+                    "didChange",
+                ))
+            }
+            _ => None,
+        }
+    }
+}
 
 /// Shared container for RPC client that can be set after service creation.
 pub type RpcClientSlot = Arc<OnceLock<RpcClient>>;
@@ -37,73 +91,71 @@ pub struct InterceptService<S> {
 }
 
 impl<S: LspService> InterceptService<S> {
+    /// Broadcast cursor to TUI and fetch goals if RPC client is available.
+    fn broadcast_cursor_and_fetch_goals(&self, cursor: &CursorInfo) {
+        let _span = tracing::debug_span!(
+            "cursor",
+            file = cursor.filename().unwrap_or("?"),
+            line = cursor.position.line,
+            char = cursor.position.character
+        )
+        .entered();
+
+        self.socket_server.broadcast_cursor(cursor.clone());
+
+        if let Some(client) = self.rpc_client_slot.get() {
+            spawn_goal_fetch(cursor, &self.socket_server, client);
+        }
+    }
+
     fn handle_request(&self, req: &AnyRequest) {
-        if let Some(cursor) = extract_cursor_from_request(req) {
-            let _span = tracing::debug_span!(
-                "cursor",
-                file = cursor.filename().unwrap_or("?"),
-                line = cursor.position.line,
-                char = cursor.position.character
-            )
-            .entered();
-
-            self.socket_server.broadcast_cursor(cursor.clone());
-
-            if let Some(client) = self.rpc_client_slot.get() {
-                spawn_goal_fetch(&cursor, &self.socket_server, client);
-            }
+        if let Some(ref cursor) = extract_cursor_from_request(req) {
+            self.broadcast_cursor_and_fetch_goals(cursor);
         }
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
-        // Handle client-to-server notifications (`DidOpen`, `DidChange`)
-        self.document_cache.handle_notification(notif);
         // Handle server-to-client notifications (`PublishDiagnostics`)
         DocumentCache::handle_server_notification(notif);
 
-        // Forward document notifications to RPC client
-        self.forward_to_rpc_client(notif);
+        // Parse once, use for all purposes
+        let parsed = ParsedNotification::from_any(notif);
 
-        if let Some(cursor) = extract_cursor_from_notification(notif) {
-            let _span = tracing::debug_span!(
-                "cursor",
-                file = cursor.filename().unwrap_or("?"),
-                line = cursor.position.line,
-                char = cursor.position.character
-            )
-            .entered();
+        // Update document cache with parsed data (no re-parsing)
+        self.document_cache.handle_parsed_notification(&parsed);
 
-            self.socket_server.broadcast_cursor(cursor.clone());
+        // Forward to RPC client with parsed data (no re-parsing)
+        self.forward_parsed_to_rpc(&parsed);
 
-            if let Some(client) = self.rpc_client_slot.get() {
-                spawn_goal_fetch(&cursor, &self.socket_server, client);
-            }
+        // Extract cursor from parsed data (no re-parsing)
+        if let Some(ref cursor) = parsed.cursor_info() {
+            self.broadcast_cursor_and_fetch_goals(cursor);
         }
     }
 
-    fn forward_to_rpc_client(&self, notif: &AnyNotification) {
-        let Some(client) = self.rpc_client_slot.get().cloned() else {
-            return;
-        };
-
-        if notif.method == DidOpenTextDocument::METHOD {
-            let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone()) else {
-                return;
-            };
-            tokio::spawn(async move {
-                let _ = client.did_open(params).await.inspect_err(|e| {
-                    tracing::warn!("Failed to forward didOpen to RPC client: {e}");
-                });
-            });
-        } else if notif.method == DidChangeTextDocument::METHOD {
-            let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone()) else {
-                return;
-            };
-            tokio::spawn(async move {
-                let _ = client.did_change(params).await.inspect_err(|e| {
-                    tracing::warn!("Failed to forward didChange to RPC client: {e}");
-                });
-            });
+    fn forward_parsed_to_rpc(&self, parsed: &ParsedNotification) {
+        match parsed {
+            ParsedNotification::DidOpen(params) => {
+                if let Some(client) = self.rpc_client_slot.get().cloned() {
+                    let params = params.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = client.did_open(params).await {
+                            tracing::warn!("Failed to forward didOpen to RPC client: {e}");
+                        }
+                    });
+                }
+            }
+            ParsedNotification::DidChange(params) => {
+                if let Some(client) = self.rpc_client_slot.get().cloned() {
+                    let params = params.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = client.did_change(params).await {
+                            tracing::warn!("Failed to forward didChange to RPC client: {e}");
+                        }
+                    });
+                }
+            }
+            ParsedNotification::Other => {}
         }
     }
 }

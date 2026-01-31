@@ -4,14 +4,13 @@ use std::{collections::HashMap, sync::Mutex};
 
 use async_lsp::{
     lsp_types::{
-        notification::{
-            DidChangeTextDocument, DidOpenTextDocument, Notification, PublishDiagnostics,
-        },
-        DidChangeTextDocumentParams, DidOpenTextDocumentParams, Position, PublishDiagnosticsParams,
-        TextDocumentContentChangeEvent,
+        notification::{Notification, PublishDiagnostics},
+        Position, PublishDiagnosticsParams, TextDocumentContentChangeEvent,
     },
     AnyNotification,
 };
+
+use super::lsp::ParsedNotification;
 
 pub struct DocumentCache {
     documents: Mutex<HashMap<String, String>>,
@@ -24,26 +23,22 @@ impl DocumentCache {
         }
     }
 
-    /// Handle client-to-server notifications (`DidOpen`, `DidChange`).
-    pub fn handle_notification(&self, notif: &AnyNotification) {
-        if notif.method == DidOpenTextDocument::METHOD {
-            let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone())
-            else {
-                return;
-            };
-            let uri = p.text_document.uri.as_str();
-            tracing::debug!("DidOpen URI: {uri}");
-            self.update(uri, p.text_document.text);
-        } else if notif.method == DidChangeTextDocument::METHOD {
-            let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone())
-            else {
-                return;
-            };
-            let uri = p.text_document.uri.as_str();
-            tracing::debug!("DidChange URI: {uri}");
-            if let Some(content) = self.apply_changes(uri, &p.content_changes) {
-                self.update(uri, content);
+    /// Handle client-to-server notifications using pre-parsed data.
+    pub fn handle_parsed_notification(&self, parsed: &ParsedNotification) {
+        match parsed {
+            ParsedNotification::DidOpen(p) => {
+                let uri = p.text_document.uri.as_str();
+                tracing::debug!("DidOpen URI: {uri}");
+                self.update(uri, p.text_document.text.clone());
             }
+            ParsedNotification::DidChange(p) => {
+                let uri = p.text_document.uri.as_str();
+                tracing::debug!("DidChange URI: {uri}");
+                if let Some(content) = self.apply_changes(uri, &p.content_changes) {
+                    self.update(uri, content);
+                }
+            }
+            ParsedNotification::Other => {}
         }
     }
 
