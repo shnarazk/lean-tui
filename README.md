@@ -151,13 +151,20 @@ The name `lean-dag` comes from Lean [Directed Acyclic Graph (DAG)](https://en.wi
 
 ```mermaid
 flowchart TD
-    subgraph LSP-proxy[lean-dag]
+    subgraph LSP-proxy[wvhulle/lean-dag]
 
-        LeanDag[Builds DAG]
+        lean-runtime[Lean-runtime]
+        LeanDag[graph constructor]
+
+        LeanDag <-->|Lean| lean-runtime
+
         custom-rpc-server[custom RPC server]
         original-lean-lsp[Lean LSP server]
-        lean-dag[lean-dag binary]
 
+        
+
+        lean-dag[LeanDag/Main]
+        original-lean-lsp --> lean-runtime
 
         lean-dag -->|JSON| custom-rpc-server 
         LeanDag <-->|Lean| custom-rpc-server
@@ -195,8 +202,9 @@ flowchart TD
 
         proxy-socket <-->|JSON lines| json-socket <-->|JSON lines| tui-socket
 
-        editor-lsp-client -->|JSON/LSP| proxy-lsp-server
+        editor-lsp-client -.->|JSON/LSP| proxy-lsp-server
         
+        Editor -.-> lean-dag
    
 ```
 
