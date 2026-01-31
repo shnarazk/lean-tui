@@ -145,35 +145,59 @@ The TUI follows your cursor in the editor automatically.
 
 ## How does it work?
 
-**lean-dag** is a custom LSP server that runs alongside Lake. It uses Lean's internal APIs to extract detailed proof information (tactic applications, goal transformations, goto locations) that isn't available through standard LSP.
+This is mainly a front for **lean-dag**, a custom LSP server that adds an RPC method on top of the built-in LSP-compliant RPC methods provided by Lean's LSP. The additional RPC methods uses Lean's internal APIs to extract detailed proof information (tactic applications, goal transformations, goto locations) that isn't available through standard LSP.
 
 The name `lean-dag` comes from Lean [Directed Acyclic Graph (DAG)](https://en.wikipedia.org/wiki/Directed_acyclic_graph) since its main goal is showing your proof state as a graph. Lean TUI is just a front-end that connects to a proxy LSP (also defined in `lean-dag` that intercepts the standard LSP and adds DAG extraction.
 
 ```mermaid
-flowchart TB
-    subgraph Lean["Lean LSP (choose one)"]
-        direction LR
-        Lake["lake serve<br/>(standard mode)"]
-        LeanDag["lean-dag<br/>(standalone mode)"]
+flowchart TD
+    subgraph LSP-proxy[lean-dag]
+
+        LeanDag[Builds DAG]
+        custom-rpc-server[custom RPC server]
+        original-lean-lsp[Lean LSP server]
+        lean-dag[lean-dag binary]
+
+
+        lean-dag -->|JSON| custom-rpc-server 
+        LeanDag <-->|Lean| custom-rpc-server
+        custom-rpc-server <-->|Lean| original-lean-lsp
     end
 
-    subgraph Proxy["lean-tui proxy"]
-        direction LR
-        intercept["Intercepts LSP traffic"]
-        broadcast["Broadcasts ProofDag to TUI"]
+    subgraph proxy["lean-tui proxy"]
+        
+        proxy-rpc-client[RPC client]
+        proxy-lsp-server[LSP server]
+        proxy-socket[Socket endpoint]
+        proxy-lsp-server <-->|Rust/JSON| proxy-socket
+        proxy-lsp-server <-->|Rust/JSON| proxy-rpc-client
+        proxy-rpc-client <-->|RPC/JSON| custom-rpc-server
     end
 
-    subgraph Terminals["User terminals"]
-        direction LR
-        Editor["Editor<br/>(Helix, Neovim, etc.)"]
-        TUI["lean-tui view<br/>(TUI frontend)"]
-    end
+    
 
-    Lake <-->|"LSP + RPC"| Proxy
-    LeanDag <-->|"LSP + RPC"| Proxy
-    Proxy <-->|"LSP"| Editor
-    Proxy -->|"ProofDag"| TUI
-    TUI -->|"goto"| Proxy
+    
+        subgraph TUI[lean-tui view]
+            tui-socket[Socket endpoint]
+
+
+            Ratatui
+
+            Ratatui <-->|Rust| tui-socket
+        end
+        
+        json-socket[UNIX socket]
+
+        subgraph Editor[Helix/NeoVim/Zed]
+            editor-lsp-client[LSP Client]
+        end
+
+
+        proxy-socket <-->|JSON lines| json-socket <-->|JSON lines| tui-socket
+
+        editor-lsp-client -->|JSON/LSP| proxy-lsp-server
+        
+   
 ```
 
 ## Debugging
