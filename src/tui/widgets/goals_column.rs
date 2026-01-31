@@ -11,7 +11,10 @@ use ratatui::{
 use super::{
     diff_text::TaggedTextExt, hypothesis_indices, ClickRegion, HypothesisFilters, Selection,
 };
-use crate::{lean_rpc::ProofState, tui::widgets::theme::Theme};
+use crate::{
+    lean_rpc::{GoalInfo, HypothesisInfo, ProofState},
+    tui::widgets::theme::Theme,
+};
 
 /// State for the goals column widget (render artifacts only).
 #[derive(Default)]
@@ -87,135 +90,130 @@ impl StatefulWidget for GoalsColumn<'_> {
             return;
         }
 
-        // Count visible hypotheses
+        let [hyp_area, div_area, goal_area] = self.compute_layout(inner);
+        let node_id = self.is_current.then_some(self.node_id).flatten();
+        let selection = self.is_current.then_some(self.selection).flatten();
+
+        self.render_hypotheses(hyp_area, buf, state, selection, node_id);
+        render_divider(div_area, buf);
+        self.render_goals(goal_area, buf, state, selection, node_id);
+    }
+}
+
+impl GoalsColumn<'_> {
+    fn compute_layout(&self, inner: Rect) -> [Rect; 3] {
         let visible_hyp_count =
             hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order)
                 .filter(|&i| self.should_show_hypothesis(i))
                 .count();
 
-        // Layout: hypotheses section, divider, goals section
         let hyp_height = visible_hyp_count.min(inner.height.saturating_sub(3) as usize / 2);
         let constraints = vec![
             Constraint::Length(hyp_height as u16),
-            Constraint::Length(1), // divider
-            Constraint::Fill(1),   // goals
+            Constraint::Length(1),
+            Constraint::Fill(1),
         ];
-        let [hyp_area, div_area, goal_area] = Layout::vertical(constraints).areas(inner);
+        Layout::vertical(constraints).areas(inner)
+    }
 
-        // Render hypotheses
-        let selection = if self.is_current {
-            self.selection
-        } else {
-            None
-        };
-        let node_id = if self.is_current { self.node_id } else { None };
+    fn render_hypotheses(
+        &self,
+        hyp_area: Rect,
+        buf: &mut Buffer,
+        state: &mut GoalsColumnState,
+        selection: Option<Selection>,
+        node_id: Option<u32>,
+    ) {
+        let visible_hyps = hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order)
+            .filter(|&i| self.should_show_hypothesis(i))
+            .take(hyp_area.height as usize);
 
-        let mut y = hyp_area.y;
-        for hyp_idx in hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order) {
-            if !self.should_show_hypothesis(hyp_idx) {
-                continue;
-            }
-            if y >= hyp_area.bottom() {
-                break;
-            }
-
+        for (row, hyp_idx) in visible_hyps.enumerate() {
             let h = &self.state.hypotheses[hyp_idx];
-            let is_selected = matches!(selection, Some(Selection::Hyp { hyp_idx: sel_idx, .. }) if sel_idx == hyp_idx);
+            let is_selected = matches!(selection, Some(Selection::Hyp { hyp_idx: sel, .. }) if sel == hyp_idx);
+            let line_area = Rect::new(hyp_area.x, hyp_area.y + row as u16, hyp_area.width, 1);
 
-            let style = if is_selected {
-                Style::new().bg(Theme::SELECTION_BG)
-            } else {
-                Style::default()
-            };
-
-            // Format: "name : type" (with diff highlighting)
-            let mut spans = vec![
-                Span::styled(&h.name, style.fg(Theme::HYP_NAME)),
-                Span::styled(" : ", style),
-            ];
-            spans.extend(h.type_.to_spans(style.fg(Theme::HYP_TYPE)));
-            let line = Line::from(spans);
-
-            let line_area = Rect::new(hyp_area.x, y, hyp_area.width, 1);
+            let line = render_hypothesis_line(h, is_selected);
             Paragraph::new(line).render(line_area, buf);
 
-            // Register click region
-            if self.is_current {
-                if let Some(nid) = node_id {
-                    state.click_regions.push(ClickRegion {
-                        area: line_area,
-                        selection: Selection::Hyp {
-                            node_id: nid,
-                            hyp_idx,
-                        },
-                    });
-                }
+            if let Some(nid) = node_id {
+                state.click_regions.push(ClickRegion {
+                    area: line_area,
+                    selection: Selection::Hyp { node_id: nid, hyp_idx },
+                });
             }
-
-            y += 1;
-        }
-
-        // Render divider
-        let divider = "─".repeat(div_area.width as usize);
-        Paragraph::new(divider)
-            .style(Theme::DIM)
-            .render(div_area, buf);
-
-        // Render goals
-        y = goal_area.y;
-        for (goal_idx, g) in self.state.goals.iter().enumerate() {
-            if y >= goal_area.bottom() {
-                break;
-            }
-
-            let is_selected = matches!(selection, Some(Selection::Goal { goal_idx: sel_idx, .. }) if sel_idx == goal_idx);
-            let is_active = self
-                .active_goal_name
-                .is_some_and(|name| g.username.as_str() == Some(name));
-
-            let style = if is_selected {
-                Style::new().bg(Theme::SELECTION_BG)
-            } else {
-                Style::default()
-            };
-
-            // Highlight active goal
-            let target_style = if is_active {
-                style
-                    .fg(Theme::CURRENT_NODE_BORDER)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                style.fg(Theme::GOAL_TYPE)
-            };
-
-            // Format: "⊢ type" or "case name ⊢ type" (with diff highlighting)
-            let prefix = g
-                .username
-                .as_str()
-                .map_or("⊢ ".to_string(), |name| format!("case {name} ⊢ "));
-            let mut spans = vec![Span::styled(prefix, style)];
-            spans.extend(g.type_.to_spans(target_style));
-            let line = Line::from(spans);
-
-            let line_area = Rect::new(goal_area.x, y, goal_area.width, 1);
-            Paragraph::new(line).render(line_area, buf);
-
-            // Register click region
-            if self.is_current {
-                if let Some(nid) = node_id {
-                    state.click_regions.push(ClickRegion {
-                        area: line_area,
-                        selection: Selection::Goal {
-                            node_id: nid,
-                            goal_idx,
-                        },
-                    });
-                }
-            }
-
-            y += 1;
         }
     }
+
+    fn render_goals(
+        &self,
+        goal_area: Rect,
+        buf: &mut Buffer,
+        state: &mut GoalsColumnState,
+        selection: Option<Selection>,
+        node_id: Option<u32>,
+    ) {
+        let visible_goals = self.state.goals.iter().enumerate().take(goal_area.height as usize);
+
+        for (goal_idx, g) in visible_goals {
+            let is_selected = matches!(selection, Some(Selection::Goal { goal_idx: sel, .. }) if sel == goal_idx);
+            let is_active = self.active_goal_name.is_some_and(|name| g.username.as_str() == Some(name));
+            let line_area = Rect::new(goal_area.x, goal_area.y + goal_idx as u16, goal_area.width, 1);
+
+            let line = render_goal_line(g, is_selected, is_active);
+            Paragraph::new(line).render(line_area, buf);
+
+            if let Some(nid) = node_id {
+                state.click_regions.push(ClickRegion {
+                    area: line_area,
+                    selection: Selection::Goal { node_id: nid, goal_idx },
+                });
+            }
+        }
+    }
+}
+
+fn render_hypothesis_line(h: &HypothesisInfo, is_selected: bool) -> Line<'static> {
+    let style = if is_selected {
+        Style::new().bg(Theme::SELECTION_BG)
+    } else {
+        Style::default()
+    };
+
+    let mut spans = vec![
+        Span::styled(h.name.clone(), style.fg(Theme::HYP_NAME)),
+        Span::styled(" : ", style),
+    ];
+    spans.extend(h.type_.to_spans(style.fg(Theme::HYP_TYPE)));
+    Line::from(spans)
+}
+
+fn render_goal_line(g: &GoalInfo, is_selected: bool, is_active: bool) -> Line<'static> {
+    let style = if is_selected {
+        Style::new().bg(Theme::SELECTION_BG)
+    } else {
+        Style::default()
+    };
+
+    let target_style = if is_active {
+        style.fg(Theme::CURRENT_NODE_BORDER).add_modifier(Modifier::BOLD)
+    } else {
+        style.fg(Theme::GOAL_TYPE)
+    };
+
+    let prefix = g.username.as_str().map_or_else(
+        || "⊢ ".to_string(),
+        |name| format!("case {name} ⊢ "),
+    );
+
+    let mut spans = vec![Span::styled(prefix, style)];
+    spans.extend(g.type_.to_spans(target_style));
+    Line::from(spans)
+}
+
+fn render_divider(div_area: Rect, buf: &mut Buffer) {
+    let divider = "─".repeat(div_area.width as usize);
+    Paragraph::new(divider).style(Theme::DIM).render(div_area, buf);
 }
 
 fn create_border_block(title: &str, is_current: bool) -> Block<'static> {

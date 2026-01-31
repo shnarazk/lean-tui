@@ -3,16 +3,20 @@
 use std::{
     collections::HashMap,
     env,
+    future::Future,
     ops::ControlFlow,
+    pin::Pin,
     sync::atomic::{AtomicI64, Ordering},
+    task::{Context, Poll},
 };
 
 use async_lsp::{
     lsp_types::{
         notification::{DidChangeTextDocument, DidOpenTextDocument, Initialized},
         request::{Initialize, Request},
-        DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams,
-        InitializedParams, Position, TextDocumentIdentifier, Url,
+        ClientCapabilities, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+        InitializeParams, InitializedParams, Position, PublishDiagnosticsParams,
+        TextDocumentIdentifier, Url,
     },
     AnyEvent, AnyNotification, AnyRequest, LspService, ResponseError, ServerSocket,
 };
@@ -41,7 +45,7 @@ pub struct LeanService {
 }
 
 impl LeanService {
-    pub fn new(name: &'static str) -> Self {
+    pub const fn new(name: &'static str) -> Self {
         Self { name }
     }
 }
@@ -49,15 +53,10 @@ impl LeanService {
 impl tower_service::Service<AnyRequest> for LeanService {
     type Response = serde_json::Value;
     type Error = ResponseError;
-    type Future = std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
-    >;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, _req: AnyRequest) -> Self::Future {
@@ -68,10 +67,7 @@ impl tower_service::Service<AnyRequest> for LeanService {
 impl LspService for LeanService {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
         if notif.method == "textDocument/publishDiagnostics" {
-            if let Ok(params) = serde_json::from_value::<
-                async_lsp::lsp_types::PublishDiagnosticsParams,
-            >(notif.params)
-            {
+            if let Ok(params) = serde_json::from_value::<PublishDiagnosticsParams>(notif.params) {
                 tracing::debug!("[{}] publishDiagnostics for {}", self.name, params.uri);
             }
         }
@@ -93,17 +89,9 @@ pub struct RpcConnectParams {
 pub struct RpcCallParams<P> {
     pub text_document: TextDocumentIdentifier,
     pub position: Position,
-    #[serde(serialize_with = "serialize_session_id")]
-    pub session_id: u64,
+    pub session_id: String,
     pub method: &'static str,
     pub params: P,
-}
-
-fn serialize_session_id<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&value.to_string())
 }
 
 #[derive(Serialize)]
@@ -157,7 +145,7 @@ impl BaseLspClient {
             message: format!("Cannot determine working directory: {e}"),
         })?;
 
-        let root_uri = Url::from_file_path(&cwd).map_err(|_| LspError::RpcError {
+        let root_uri = Url::from_file_path(&cwd).map_err(|()| LspError::RpcError {
             code: None,
             message: format!("Invalid project path: {}", cwd.display()),
         })?;
@@ -165,7 +153,7 @@ impl BaseLspClient {
         #[allow(deprecated)]
         let params = InitializeParams {
             root_uri: Some(root_uri),
-            capabilities: Default::default(),
+            capabilities: ClientCapabilities::default(),
             ..Default::default()
         };
 
@@ -227,7 +215,7 @@ impl BaseLspClient {
     /// Open a document in the server.
     pub async fn did_open(&self, params: DidOpenTextDocumentParams) -> Result<(), LspError> {
         let uri = params.text_document.uri.to_string();
-        let version = params.text_document.version as u32;
+        let version = params.text_document.version.cast_unsigned();
 
         tracing::debug!("[{}] didOpen {} v{}", self.name, uri, version);
 
@@ -252,7 +240,7 @@ impl BaseLspClient {
     /// Update a document in the server.
     pub async fn did_change(&self, params: DidChangeTextDocumentParams) -> Result<(), LspError> {
         let uri = params.text_document.uri.to_string();
-        let version = params.text_document.version as u32;
+        let version = params.text_document.version.cast_unsigned();
 
         tracing::debug!("[{}] didChange {} v{}", self.name, uri, version);
 
@@ -282,12 +270,7 @@ impl BaseLspClient {
             version,
         };
 
-        tracing::debug!(
-            "[{}] waitForDiagnostics {} v{}",
-            self.name,
-            uri,
-            version
-        );
+        tracing::debug!("[{}] waitForDiagnostics {} v{}", self.name, uri, version);
         let _ = self
             .request("textDocument/waitForDiagnostics", params)
             .await?;
@@ -315,7 +298,7 @@ impl BaseLspClient {
         let resp: RpcConnectResponse = serde_json::from_value(response)
             .map_err(|e| LspError::ParseError(format!("Invalid RPC session response: {e}")))?;
 
-        let session_id = resp.session_id;
+        let session_id = resp.session_id.parse::<u64>().unwrap();
         tracing::debug!("[{}] RPC session for {}: {}", self.name, uri, session_id);
 
         self.sessions
@@ -343,8 +326,7 @@ impl BaseLspClient {
             .read()
             .await
             .get(uri.as_str())
-            .map(|d| d.version)
-            .unwrap_or(1);
+            .map_or(1, |d| d.version);
 
         // Wait for diagnostics first
         self.wait_for_diagnostics(uri, version).await?;
@@ -382,7 +364,7 @@ impl BaseLspClient {
         let params = RpcCallParams {
             text_document,
             position,
-            session_id,
+            session_id: session_id.to_string(),
             method: GET_PROOF_DAG,
             params: inner_params,
         };

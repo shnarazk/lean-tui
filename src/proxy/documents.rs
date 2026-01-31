@@ -48,7 +48,7 @@ impl DocumentCache {
     }
 
     /// Handle server-to-client notifications (`PublishDiagnostics`).
-    pub fn handle_server_notification(&self, notif: &AnyNotification) {
+    pub fn handle_server_notification(notif: &AnyNotification) {
         if notif.method == PublishDiagnostics::METHOD {
             let Ok(p) = serde_json::from_value::<PublishDiagnosticsParams>(notif.params.clone())
             else {

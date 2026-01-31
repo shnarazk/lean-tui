@@ -1,9 +1,3 @@
-//! TUI-side endpoint for Unix socket communication with the proxy.
-//!
-//! This module runs in the TUI process and handles:
-//! - Connecting to the proxy's Unix socket
-//! - Receiving messages (cursor position, goals) from the proxy
-//! - Sending commands (navigation requests) to the proxy
 
 use std::{io, time::Duration};
 
@@ -17,22 +11,21 @@ use tokio::{
 use super::protocol::{socket_path, Command, Message};
 
 /// Handle for communicating with the proxy.
-pub struct SocketHandle {
+pub struct TuiIpcSocketEndpoint {
     /// Receiver for incoming messages from proxy.
     pub rx: mpsc::Receiver<Message>,
     /// Sender for outgoing commands to proxy.
     pub tx: mpsc::Sender<Command>,
 }
 
-/// Spawn a background task that connects to the Unix socket.
-/// Returns a handle for bidirectional communication.
-pub fn spawn_socket_handler() -> SocketHandle {
+/// Spawn a background task that connects to the UNIX socket.
+pub fn spawn_socket_handler() -> TuiIpcSocketEndpoint {
     let (msg_tx, msg_rx) = mpsc::channel::<Message>(16);
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(16);
 
     tokio::spawn(connection_loop(msg_tx, cmd_rx));
 
-    SocketHandle {
+    TuiIpcSocketEndpoint {
         rx: msg_rx,
         tx: cmd_tx,
     }

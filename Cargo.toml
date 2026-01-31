@@ -6,15 +6,15 @@ keywords = ["lean4", "proof-assistant", "tui", "mathematics"]
 license = "MIT"
 name = "lean-tui"
 repository = "https://codeberg.org/wvhulle/lean-tui"
-version = "0.0.10"
+version = "0.1.0"
 
 [lints.clippy]
-excessive_nesting = { level = "deny", priority = 2 }
+absolute_paths = { level = "warn", priority = 2 }
+cast_possible_truncation = { level = "allow", priority = 2 }
+excessive_nesting = { level = "warn", priority = 2 }
 missing_errors_doc = { level = "allow", priority = -1 }
 nursery = "warn"
 pedantic = "deny"
-absolute_paths = {level = "warn", priority = 2}
-cast_possible_truncation = {level = "allow", priority = 2}
 
 [dependencies]
 # Async runtime

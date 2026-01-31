@@ -1,5 +1,5 @@
 [language-server.lean-tui]
-args = ["run", "--quiet", "--", "proxy"]
+args = ["run", "--quiet", "--", "proxy"] # Add --standalone for using lean-dag binary
 command = "cargo"
 
 [[language]]

@@ -208,7 +208,6 @@ pub fn find_nearest_in_direction(
         );
     }
 
-    // Only navigate to aligned items - no fallback
     let result = aligned
         .into_iter()
         .min_by_key(|r| direction.distance(cur, r))
@@ -226,7 +225,6 @@ mod tests {
     #[test]
     fn test_sibling_hypothesis_navigation() {
         // Simulate two hypotheses in the same node at the same y position
-        // h.mp at x=0, h.mpr at x=16
         let regions = vec![
             NavigationRegion {
                 x: 0,
@@ -261,7 +259,6 @@ mod tests {
             },
         ];
 
-        // From h.mp (idx 0), pressing Right should go to h.mpr (idx 1)
         let result = find_nearest_in_direction(
             &regions,
             Selection::Hyp {
@@ -279,7 +276,6 @@ mod tests {
             "Right from first hyp should go to second hyp"
         );
 
-        // From h.mpr (idx 1), pressing Left should go to h.mp (idx 0)
         let result = find_nearest_in_direction(
             &regions,
             Selection::Hyp {
@@ -297,7 +293,6 @@ mod tests {
             "Left from second hyp should go to first hyp"
         );
 
-        // From h.mp, pressing Down should go to the goal
         let result = find_nearest_in_direction(
             &regions,
             Selection::Hyp {
@@ -315,7 +310,6 @@ mod tests {
             "Down from hyp should go to goal"
         );
 
-        // From goal, pressing Up should go to a hypothesis (overlaps with goal x range)
         let result = find_nearest_in_direction(
             &regions,
             Selection::Goal {
@@ -324,17 +318,12 @@ mod tests {
             },
             Direction::Up,
         );
-        // Goal x=1 with width=30 overlaps with both hypotheses (0-15 and 16-31)
-        // Both have the same distance, so the first one (hyp_idx=0) should be selected
         assert!(
             matches!(
                 result,
                 Some(Selection::Hyp {
                     node_id: 1,
-                    hyp_idx: 0
-                }) | Some(Selection::Hyp {
-                    node_id: 1,
-                    hyp_idx: 1
+                    hyp_idx: 0 | 1
                 })
             ),
             "Up from goal should go to a hypothesis"
@@ -378,7 +367,6 @@ mod tests {
         assert_eq!(result, None, "No target to the left");
     }
 
-    /// Test ranges_overlap helper function.
     #[test]
     fn test_ranges_overlap() {
         // Same position

@@ -1,4 +1,3 @@
-//! List of open goals widget - renders hypotheses and goals from ProofState.
 
 use ratatui::{
     buffer::Buffer,
@@ -14,7 +13,6 @@ use super::{
 };
 use crate::{lean_rpc::ProofState, tui::widgets::theme::Theme};
 
-/// Widget for rendering hypotheses and goals from ProofState.
 pub struct OpenGoalList<'a> {
     state: &'a ProofState,
     selection: Option<Selection>,
@@ -25,7 +23,6 @@ pub struct OpenGoalList<'a> {
     active_goal_name: Option<&'a str>,
 }
 
-/// Mutable state for `OpenGoalList` that tracks click regions.
 #[derive(Default)]
 pub struct OpenGoalListState {
     click_regions: Vec<ClickRegion>,
@@ -195,7 +192,7 @@ impl StatefulWidget for OpenGoalList<'_> {
             let prefix = g
                 .username
                 .as_str()
-                .map_or("⊢ ".to_string(), |name| format!("case {name} ⊢ "));
+                .map_or_else(|| "⊢ ".to_string(), |name| format!("case {name} ⊢ "));
             let mut spans = vec![Span::styled(prefix, style)];
             spans.extend(g.type_.to_spans(target_style));
             let line = Line::from(spans);

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lean_rpc::ProofDag;
 
-/// Returns the path to the Unix socket for IPC.
+/// Returns the path to the UNIX socket for IPC.
 pub fn socket_path() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -45,7 +45,7 @@ pub enum ServerMode {
 
 impl ServerMode {
     /// Display name for the server mode.
-    pub fn display_name(&self) -> &'static str {
+    pub const fn display_name(self) -> &'static str {
         match self {
             Self::Library => "Library",
             Self::Standalone => "Standalone",
@@ -53,7 +53,7 @@ impl ServerMode {
     }
 }
 
-/// Messages sent from proxy to TUI over the Unix socket.
+/// Messages sent from proxy to TUI over the UNIX socket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Message {

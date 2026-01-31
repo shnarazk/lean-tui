@@ -1,19 +1,14 @@
-//! Asynchronous goal fetching and broadcasting.
-
 use std::sync::Arc;
 
 use crate::{
     lean_rpc::RpcClient,
-    tui_ipc::{CursorInfo, SocketServer},
+    tui_ipc::{CursorInfo, LspProxySocketEndpoint},
 };
 
 /// Spawn a task to fetch the proof DAG at the given cursor position.
-///
-/// Uses the RPC client which manages its own LSP connection,
-/// ensuring proper synchronization.
 pub fn spawn_goal_fetch(
     cursor: &CursorInfo,
-    socket_server: &Arc<SocketServer>,
+    socket_server: &Arc<LspProxySocketEndpoint>,
     rpc_client: &RpcClient,
 ) {
     let rpc_client = rpc_client.clone();
@@ -30,7 +25,6 @@ pub fn spawn_goal_fetch(
         );
 
         // Fetch proof DAG using the RPC client
-        // The client handles waitForDiagnostics internally
         let result = rpc_client.get_proof_dag(&uri, position, "tree").await;
 
         match result {

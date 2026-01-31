@@ -15,7 +15,7 @@ use async_lsp::{
     lsp_types::{DidChangeTextDocumentParams, DidOpenTextDocumentParams, Position, Url},
     MainLoop,
 };
-use tokio::process::Command;
+use tokio::process::{ChildStdin, ChildStdout, Command};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{
@@ -80,7 +80,7 @@ impl LeanDagClient {
     }
 }
 
-/// Find the Lake project root by searching upward for lakefile.lean.
+/// Find the Lake project root by searching upward for `lakefile.lean`.
 fn find_lake_root() -> Option<PathBuf> {
     let mut current = env::current_dir().ok()?;
     loop {
@@ -96,9 +96,10 @@ fn find_lake_root() -> Option<PathBuf> {
 /// Find the lean-dag server binary.
 ///
 /// Search order:
-/// 1. LEAN_DAG_SERVER environment variable (development override)
-/// 2. Git-imported LeanDag package at .lake/packages/LeanDag/.lake/build/bin/lean-dag
-/// 3. Sibling directory ../lean-dag/.lake/build/bin/lean-dag
+/// 1. `LEAN_DAG_SERVER` environment variable (development override)
+/// 2. Git-imported `LeanDag` package at
+///    `.lake/packages/LeanDag/.lake/build/bin/lean-dag`
+/// 3. Sibling directory `../lean-dag/.lake/build/bin/lean-dag`
 fn find_lean_dag_server() -> Result<PathBuf, LspError> {
     let mut searched_paths = Vec::new();
 
@@ -148,28 +149,27 @@ fn get_lean_dag_log_file() -> Option<File> {
 }
 
 /// Spawn the lean-dag server process.
-fn spawn_lean_dag_server(
-    server_path: &PathBuf,
-) -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout), LspError> {
+///
+/// lean-dag handles its own environment discovery internally by calling
+/// `lake env printenv` at startup, so we can spawn it directly without
+/// wrapping in `lake env`.
+fn spawn_lean_dag_server(server_path: &PathBuf) -> Result<(ChildStdin, ChildStdout), LspError> {
     let server_str = server_path.display().to_string();
-    let pp_opts: String = LEAN_PP_OPTIONS
-        .iter()
-        .map(|opt| format!("-D {opt}"))
-        .collect::<Vec<_>>()
-        .join(" ");
+
+    // Build command-line arguments for pretty-printing options
+    let mut args: Vec<String> = Vec::new();
+    for opt in LEAN_PP_OPTIONS {
+        args.push("-D".to_string());
+        args.push(opt.to_string());
+    }
+
+    let mut cmd = Command::new(server_path);
+    cmd.args(&args);
 
     // Set LEAN_WORKER_PATH so worker processes also use the lean-dag binary
-    let shell_cmd = format!("LEAN_WORKER_PATH={server_str} exec {server_str} -- {pp_opts}");
+    cmd.env("LEAN_WORKER_PATH", server_path);
 
-    let mut cmd = Command::new("lake");
-    cmd.args(["env", "sh", "-c", &shell_cmd]);
-    cmd.env_remove("LEAN_PATH");
-    cmd.env_remove("LEAN_SYSROOT");
-
-    let stderr = match get_lean_dag_log_file() {
-        Some(file) => Stdio::from(file),
-        None => Stdio::inherit(),
-    };
+    let stderr = get_lean_dag_log_file().map_or_else(Stdio::inherit, Stdio::from);
 
     let mut child = cmd
         .stdin(Stdio::piped())

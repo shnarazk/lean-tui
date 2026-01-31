@@ -101,7 +101,7 @@ impl BeforeAfterMode {
             self.current_state
                 .hypotheses
                 .get(hyp_idx)
-                .map_or(false, |h| {
+                .is_some_and(|h| {
                     (!self.filters.hide_instances || !h.is_instance)
                         && (!self.filters.hide_inaccessible || !h.is_proof)
                 })

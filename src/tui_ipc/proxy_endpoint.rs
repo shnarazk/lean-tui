@@ -1,8 +1,3 @@
-//! Proxy-side endpoint for Unix socket communication with TUI clients.
-//!
-//! This module runs in the proxy process and handles:
-//! - Broadcasting messages (cursor position, goals) to connected TUI clients
-//! - Processing commands from TUI clients (navigation requests)
 
 use std::fs;
 
@@ -19,20 +14,16 @@ use tokio::{
 use super::protocol::{socket_path, Command, CursorInfo, Message, ServerMode};
 use crate::lean_rpc::ProofDag;
 
-// ============================================================================
-// SocketServer - broadcasts messages to TUI clients
-// ============================================================================
 
-/// Unix socket server that broadcasts messages to TUI clients.
-/// Immutable after creation - all state is in channels.
-pub struct SocketServer {
+/// UNIX socket server that broadcasts messages to TUI clients.
+pub struct LspProxySocketEndpoint {
     /// Sender for outgoing messages to TUI clients.
     msg_sender: broadcast::Sender<Message>,
     /// Server mode for RPC communication.
     server_mode: ServerMode,
 }
 
-impl SocketServer {
+impl LspProxySocketEndpoint {
     /// Create a new socket server with the specified server mode.
     pub fn new(server_mode: ServerMode) -> Self {
         let (msg_sender, _) = broadcast::channel(16);
@@ -88,7 +79,7 @@ impl SocketServer {
     }
 }
 
-/// Run the Unix socket listener.
+/// Run the UNIX socket listener.
 async fn run_listener(
     msg_sender: broadcast::Sender<Message>,
     cmd_tx: mpsc::Sender<Command>,
@@ -180,12 +171,7 @@ async fn handle_client(
     }
 }
 
-// ============================================================================
-// CommandHandler - processes commands from TUI clients
-// ============================================================================
-
 /// Processes commands from TUI clients.
-/// Runs in the proxy process and sends LSP requests to the editor.
 pub struct CommandHandler {
     /// Channel to receive commands from TUI clients.
     rx: mpsc::Receiver<Command>,

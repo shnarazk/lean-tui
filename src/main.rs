@@ -21,8 +21,9 @@ enum Commands {
     /// Run as LSP proxy between editor and lake serve
     Proxy {
         /// Use standalone lean-dag binary instead of library mode.
-        /// In library mode (default), users must `import LeanDag` in their Lean files.
-        /// In standalone mode, the lean-dag binary provides RPC methods directly.
+        /// In library mode (default), users must `import LeanDag` in their Lean
+        /// files. In standalone mode, the lean-dag binary provides RPC
+        /// methods directly.
         #[arg(long)]
         standalone: bool,
     },

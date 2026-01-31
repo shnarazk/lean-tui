@@ -44,7 +44,7 @@ impl HypLayer {
         self.node_id = node_id;
     }
 
-    /// Add a hypothesis from HypothesisInfo.
+    /// Add a hypothesis from `HypothesisInfo`.
     pub fn add_from_info(&mut self, hyp_idx: usize, info: &HypothesisInfo) {
         self.hypotheses.push((hyp_idx, info.clone()));
     }
@@ -106,7 +106,6 @@ fn render_hyp_line(hyp: &HypothesisInfo, is_selected: bool, is_dependency: bool)
     let state = DiffState {
         is_inserted: false,
         is_removed: hyp.is_removed,
-        has_diff: hyp.type_.has_any_diff(),
     };
     let diff = diff_style(&state, is_selected, Color::White);
 

@@ -65,7 +65,7 @@ impl TacticTree {
         // All hypotheses first, then all goals
         let hyps = hypothesis_indices(self.state.hypotheses.len(), self.filters.reverse_order)
             .filter(|&i| {
-                self.state.hypotheses.get(i).map_or(false, |h| {
+                self.state.hypotheses.get(i).is_some_and(|h| {
                     (!self.filters.hide_instances || !h.is_instance)
                         && (!self.filters.hide_inaccessible || !h.is_proof)
                 })

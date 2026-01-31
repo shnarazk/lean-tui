@@ -15,7 +15,7 @@ use async_lsp::{
     lsp_types::{DidChangeTextDocumentParams, DidOpenTextDocumentParams, Position, Url},
     MainLoop,
 };
-use tokio::process::Command;
+use tokio::process::{ChildStdin, ChildStdout, Command};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{
@@ -91,7 +91,7 @@ fn get_lake_serve_log_file() -> Option<File> {
 }
 
 /// Spawn the lake serve process.
-fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout), LspError>
+fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout), LspError>
 {
     let mut cmd = Command::new("lake");
     cmd.arg("serve").arg("--");
@@ -103,10 +103,7 @@ fn spawn_lake_serve() -> Result<(tokio::process::ChildStdin, tokio::process::Chi
     cmd.env_remove("LEAN_PATH");
     cmd.env_remove("LEAN_SYSROOT");
 
-    let stderr = match get_lake_serve_log_file() {
-        Some(file) => Stdio::from(file),
-        None => Stdio::inherit(),
-    };
+    let stderr = get_lake_serve_log_file().map_or_else(Stdio::inherit, Stdio::from);
 
     let mut child = cmd
         .stdin(Stdio::piped())

@@ -29,9 +29,6 @@ fn get_lake_serve_log_file() -> Option<File> {
 }
 
 /// Spawn lake serve for the editor-facing LSP connection.
-///
-/// This server handles standard LSP requests from the editor (hover, diagnostics, etc.).
-/// The RPC client for proof DAGs is separate and spawns its own server.
 pub fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
     // Log working directory for debugging
     if let Ok(cwd) = env::current_dir() {
@@ -51,11 +48,8 @@ pub fn spawn_lake_serve() -> Result<(ChildStdin, ChildStdout)> {
     cmd.env_remove("LEAN_PATH");
     cmd.env_remove("LEAN_SYSROOT");
 
-    // Redirect stderr to log file for debugging
-    let stderr = match get_lake_serve_log_file() {
-        Some(file) => Stdio::from(file),
-        None => Stdio::inherit(),
-    };
+    // Redirect standard error to log file for debugging
+    let stderr = get_lake_serve_log_file().map_or_else(Stdio::inherit, Stdio::from);
 
     let mut child = cmd
         .stdin(Stdio::piped())

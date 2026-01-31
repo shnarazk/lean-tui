@@ -38,7 +38,7 @@ pub struct GoalSectionState {
     is_focused: bool,
 }
 
-/// Layout information for tracking click regions in the goal section.
+/// Lay out information for tracking click regions in the goal section.
 struct GoalClickLayout {
     area: Rect,
     goal_count: usize,
@@ -54,7 +54,7 @@ impl GoalSectionState {
         node_id: Option<u32>,
         active_goal_name: Option<String>,
     ) {
-        self.goals = state.goals.clone();
+        self.goals.clone_from(&state.goals);
         self.selection = selection;
         self.spawned_goal_ids = spawned_goal_ids;
         self.node_id = node_id;

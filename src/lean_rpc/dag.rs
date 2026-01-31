@@ -1,27 +1,11 @@
-//! Unified proof DAG - single source of truth for all display modes.
-//!
-//! This module defines the `ProofDag` data structure that contains all semantic
-//! information about a proof, pre-computed by the server. Each display mode
-//! uses the subset of data it needs, and the TUI only handles layout and
-//! rendering.
-
 use std::fmt;
 
 use async_lsp::lsp_types::Position;
 use serde::{Deserialize, Serialize};
 
 use super::{GotoLocations, TaggedText};
-
-// ============================================================================
-// Node ID
-// ============================================================================
-
 /// Unique identifier for a node in the proof DAG.
 pub type NodeId = u32;
-
-// ============================================================================
-// Proof State Types
-// ============================================================================
 
 /// Check if a name is a Lean 4 hygienic macro identifier.
 /// These contain `._hyg.` or `._@.` patterns and are internal implementation
@@ -31,15 +15,12 @@ fn is_hygienic_name(name: &str) -> bool {
 }
 
 /// User-visible name for a goal.
-///
-/// Serializes to/from `Option<String>` (null or a string) for compatibility
-/// with the Lean server which sends `username: null` or `username: "name"`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum UserName {
     /// No user-visible name (anonymous goal).
     #[default]
     Anonymous,
-    /// A named goal (e.g., "case inl", "h").
+    /// A named goal (e.g., `case inl`, "h").
     Named(String),
 }
 
@@ -102,14 +83,14 @@ pub struct GoalInfo {
     /// Goal type expression (with diff highlighting).
     #[serde(rename = "type")]
     pub type_: TaggedText,
-    /// User-visible name (e.g., "case inl").
+    /// User-visible name (e.g., `case inl`).
     pub username: UserName,
     /// Internal goal ID (for tracking across steps).
     pub id: String,
     /// Whether this goal was removed (for diff display in "before" view).
     #[serde(default)]
     pub is_removed: bool,
-    /// Pre-resolved goto locations for navigation.
+    /// Pre-resolved `goto` locations for navigation.
     #[serde(default)]
     pub goto_locations: GotoLocations,
 }
@@ -134,14 +115,10 @@ pub struct HypothesisInfo {
     /// Whether this hypothesis was removed (for diff display in "before" view).
     #[serde(default)]
     pub is_removed: bool,
-    /// Pre-resolved goto locations for navigation.
+    /// Pre-resolved `goto` locations for navigation.
     #[serde(default)]
     pub goto_locations: GotoLocations,
 }
-
-// ============================================================================
-// Proof DAG Node
-// ============================================================================
 
 /// A node representing a proof state after applying a tactic.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,19 +126,15 @@ pub struct HypothesisInfo {
 pub struct ProofDagNode {
     pub id: NodeId,
 
-    // === Tactic information ===
     pub tactic: DagTacticInfo,
     pub position: Position,
 
-    // === State before/after (for BeforeAfter mode) ===
     pub state_before: ProofState,
     pub state_after: ProofState,
 
-    // === Diff information (pre-computed) ===
     /// Indices into `state_after.hypotheses` for new hypotheses.
     pub new_hypotheses: Vec<usize>,
 
-    // === Tree structure (for DeductionTree mode) ===
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
     pub depth: usize,
@@ -173,7 +146,7 @@ pub struct ProofDagNode {
 }
 
 impl ProofDagNode {
-    /// All subgoals solved (`goals_after` empty).
+    /// All sub-goals solved (`goals_after` empty).
     pub const fn is_complete(&self) -> bool {
         self.state_after.goals.is_empty()
     }
@@ -196,12 +169,8 @@ pub struct DagTacticInfo {
     pub theorems_used: Vec<String>,
 }
 
-// ============================================================================
-// Proof DAG
-// ============================================================================
-
 /// The complete proof DAG - single source of truth for all display modes.
-/// Contains all semantic information pre-computed by the server.
+/// Contains all semantic information precomputed by the server.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProofDag {
@@ -221,7 +190,6 @@ pub struct ProofDag {
     pub definition_name: Option<String>,
 
     /// Orphan nodes not connected to main tree (e.g., inline `by` blocks).
-    /// These should be rendered separately.
     #[serde(default)]
     pub orphans: Vec<NodeId>,
 }

@@ -158,7 +158,7 @@ impl App {
         let dag = self.proof_dag.as_ref();
         let fallback_pos = self.goals_position().unwrap_or(cursor.position);
 
-        // Resolve goto location based on selection type
+        // Resolve `goto` location based on selection type
         let goto_location: Option<(Url, Position)> = selection.and_then(|sel| match sel {
             // Hypotheses: use binder location from goto_locations
             Selection::InitialHyp { hyp_idx } => dag
@@ -178,7 +178,7 @@ impl App {
             Selection::Theorem => None,
         });
 
-        let (uri, position) = goto_location.unwrap_or((cursor.uri.clone(), fallback_pos));
+        let (uri, position) = goto_location.unwrap_or_else(|| (cursor.uri.clone(), fallback_pos));
         self.queue_command(Command::Navigate { uri, position });
     }
 

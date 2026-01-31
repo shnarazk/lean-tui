@@ -25,14 +25,9 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use crate::{
     error::{Error, LspError, Result},
     lean_rpc::RpcClient,
-    tui_ipc::{CommandHandler, ServerMode, SocketServer},
+    tui_ipc::{CommandHandler, ServerMode, LspProxySocketEndpoint},
 };
 
-/// Run the LSP proxy: editor ↔ lean-tui ↔ lake serve.
-///
-/// # Arguments
-/// * `standalone` - If true, use the lean-dag binary (standalone mode).
-///                  If false, use `lake serve` (library mode - users import LeanDag).
 pub async fn run(standalone: bool) -> Result<()> {
     let server_mode = if standalone {
         tracing::info!("Running in standalone mode (lean-dag binary)");
@@ -42,7 +37,7 @@ pub async fn run(standalone: bool) -> Result<()> {
         ServerMode::Library
     };
 
-    let socket_server = Arc::new(SocketServer::new(server_mode));
+    let socket_server = Arc::new(LspProxySocketEndpoint::new(server_mode));
     let document_cache = Arc::new(DocumentCache::new());
 
     // Create RPC client based on mode
@@ -65,34 +60,37 @@ pub async fn run(standalone: bool) -> Result<()> {
     }
 
     // Spawn the editor-facing LSP server (lake serve)
-    // Note: In both modes, the editor talks to lake serve for standard LSP.
-    // The RPC client is separate and handles proof DAG fetching.
     let (child_stdin, child_stdout) = spawn_lake_serve()?;
 
-    // Client-side: lean-tui → lake serve
     let doc_cache_client = document_cache.clone();
     let socket_server_client = socket_server.clone();
     let rpc_client_slot_client = rpc_client_slot.clone();
     let (mut client_mainloop, server_socket) = MainLoop::new_client(move |_| {
-        InterceptService::new(
-            DeferredService(None),
-            socket_server_client.clone(),
-            doc_cache_client,
-            rpc_client_slot_client,
-        )
+        {
+            let service = DeferredService(None);
+            let socket_server = socket_server_client.clone();
+            InterceptService {
+                service,
+                socket_server,
+                document_cache: doc_cache_client,
+                rpc_client_slot: rpc_client_slot_client,
+            }
+        }
     });
 
-    // Server-side: editor → lean-tui
     let doc_cache_server = document_cache.clone();
     let socket_server_server = socket_server.clone();
     let rpc_client_slot_server = rpc_client_slot.clone();
     let (server_mainloop, client_socket) = MainLoop::new_server(move |_| {
-        InterceptService::new(
-            server_socket,
-            socket_server_server.clone(),
-            doc_cache_server,
-            rpc_client_slot_server,
-        )
+        {
+            let socket_server = socket_server_server.clone();
+            InterceptService {
+                service: server_socket,
+                socket_server,
+                document_cache: doc_cache_server,
+                rpc_client_slot: rpc_client_slot_server,
+            }
+        }
     });
 
     // Start socket listener and get command receiver

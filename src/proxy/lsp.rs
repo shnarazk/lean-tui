@@ -21,7 +21,7 @@ use super::{
     cursor::{extract_cursor_from_notification, extract_cursor_from_request},
     documents::DocumentCache,
 };
-use crate::{lean_rpc::RpcClient, proxy::goals::spawn_goal_fetch, tui_ipc::SocketServer};
+use crate::{lean_rpc::RpcClient, proxy::goals::spawn_goal_fetch, tui_ipc::LspProxySocketEndpoint};
 
 /// Shared container for RPC client that can be set after service creation.
 pub type RpcClientSlot = Arc<OnceLock<RpcClient>>;
@@ -30,28 +30,13 @@ pub type RpcClientSlot = Arc<OnceLock<RpcClient>>;
 /// service.
 pub struct InterceptService<S> {
     pub service: S,
-    pub socket_server: Arc<SocketServer>,
+    pub socket_server: Arc<LspProxySocketEndpoint>,
     pub document_cache: Arc<DocumentCache>,
     /// RPC client slot - set after client is initialized.
     pub rpc_client_slot: RpcClientSlot,
 }
 
 impl<S: LspService> InterceptService<S> {
-    /// Create with a shared document cache and RPC client.
-    pub fn new(
-        service: S,
-        socket_server: Arc<SocketServer>,
-        document_cache: Arc<DocumentCache>,
-        rpc_client_slot: RpcClientSlot,
-    ) -> Self {
-        Self {
-            service,
-            socket_server,
-            document_cache,
-            rpc_client_slot,
-        }
-    }
-
     fn handle_request(&self, req: &AnyRequest) {
         if let Some(cursor) = extract_cursor_from_request(req) {
             let _span = tracing::debug_span!(
@@ -71,10 +56,10 @@ impl<S: LspService> InterceptService<S> {
     }
 
     fn handle_notification(&self, notif: &AnyNotification) {
-        // Handle client-to-server notifications (DidOpen, DidChange)
+        // Handle client-to-server notifications (`DidOpen`, `DidChange`)
         self.document_cache.handle_notification(notif);
-        // Handle server-to-client notifications (PublishDiagnostics)
-        self.document_cache.handle_server_notification(notif);
+        // Handle server-to-client notifications (`PublishDiagnostics`)
+        DocumentCache::handle_server_notification(notif);
 
         // Forward document notifications to RPC client
         self.forward_to_rpc_client(notif);
@@ -97,32 +82,28 @@ impl<S: LspService> InterceptService<S> {
     }
 
     fn forward_to_rpc_client(&self, notif: &AnyNotification) {
-        let Some(client) = self.rpc_client_slot.get() else {
+        let Some(client) = self.rpc_client_slot.get().cloned() else {
             return;
         };
 
         if notif.method == DidOpenTextDocument::METHOD {
-            if let Ok(params) =
-                serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone())
-            {
-                let client = client.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = client.did_open(params).await {
-                        tracing::warn!("Failed to forward didOpen to RPC client: {}", e);
-                    }
+            let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone()) else {
+                return;
+            };
+            tokio::spawn(async move {
+                let _ = client.did_open(params).await.inspect_err(|e| {
+                    tracing::warn!("Failed to forward didOpen to RPC client: {e}");
                 });
-            }
+            });
         } else if notif.method == DidChangeTextDocument::METHOD {
-            if let Ok(params) =
-                serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone())
-            {
-                let client = client.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = client.did_change(params).await {
-                        tracing::warn!("Failed to forward didChange to RPC client: {}", e);
-                    }
+            let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone()) else {
+                return;
+            };
+            tokio::spawn(async move {
+                let _ = client.did_change(params).await.inspect_err(|e| {
+                    tracing::warn!("Failed to forward didChange to RPC client: {e}");
                 });
-            }
+            });
         }
     }
 }
