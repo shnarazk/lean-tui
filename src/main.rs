@@ -11,6 +11,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "lean-tui")]
 #[command(about = "Standalone TUI infoview for Lean 4")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
